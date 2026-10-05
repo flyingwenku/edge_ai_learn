@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 11 章 · 项目主体搭建（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">第 1 章</a>
+    <a href="ch02.html">第 2 章</a>
+    <a href="ch03.html">第 3 章</a>
+    <a href="ch04.html">第 4 章</a>
+    <a href="ch05.html">第 5 章</a>
+    <a href="ch06.html">第 6 章</a>
+    <a href="ch07.html">第 7 章</a>
+    <a href="ch08.html">第 8 章</a>
+    <a href="ch09.html">第 9 章</a>
+    <a href="ch10.html">第 10 章</a>
+    <a href="ch11.html" class="active">第 11 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 11 章：项目主体搭建</h1>
+  <p class="lead"><strong>章节目标：</strong>把前 10 章的零件组装成一个<b>能对话的端侧 AI 助手 demo v0.1</b>——RK3576 上跑 1.5B/3B int4，本地无网对话跑通，并留下基准性能记录。这是你面试最硬的作品。</p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch11-project-demo</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把分层架构、最小对话循环、HTTP 服务看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的内存预算表 / TTFT 手算自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」把 demo 真搭起来、跑通对话。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>前面各章是零件：会算内存、会量化、会转换、会调优。这一章是把零件<b>拼成一台能跑的机器</b>。目标只有一个——<span class="key">端侧本地、断网、能对话</span>，并且能拿出数字证明它跑得动。</p>
+    <div class="callout"><strong>交付物定义很硬：</strong>一段命令能启动、一个 HTTP 接口能问、本地无网能答、有一张基准性能表。做到这几条，你的简历就有了「可演示项目」。</div>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：项目分层架构（四层）</h3>
+    <p>架构师先画图再写码。四层职责清晰，换模型/换服务方式时只动一层。</p>
+    <div class="board"><span class="k">端侧 AI 助手 · 四层架构</span>
+
+┌─────────────────────────────────────────┐
+│ ④ 交互层  CLI 交互循环 / HTTP 接口        │
+│    chat_loop.py · server.py              │
+├─────────────────────────────────────────┤
+│ ③ 服务层  会话管理、prompt 组装、流式输出  │
+│    session.py · prompt_template.py       │
+├─────────────────────────────────────────┤
+│ ② 推理层  rkllm 加载 / 生成 / 采样        │
+│    rkllm wrapper · callback 流式          │
+├─────────────────────────────────────────┤
+│ ① 模型层  qwen2.5-3b-w4a16.rkllm + tokenizer│
+└─────────────────────────────────────────┘
+
+<span class="k">设计原则：每层只依赖下一层，模型换代不动上层。</span>
+<span class="g">面试点：能画出这张图并说清各层职责，就是"架构"而不是"脚本"。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：模型与工具链选型</h3>
+    <div class="board"><span class="k">选型结论（回顾前几章，直接给答案）</span>
+
+模型     <span class="g">Qwen2.5-1.5B / 3B Instruct</span>（中文强、生态好）
+精度     <span class="g">w4a16 int4</span>（端侧甜点，内存/速度平衡）
+工具链   <span class="g">rknn-llm（rkllm）</span> 转 .rkllm，NPU 原生
+服务     先 CLI 跑通 → 再包 HTTP（OpenAI 兼容）
+
+<span class="k">为什么 1.5B 和 3B 都准备？</span>
+  3B：回答质量好，decode 约 8 t/s（带宽瓶颈）
+  1.5B：更轻，decode 约 15 t/s，内存 < 1GB
+  → <span class="g">3B 做质量场景，1.5B 做断网降级/极速场景</span>
+
+<span class="k">内存预算（3B int4 + 4K 上下文）</span>
+  模型权重 w4a16         ≈ 2.0 GB
+  KV Cache @4K           ≈ 1.2 GB
+  runtime + 对齐         ≈ 0.5 GB
+  系统 + 其它进程        ≈ 1.0 GB
+  ─────────────────────────────────
+  合计                   ≈ <span class="g">4.7 GB</span>  （16GB 板子：安全预算内，OK）</div>
+    <p><b>练习（板书填空）：</b>KV Cache 与合计自己算，再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>上下文</th><th>每 token KV</th><th>KV Cache(填)</th><th>总占用(填)</th><th>能塞下?</th></tr></thead>
+      <tbody>
+        <tr><td>2K</td><td>≈0.28 MB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>4K</td><td>≈0.28 MB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>8K</td><td>≈0.28 MB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案（先自己填！）</summary>
+      <p>KV = 上下文 × 0.28MB：2K≈<b>0.56GB</b>，4K≈<b>1.2GB</b>，8K≈<b>2.3GB</b>。<br>
+      总占用 = 2.0(模型) + KV + 1.5(其它)：2K≈<b>4.1GB</b>，4K≈<b>4.7GB</b>，8K≈<b>5.8GB</b>。<br>
+      16GB 都能塞下，但 8K 时 KV 已经超过模型本身一半——这就是第 4 章说的「KV 抢带宽/抢内存」，上下文不是免费拉的。</p>
+    </details>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：最小对话循环（先跑通再说）</h3>
+    <p>别一上来写架构。先用官方 <b>rkllm Python API</b> 跑通一次「问一句、答一句」，这是所有上层的基础。</p>
+    <div class="board"><span class="k">最小可跑：chat_loop.py</span>
+from rkllm.api import RKLLM
+
+llm = RKLLM()
+llm.load_rkllm("./models/qwen2.5-3b-w4a16.rkllm",
+               max_context=4096,
+               num_npu_core=1)
+
+def on_token(token, status):
+    print(token, end="", flush=True)   # 流式吐字
+
+while True:
+    q = input("\n你> ")
+    if q in ("exit", "quit"): break
+    print("AI> ", end=""), llm.run(q, callback=on_token)
+
+<span class="k">要点：</span>
+  ① load_rkllm 指定模型、上下文长度、NPU 核心
+  ② run 的 callback 实现流式输出（体验关键）
+  ③ <span class="g">先不管多轮、先不管包装，跑通单轮 = v0 里程碑</span></div>
+    <div class="callout"><strong>排错顺序：</strong>① 模型能不能 load ② 单轮能不能出字 ③ 出字是否乱码（tokenizer）④ 是否流式。按这个顺序查，别一锅乱炖。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：包成 HTTP 服务（OpenAI 兼容）</h3>
+    <p>CLI 只能自己玩。做成 HTTP 接口，才能接前端、接 App、被别人集成。做成 OpenAI 兼容格式最值钱——别人的代码改个 base_url 就能用你。</p>
+    <div class="board"><span class="k">server.py（Flask 最简版，OpenAI 兼容）</span>
+from flask import Flask, request, jsonify
+from rkllm.api import RKLLM
+
+app = Flask(__name__)
+llm = RKLLM()
+llm.load_rkllm("./models/qwen2.5-3b-w4a16.rkllm", max_context=4096)
+
+@app.post("/v1/chat/completions")
+def chat():
+    msg = request.json["messages"][-1]["content"]
+    buf = []
+    llm.run(msg, callback=lambda t, s: buf.append(t))
+    return jsonify({
+        "object": "chat.completion",
+        "choices": [{"message": {"role": "assistant",
+                                 "content": "".join(buf)}}]
+    })
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
+
+<span class="k">测试：</span>
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"你好"}]}'
+
+<span class="g">兼容 OpenAI 格式 = 生态红利：以后换更强模型，
+只要接口不变，上层前端一行不用改。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：基准性能记录（拿数字说话）</h3>
+    <div class="board"><span class="k">四项基准（demo 验收必留）</span>
+
+① 首 token 时延 TTFT = prompt_tokens ÷ prefill_tps
+   示例：512 tok ÷ 430 t/s ≈ <span class="g">1.2 s</span>
+
+② decode 速度  = 生成 token 数 ÷ 生成耗时
+   示例：生成 40 tok 用 5.0s → <span class="g">8.0 t/s</span>
+
+③ 内存     free -m 前后对比（看 RSS 增量）
+④ NPU 利用率  cat /sys/kernel/debug/rknpu/load
+
+<span class="k">一键采集（bench.sh 片段）</span>
+free -m | awk 'NR==2{print "mem_before="$3"MB"}'
+START=$(date +%s.%N)
+# 跑一次 40-token 生成 ...
+END=$(date +%s.%N)
+echo "decode_tps=$(echo "40/($END-$START)" | bc -l)"
+cat /sys/kernel/debug/rknpu/load
+
+<span class="k">带宽校验：</span>decode 8 t/s × 2.0GB ÷ 35 = 45.7% 利用率
+→ 与第 9/10 章对上，说明记录可信。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：demo v0.1 验收标准</h3>
+    <div class="board"><span class="k">v0.1 过关清单（全过才算完成）</span>
+
+□ 本地无网启动          —— 拔网线还能聊
+□ 首 token &lt; 2s         —— TTFT 达标
+□ decode ≥ 5 t/s        —— 能连续读
+□ 连续对话 ≥ 10 分钟    —— 不 OOM、不崩
+□ HTTP 接口可调通        —— curl 有正常返回
+□ 基准表已落盘          —— 四项指标齐全
+
+<span class="k">被问"项目做了什么"→ 标准答：</span>
+「我在 RK3576 上用 rknn-llm 把 Qwen2.5-3B 量化成 w4a16 并部署，
+搭了四层架构的端侧 AI 助手：模型层、推理层、服务层、交互层，
+CLI 和 OpenAI 兼容 HTTP 都能对话，本地断网可用，
+首 token 约 1.2s、decode 约 8 tok/s、内存约 2.1GB、
+带宽利用率约 45%，瓶颈在内存带宽。」</div>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手把 demo 真搭起来。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>架构图 + 目录骨架</h3></div>
+    <dl>
+      <dt>目标</dt><dd>画四层架构图，并建出对应目录结构。</dd>
+      <dt>要掌握</dt><dd>四层职责；每层只依赖下一层的原则。</dd>
+      <dt>实操步骤</dt><dd>写 <code>architecture.md</code>（四层图 + 职责表）；建目录 <code>models/ inference/ service/ ui/ scripts/</code>。</dd>
+      <dt>检验标准</dt><dd>能对着图说清「换模型只动模型层，换接口只动交互层」。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>模型准备（复用第 9 章产物）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>拿到可加载的 <code>.rkllm</code>（3B 和/或 1.5B w4a16）。</dd>
+      <dt>要掌握</dt><dd>内存预算（模型+KV）；w4a16 为什么是端侧默认。</dd>
+      <dt>实操步骤</dt><dd>把第 9 章转好的模型放入 <code>models/</code>；写 <code>models/README.md</code> 记录模型名、格式、大小、来源配置。</dd>
+      <dt>检验标准</dt><dd><code>ls -lh models/</code> 能看到模型文件，大小符合 w4a16 预期（3B ≈ 2GB）。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>最小对话循环跑通</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书③跑通「问一句、答一句」，带流式。</dd>
+      <dt>要掌握</dt><dd>load_rkllm 参数；callback 流式；排错四步顺序。</dd>
+      <dt>实操步骤</dt><dd>写 <code>ui/chat_loop.py</code>，加载模型，输入问题打印回答；记录第一次跑通的截图或日志到 <code>first_run.log</code>。</dd>
+      <dt>检验标准</dt><dd>能连续输入 3 个问题、每次都有回答，且是流式吐字。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>包成 HTTP 服务（OpenAI 兼容）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书④把对话包成 <code>/v1/chat/completions</code> 接口。</dd>
+      <dt>要掌握</dt><dd>Flask 路由；OpenAI 兼容格式；curl 测试。</dd>
+      <dt>实操步骤</dt><dd>写 <code>service/server.py</code>；<code>python server.py</code> 启动；用 curl 发一条消息并保存返回到 <code>curl_test.txt</code>。</dd>
+      <dt>检验标准</dt><dd>curl 返回 JSON，<code>choices[0].message.content</code> 是正常回答。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>基准性能采集（核心实操）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书⑤测出四项基准并写入表。</dd>
+      <dt>要掌握</dt><dd>TTFT 手算；decode tok/s；内存与 NPU 利用率取法；带宽校验。</dd>
+      <dt>实操步骤</dt><dd>写 <code>scripts/bench.sh</code>，跑 3 次取均值，输出 <code>bench_report.md</code>（TTFT / decode / 内存 / NPU / 带宽利用率）。</dd>
+      <dt>检验标准</dt><dd>四项数字齐全，且带宽利用率与公式一致（±10%）。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>demo v0.1 验收 + 演示记录</h3></div>
+    <dl>
+      <dt>目标</dt><dd>对照板书⑥清单逐项验收，产出演示记录——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>六项验收标准；如何讲清项目价值。</dd>
+      <dt>实操步骤</dt><dd>写 <code>demo_v0.1.md</code>：①启动命令 ②接口示例 ③验收清单打勾 ④基准表 ⑤30 秒演示脚本（要讲的话）⑥已知问题/下一步。</dd>
+      <dt>检验标准</dt><dd>照这份文档，别人能在 5 分钟内跑起你的 demo 并复现基准数字。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>architecture.md</code> —— 四层架构图 + 职责表 + 目录骨架。</li>
+    <li><code>models/README.md</code> —— 模型清单（名称/格式/大小/来源配置）。</li>
+    <li><code>ui/chat_loop.py</code> + <code>first_run.log</code> —— 最小对话循环与首次跑通记录。</li>
+    <li><code>service/server.py</code> + <code>curl_test.txt</code> —— OpenAI 兼容 HTTP 服务与测试。</li>
+    <li><code>scripts/bench.sh</code> + <code>bench_report.md</code> —— 基准性能采集与报告。</li>
+    <li><code>demo_v0.1.md</code> —— 能对话的 demo 验收与演示记录（核心产出）。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>能画出四层架构并说清每层职责与依赖方向。</li>
+    <li>能算内存预算：3B int4 模型 ≈2GB、KV@4K ≈1.2GB、合计 ≈4.7GB。</li>
+    <li>能脱口说出最小对话循环的三步（load → run → callback 流式）。</li>
+    <li>能解释「为什么做成 OpenAI 兼容接口」。</li>
+    <li>demo 能在本地无网启动并对话，四项基准有数字。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「我做了一个基于 RK3576 的端侧 AI 助手：模型是 Qwen2.5-3B 的 w4a16 int4，用 rknn-llm 转换部署到 NPU，架构分四层——模型层、推理层、服务层、交互层，层间单向依赖，换模型不影响上层。交互上既做了 CLI 也做了 OpenAI 兼容的 HTTP 接口，本地断网能跑。基准上首 token 约 1.2 秒、decode 约 8 tok/s、内存约 2.1GB、带宽利用率约 45%，瓶颈在内存带宽，所以我下一步会试 batch 和投机解码继续压延迟。这个项目从头到尾的量化、部署、调优都是我做的。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能独立交付一个可演示、可复现、有性能数字的端侧 AI 项目——最硬的面试作品。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li>模型放在本地 <code>models/</code>（eMMC/NVMe），加载后常驻内存；<strong>首次 load 较慢</strong>，别误判为卡死。</li>
+      <li>3576 内存 16GB，但 demo + 系统 + KV + 其它服务要一起算；<strong>3B int4 建议上下文 ≤4K</strong>，8K 会让 KV 涨到 2.3GB。</li>
+      <li>NPU 单核，服务端并发（batch）能把带宽利用率从 ~45% 拉到 ~80%，是提升吞吐的正道。</li>
+      <li>demo 用 <code>1.5B</code> 做断网降级/极速模式、<code>3B</code> 做质量模式——<strong>一套代码两个档位</strong>，面试时是加分项。</li>
+      <li>HTTP 服务记得绑 <code>0.0.0.0</code> 才能被外部访问；生产要加超时与限流，避免长 prompt 打满内存。</li>
+    </ul>
+  </div>
+
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>

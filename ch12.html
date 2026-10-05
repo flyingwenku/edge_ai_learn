@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 12 章 · 项目收尾与架构文档（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">第 1 章</a>
+    <a href="ch02.html">第 2 章</a>
+    <a href="ch03.html">第 3 章</a>
+    <a href="ch04.html">第 4 章</a>
+    <a href="ch05.html">第 5 章</a>
+    <a href="ch06.html">第 6 章</a>
+    <a href="ch07.html">第 7 章</a>
+    <a href="ch08.html">第 8 章</a>
+    <a href="ch09.html">第 9 章</a>
+    <a href="ch10.html">第 10 章</a>
+    <a href="ch11.html">第 11 章</a>
+    <a href="ch12.html" class="active">第 12 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 12 章：项目收尾与架构文档</h1>
+  <p class="lead"><strong>章节目标：</strong>把前 11 章的零件拼成「<b>一个能现场演示的端侧 agent + 一份能讲清每个决策理由的架构文档</b>」——这是简历上那一条项目的实物。</p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch12-doc-demo</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把 function calling、RAG、性能测试、架构文档四块看懂。</li>
+    <li><strong>第 2 步 填板书练习：</strong>讲义里的模板 / 空表先自己写，再看「答案」核对。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写代码、跑指标、成文档。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，能当场演示 + 讲清理由才算过。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>前面你已经有：量化（能算内存）、部署（能跑起来）、RAG 思路、端侧调优。但面试官不看零件，只看<b>成品</b>。本章把零件收口成一个可演示的 agent，并产出一份<b>架构设计文档</b>。记住这条判据：<span class="key">文档的价值不在「写了什么」，而在「每个选择你都能说出为什么不选另一个」。</span></p>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：function calling——让本地模型会「用工具」</h3>
+    <p>本地模型只会说话不够，架构师要让它能<b>干活</b>：查天气、设闹钟。做法就是 function calling 最小闭环——<b>模型只负责「吐结构化请求」，真正执行永远在本地代码手里</b>。</p>
+    <div class="board"><span class="k">本地工具调用（function calling）最小闭环</span>
+
+① 注册工具 schema（给模型看的「菜单」）
+   tools = [
+     {"name":"get_weather","desc":"查某城市天气","params":{"city":"str"}},
+     {"name":"set_alarm","desc":"设定闹钟","params":{"time":"HH:MM","label":"str"}}
+   ]
+
+② 模型输出 <span class="k">结构化调用请求</span>（不是自然语言！）
+   用户：「明天几点下雨？顺便 7 点叫我」
+   模型 → {"tool":"get_weather","args":{"city":"本地"}}
+   模型 → {"tool":"set_alarm","args":{"time":"07:00","label":"起床"}}
+
+③ 本地执行器：解析 JSON → 跑本地函数 → 结果回填 → 二次生成
+   执行(get_weather) → {"temp":18,"rain":"14:00"} → 塞回 prompt → 组织成人话
+
+<span class="g">关键：模型不接触真实系统，调用请求经本地代码校验后才执行。</span>
+安全、可控、断网也能跑（工具本身是离线的）。</div>
+    <div class="callout"><b>一句话结论：</b>function calling 的本质是「<b>让模型吐 JSON，而不是吐散文</b>」；执行权、校验权、权限永远留在本地代码里——这正是端侧架构师的掌控点。</div>
+    <p>给分不清「工具描述、约束、兜底」的写法补一条模板：</p>
+    <div class="board"><span class="k">工具 schema 写法模板</span>
+{
+  "name": "set_alarm",
+  "description": "设置一个本地闹钟",          ← 越具体，模型越少乱调
+  "parameters": {
+    "type":"object",
+    "properties":{
+      "time":{"type":"string","description":"24 小时制 HH:MM"},
+      "label":{"type":"string","description":"闹钟名称，可空"}
+    },
+    "required":["time"]
+  }
+}
+<span class="r">兜底：解析失败 / 参数非法 → 不执行，回一句「我没听清，你再说一遍」。</span>
+<span class="g">宁可让模型说「我不确定」，也不让它乱调工具。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：本地 RAG——轻量向量库 + 检索闭环</h3>
+    <p>模型不知道你的私域知识（产品手册、内部文档）。本地 RAG 让它「开卷考试」，且全程离线。流程就两步：<b>离线建库 + 在线检索</b>。</p>
+    <div class="board"><span class="k">本地 RAG 最小闭环（离线、无外网）</span>
+
+① 离线建库（一次性，跑在 PC 上）
+   文档 → 切块 chunk（300~500 字，重叠 50）→ 向量化 embedding
+        → 写入本地向量库 → 建索引
+
+② 在线检索（每次提问，跑在端侧）
+   问题 → 向量化 → 向量库 top-k 相似 chunk（k=3~5）
+        → 拼进 prompt → 本地 LLM 生成带引用的答案
+
+<span class="k">轻量向量库选型（端侧内存优先）</span>
+   sqlite-vec   ：单文件、零依赖、可嵌入，<span class="g">首选</span>
+   FAISS(CPU)   ：快，但要单独带库
+   chroma 本地态：开发方便，端侧偏重
+
+<span class="k">内存预算：</span>几万条 chunk 的索引 ≈ <span class="g">&lt; 50MB</span>，完全塞得下。
+额外开销：embedding 模型也要端侧化（可用小模型，如 bge-small 量化版）。</div>
+    <div class="callout"><b>一句话结论：</b>RAG = 「<b>检索</b>」+「<b>生成</b>」两步；本地 RAG 的难点不是向量库，而是<b>把 embedding 模型也压到端侧能跑</b>，并把索引内存控制在几十 MB。</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：性能测试四件套（端侧 LLM 的体检表）</h3>
+    <p>没有数据的架构文档是散文。端侧 LLM 的性能就测四样，每一样都对应一个用户体感或一个硬件瓶颈。</p>
+    <div class="board"><span class="k">性能测试四件套</span>
+
+① 首 token 延迟 TTFT：提交到吐出第 1 个字  → 体感「快不快」
+② 生成速度 tok/s     ：稳定阶段每秒 token   → 体感「流不流畅」
+③ 内存峰值 RSS       ：运行最高占用          → 决定「塞不塞得进」
+④ NPU 利用率         ：NPU 是否吃满          → 判断瓶颈在算力还是带宽
+
+<span class="k">测量模板（每次必须记录环境，否则数据没用）</span>
+   模型=/量化=/上下文长度=/线程数=/温度=
+   TTFT=___ms   tok/s=___   RSS=___MB   NPU=___%</div>
+    <p>怎么用这四个数下结论？看一条推理：</p>
+    <div class="board"><span class="k">用数据定位瓶颈（面试可直接讲）</span>
+3B int4 权重 ≈ <span class="g">2GB</span>
+每生成 1 token 需读一遍权重：2GB
+RK3576 内存带宽 ≈ <span class="k">35 GB/s</span>
+理论 tok/s = 35 / 2 ≈ <span class="g">17 tok/s</span>
+实测           = <span class="r">5~10 tok/s</span>
+
+结论：算力没吃满、NPU 利用率不高 → <span class="r">瓶颈是内存带宽，不是 NPU</span>。
+优化方向：降比特（更狠量化）、减上下文、增加前缀缓存，而不是堆算力。</div>
+    <div class="callout"><b>一句话结论：</b>端侧 LLM 的性能瓶颈<b>通常是内存带宽而非算力</b>；四个指标一起看，才能判断该往「量化 / 上下文 / 缓存」哪个方向优化。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：架构设计文档模板（一页纸 ADR）</h3>
+    <p>架构文档别写成长篇报告，用 <b>ADR（Architecture Decision Record）</b>思路：一页讲清七件事。这是本章的<b>核心产出</b>。</p>
+    <div class="board"><span class="k">《架构设计文档》一页纸模板</span>
+
+1. 背景与目标   ：要解决什么问题、给谁用、约束（成本/功耗/尺寸/离线）
+2. 需求与指标   ：功能列表 + <span class="g">可量化指标</span>（TTFT&lt;1s, tok/s&gt;8, 内存&lt;2GB）
+3. 方案总览     ：一张分层图（应用 / 编排 / 推理 / 硬件）
+4. 关键决策 ADR ：每条 = 决策 + 理由 + 备选 + 代价（<span class="k">最重要</span>）
+5. 数据流       ：语音/文本 → 预处理 → 推理 → 工具/RAG → 输出
+6. 性能实测     ：四件套实测表（带环境）
+7. 风险与降级   ：断网 / 过热 / 内存不足 各自怎么办</div>
+    <p>其中「关键决策」每条都按同一个骨架写，逼你暴露真实的权衡：</p>
+    <div class="board"><span class="k">ADR 单条骨架</span>
+决策：<span class="g">用 RKNN int8 落地，而非 llama.cpp</span>
+理由：RK3576 有 NPU，RKNN 原生吃 NPU，能效比 CPU 高数倍
+备选：llama.cpp + GGUF（跨平台好，但走 CPU，速度/功耗差）
+代价：int4 在 NPU 支持有限，需退回 int8；平台被 RKNN 绑定
+<span class="k">→ 每条决策都能回答「为什么不选另一个」，文档就合格。</span></div>
+    <div class="callout"><b>一句话结论：</b>架构文档的合格线只有一条——<b>每个技术选择都能讲清「备选是什么、为什么不要它、代价是什么」</b>。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：Demo 演示脚本（照着背，3 分钟）</h3>
+    <p>演示不是「随便点两下」，而是<b>每个演示点对应一个架构能力</b>，串成一条有说服力的线。</p>
+    <div class="board"><span class="k">3 分钟 Demo 剧本</span>
+
+0:00 定位一句话：「这是跑在 RK3576 上的<span class="g">离线</span>语音助手，断网可用。」
+0:20 演示 1 基础对话：「你好，介绍下你自己」      → 看<span class="k">流式输出</span>
+0:50 演示 2 function calling：「查天气 / 设 7 点闹钟」→ 看<span class="k">工具调用</span>
+1:20 演示 3 本地 RAG：「按我上传的手册，XX 怎么操作」→ 看<span class="k">检索引用</span>
+1:50 演示 4 断网降级：拔网线 → 仍能对话（本地 1.5B）→ 看<span class="k">鲁棒性</span>
+2:20 报指标：TTFT / tok/s / 内存 / NPU 四个数
+2:40 收尾：「架构文档在这，每个决策我都能讲清理由。」</div>
+    <div class="callout"><b>一句话结论：</b>Demo 的目的不是「能跑」，而是<b>让每个演示点都映射到一个架构能力</b>——对话=推理、工具=编排、RAG=数据、断网=降级。</div>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>接入本地 function calling（查天气 + 设闹钟）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>让本地模型能调用至少 2 个本地工具，且调用请求经过本地校验后才执行。</dd>
+      <dt>要掌握</dt><dd>工具 schema 怎么写；模型输出的结构化请求怎么解析；解析失败怎么兜底。</dd>
+      <dt>实操步骤</dt><dd>写 <code>tools_registry.py</code>：定义 <code>get_weather</code>、<code>set_alarm</code> 两个工具（离线假数据即可）；写 <code>agent_demo.py</code>：把工具菜单注入 prompt，让本地模型输出 JSON 调用，本地解析并执行，再把结果回填生成自然语言回复。记录 3 个成功用例 + 1 个非法参数兜底用例。</dd>
+      <dt>检验标准</dt><dd>说「查下天气」能触发 <code>get_weather</code> 并返回离线天气；说「7 点叫我」能触发 <code>set_alarm</code>；乱说一句不会误触发工具。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>搭一个本地轻量 RAG 知识库</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用本地向量库（sqlite-vec / FAISS）对一份自有文档做检索问答，全程离线。</dd>
+      <dt>要掌握</dt><dd>切块（chunk 大小 + 重叠）、向量化、top-k 检索、把检索片段拼进 prompt。</dd>
+      <dt>实操步骤</dt><dd>写 <code>rag_local.py</code>：① 把一份 ≥10 页的文档切块；② 向量化并写入本地向量库；③ 提问时检索 top-3 chunk；④ 拼进 prompt 让本地模型生成带来源的答案。记录索引文件大小（证明 &lt; 50MB 级别）。</dd>
+      <dt>检验标准</dt><dd>问一个只有文档里才有答案的问题，模型能答对并引用出处；问无关问题时不硬编。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>性能测试脚本（四件套）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>写一个可复用的脚本，一次跑出 TTFT / tok/s / 内存峰值 / NPU 利用率。</dd>
+      <dt>要掌握</dt><dd>怎么测首个 token 的时间；怎么稳定统计 tok/s；怎么抓进程内存峰值；怎么读 NPU 利用率。</dd>
+      <dt>实操步骤</dt><dd>写 <code>perf_test.py</code>：固定 prompt 跑 N 次，输出四个指标 + 运行环境（模型/量化/上下文/线程/温度）。内存用进程 RSS 采样取峰值；NPU 用平台工具（如 <code>rknn</code> runtime perf 或系统接口）读取。结果先存 CSV。</dd>
+      <dt>检验标准</dt><dd>脚本一条命令跑完，输出四个数；重复跑两次结果接近（说明测量稳定）。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>跑全套性能测试并写《性能测试报告》</h3></div>
+    <dl>
+      <dt>目标</dt><dd>在 RK3576（或等效环境）上跑出真实四件套数据，并给出瓶颈判断。</dd>
+      <dt>要掌握</dt><dd>从数据反推瓶颈（带宽 vs 算力）；对照组（不同量化 / 不同上下文）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>perf_report.md</code>：① 测试环境；② 四件套实测表（至少 2 组对照，如 Q4 vs Q8 或 2K vs 8K 上下文）；③ 用「权重体积 ÷ 带宽 = 理论 tok/s」做一次推算，指出瓶颈。</dd>
+      <dt>检验标准</dt><dd>报告能一句话说清「瓶颈在哪、为什么、下一步优化方向是什么」。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>写架构设计文档（一页纸，核心产出）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书④模板，输出本项目的一页纸架构文档，含 ≥3 条 ADR。</dd>
+      <dt>要掌握</dt><dd>每条 ADR 写清「决策 / 理由 / 备选 / 代价」；指标是可量化的。</dd>
+      <dt>实操步骤</dt><dd>写 <code>architecture.md</code>：七段结构（背景/指标/总览/ADR/数据流/实测/风险）；至少 3 条 ADR（量化方案、框架选型、端云或降级策略）。模型图可用文字分层或代码块画。</dd>
+      <dt>检验标准</dt><dd>别人拿这页文档，不用问你就能讲出每个决策的理由——这是架构师的标准。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>串联 Demo + 演示彩排</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把对话、工具、RAG、断网降级串成一个 3 分钟现场演示。</dd>
+      <dt>要掌握</dt><dd>演示节奏；每个演示点对应哪个架构能力；指标怎么播报。</dd>
+      <dt>实操步骤</dt><dd>写 <code>demo_script.md</code>（照板书⑤填时间轴）+ 把 <code>agent_demo.py</code> 与 <code>rag_local.py</code> 合成一个入口。完整彩排 ≥2 次，掐表 3 分钟内完成，断网场景必须真拔网线验证。</dd>
+      <dt>检验标准</dt><dd>陌生人看一遍就能听懂「这东西强在哪」；断网后对话不崩。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>tools_registry.py</code> —— 本地工具定义（查天气 / 设闹钟）。</li>
+    <li><code>agent_demo.py</code> —— function calling 闭环 + 统一 demo 入口。</li>
+    <li><code>rag_local.py</code> —— 本地轻量向量库 RAG（离线检索问答）。</li>
+    <li><code>perf_test.py</code> —— 四件套性能测试脚本。</li>
+    <li><code>perf_report.md</code> —— 性能测试报告（含瓶颈推算）。</li>
+    <li><code>architecture.md</code> —— 架构设计文档（一页纸 ADR，核心产出）。</li>
+    <li><code>demo_script.md</code> —— 3 分钟演示剧本。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>能现场演示：基础对话 + 工具调用 + RAG 检索 + 断网降级，四段全过。</li>
+    <li>能讲清每个架构决策的理由（备选是什么、为什么不要、代价是什么）。</li>
+    <li>能报出四件套实测数据，并用「权重 ÷ 带宽」解释瓶颈。</li>
+    <li>能说清 function calling 为什么「模型只吐 JSON、执行在本地」。</li>
+    <li>能说清本地 RAG 的索引开销为什么只有几十 MB 级别。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「我有一个完整落地的端侧 AI agent 项目：跑在 RK3576 上，模型是 1.5B~3B int4，负责意图识别和简单对话。它支持本地 function calling——查天气、设闹钟这些工具都在本地执行，模型只吐结构化 JSON，执行权在本地代码手里；还接了本地 RAG，用轻量向量库做离线知识检索。性能上我实测了首 token 延迟、tok/s、内存峰值和 NPU 利用率四个指标，用权重体积除以内存带宽推算出理论 tok/s 是 17、实测 5~10，定位到瓶颈是内存带宽而不是算力。整个项目我写了架构设计文档，每个决策都写清了备选方案和代价，结论是每个技术选择都能讲出为什么不选另一个。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>端到端完整项目能力——能落地、能测、能演示、能讲清架构决策。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li><strong>NPU 利用率：</strong>用 RKNN runtime / 平台自带 perf 接口读取；如果 NPU 打不满 100%，多半是<strong>内存带宽喂不饱</strong>，而不是算力不够。</li>
+      <li><strong>内存要留 headroom：</strong>3B int4 权重约 2GB，加上 KV Cache、RAG 索引、运行时，留足余量，别贴着上限跑。</li>
+      <li><strong>温度与降频：</strong>长时间推理会触发热降频，tok/s 会掉——性能报告要记录温度与稳定性，别只报最好成绩。</li>
+      <li><strong>工具/RAG 全程离线：</strong>这正是端侧相对云端的最大卖点，演示时一定要真拔网线验证。</li>
+    </ul>
+  </div>
+
+  <div class="footer">听懂讲义 → 填板书模板 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>

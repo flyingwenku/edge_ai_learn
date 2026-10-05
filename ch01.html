@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 1 章 · 量化基础与内存估算（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html" class="active">第 1 章</a>
+    <a href="ch02.html">第 2 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 1 章：量化基础与内存估算</h1>
+  <p class="lead"><strong>章节目标：</strong>建立「给一个模型尺寸 + 精度，3 秒算出内存占用和理论 tok/s 上限」的条件反射——端侧架构师的第一块敲门砖。</p>
+  <div class="pill-row">
+    <span class="chip">状态：已完成</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch01-quant-memory</span>
+  </div>
+
+  <div class="callout">
+    <strong>本章已结课（2026-10-05）· 秒答 5/5 通过。</strong><br>
+    产出：<code>precision_bytes.md</code>、<code>memory_table.md</code>、<code>memory_table.py</code>、<code>quantize.py</code>。<br>
+    关键实测：<span class="key">int8 最大误差 0.0196 vs int4 0.357（≈18×）</span>——低精度掉精度的硬证据。
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>先读下面的「课堂讲义（板书）」，把原理看懂。看不懂就问我，别硬扛。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的空表自己填，填完展开「答案」自查。</li>
+    <li><strong>第 3 步 动手交作业：</strong>往下到「练习（交作业）」，产出脚本和表。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>一句话：<span class="key">把「模型多大、占多少内存、跑多快」变成你能心算的常识。</span></p>
+    <p>你是架构师，选型时老板/面试官不会给你跑一遍再决定。你需要在<b>买板子之前</b>就说出：这个 3B 模型能不能塞进 3576、能跑多快、值不值得。这节课就是练这个。</p>
+
+    <h3><span class="tag-lesson">讲解</span>1. 什么是量化（Quantization）</h3>
+    <p>模型里每个「参数」本来用 32 位小数（float32）存。量化就是<b>用更少的位去存它</b>：32 位 → 8 位 → 4 位。</p>
+    <p>类比：一张高清照片（fp32）压成小图（int4），文件小很多、传得快，但细节会糊一点。</p>
+    <div class="board">量化带来的变化：
+  位数 ↓  →  内存 ↓  →  带宽需求 ↓  →  速度 ↑
+                代价：精度 ↓（答得没那么准）
+
+架构师的口诀：<span class="k">「能用低精度，就别用高精度」</span>——
+只要效果掉得可接受，int4 永远优先于 fp16。</div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书①：位数 → 字节</h3>
+    <p>只需要一条换算：<span class="key">1 Byte = 8 bit</span>。把「每个参数多少位」除以 8 就是字节数。</p>
+    <div class="board">精度      位数        ÷8          每参数字节
+─────────────────────────────────────────────
+fp32      32 bit   →   32/8    =   <span class="g">4.0 Byte</span>
+fp16      16 bit   →   16/8    =   <span class="g">2.0 Byte</span>
+bf16      16 bit   →   16/8    =   <span class="g">2.0 Byte</span>
+int8       8 bit   →   8/8     =   <span class="g">1.0 Byte</span>
+int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关键
+
+<span class="k">int4 = 0.5 字节</span>：因为 4 位装不下 1 个字节，
+所以硬件把 <span class="g">2 个参数打包进 1 个字节</span>（叫 packed）。
+这就是为什么「4 位」听起来像省了一半，其实是省到 1/8。</div>
+    <div class="callout"><strong>bf16 vs fp16（只记结论，不推公式）：</strong>字节数一样（都是 2B）。fp16 精度细但范围窄、容易溢出；bf16 范围大、更稳，现代大模型/端侧更偏好 <span class="key">bf16</span>。你选型时默认 bf16 就对了。</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书②：内存公式 + 手算示范</h3>
+    <div class="formula">权重内存 ≈ 参数量 × 每参数字节</div>
+    <p>注意「≈」，因为真实占用总比净值大一点（下面解释）。先看一个完整手算：</p>
+    <div class="board"><span class="k">示范：3B 模型放 int4 要多少内存？</span>
+
+第一步 净值：  3,000,000,000 个参数 × 0.5 Byte
+            = 1,500,000,000 Byte
+            = <span class="g">1.5 GB</span>（净权重）
+
+第二步 真实：  ×1.2 ~ 1.4 的 overhead
+            ≈ 1.5 × 1.3 = <span class="k">约 2 GB</span>  ← 这就是「3B int4 约 2GB」的来历
+
+<span class="k">为什么有 overhead？</span>
+  ① Embedding 表通常不量化（或单独 int8），体积不小
+  ② LayerNorm / bias 这类小张量一般留高精度
+  ③ 内存对齐、runtime 缓冲、框架自身开销
+经验值：<span class="g">int4 真实占用 ≈ 净值 × 1.3，工程上直接取整背整数</span>。</div>
+
+    <p><b>练习（板书填空）：</b>先自己算，再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>模型</th><th>fp32</th><th>fp16/bf16</th><th>int8</th><th>int4 净值</th><th>int4 真实(填)</th><th>理论 tok/s(填)</th></tr></thead>
+      <tbody>
+        <tr><td>0.5B</td><td>2.0 GB</td><td>1.0 GB</td><td>0.5 GB</td><td>0.25 GB</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>1.5B</td><td>6.0 GB</td><td>3.0 GB</td><td>1.5 GB</td><td>0.75 GB</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>3B</td><td>12 GB</td><td>6.0 GB</td><td>3.0 GB</td><td>1.5 GB</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>7B</td><td>28 GB</td><td>14 GB</td><td>7.0 GB</td><td>3.5 GB</td><td class="fill">?</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案（先自己填！）</summary>
+      <p>int4 真实占用（工程取整）：0.5B ≈ 0.3GB，1.5B ≈ 1.0GB，3B ≈ 2.0GB，7B ≈ 4.0GB。<br>
+      理论 tok/s（= 35 ÷ 真实GB）：0.5B ≈ 117，1.5B ≈ 35，3B ≈ 17.5，7B ≈ 8.75。<br>
+      塞进 16GB（安全预算 8~12GB）：4 行都塞得下；fp32 的 7B（28GB）、3B（12GB）直接出局。</p>
+    </details>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书③：带宽 → 理论 tok/s</h3>
+    <p>这是本章的灵魂。大模型<b>生成文字时（decode）</b>，每吐 1 个 token，NPU 都要把整个模型权重从内存里<b>读一遍</b>。所以速度不由算力决定，由<b>内存带宽</b>决定。</p>
+    <div class="formula">理论 tok/s ≈ 内存带宽 ÷ 模型真实占用(GB)</div>
+    <div class="board"><span class="k">示范（RK3576，带宽 35 GB/s）</span>
+
+3B int4： 35 ÷ 2.0  = 17.5  ≈ <span class="g">17 tok/s</span>   （理论天花板）
+7B int4： 35 ÷ 4.0  = 8.75  ≈ <span class="g">8.75 tok/s</span>  （理论天花板）
+
+<span class="k">为什么实测只有 5~10 tok/s，远低于理论？</span>
+  ① 有效带宽达不到峰值，通常打 6~8 折
+  ② KV Cache 也在抢带宽（第 4 章细讲）
+  ③ kernel 调度、算子切换有开销
+  ④ 有些算子没跑到 NPU，掉回 CPU</div>
+    <div class="callout"><strong>一句话记住：</strong><span class="key">算力决定「能不能算」，带宽决定「算多快」。</span>LLM 聊天场景默认是带宽瓶颈——这句话后面每章都用得上。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书④：量化数学（下午写脚本用）</h3>
+    <p>对称量化就三步，把它想成「<b>找一把尺子，把所有数对齐到刻度上</b>」：</p>
+    <div class="board">给定一批数字 x，量化到 int8：
+  qmax   = 127                     # 8 位有符号最大整数
+  scale  = max(|x|) / qmax         # 这把尺子的刻度
+  q      = round(x / scale)        # 量化：小数 → 整数
+  x'     = q * scale               # 反量化：整数 → 近似小数
+
+<span class="k">举例</span> x = [-1.2, 0.5, 3.0]
+  max(|x|) = 3.0 → scale = 3.0/127 ≈ 0.0236
+  q = round([-50.8, 21.2, 127]) = [-51, 21, 127]
+  x' = [-1.204, 0.496, 3.0]
+  误差 = [-0.004, -0.004, 0]  ← 很小，因为 8 位刻度够细
+
+<span class="k">换成 int4（qmax=7）：</span>刻度变粗 → 误差明显变大
+  scale = 3.0/7 ≈ 0.4286  →  x' = [-1.29, 0.43, 3.0]
+  int4 误差 ≫ int8 误差  ← 这就是低精度的代价</div>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后，动手产出下面内容。这是你今天的作业，做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>精度 → 字节占用</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把讲义板书①亲手整理成一张对照表。</dd>
+      <dt>要掌握</dt><dd>位数换算；bf16 vs fp16 结论；int4 = 0.5 字节的原因（packed）。</dd>
+      <dt>实操步骤</dt><dd>在 ch01 目录写 <code>precision_bytes.md</code>：5 行（精度 / 位数 / 字节 / 典型用途 / 一句话备注）。</dd>
+      <dt>检验标准</dt><dd>合上讲义，口头说出 5 种精度的字节数，不卡壳。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>内存估算表（核心产出）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把讲义板书②的填空表，扩成完整 16 格（0.5B/1.5B/3B/7B × 4 精度）。</dd>
+      <dt>要掌握</dt><dd>净值 vs 真实占用（×1.3）；标出哪几格能进 16GB（安全预算 8~12GB）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>memory_table.md</code>：净值 16 格 + int4 真实列 + 理论 tok/s 列 + 「能否部署」判断列。</dd>
+      <dt>检验标准</dt><dd>秒答「3B int4 约 2GB」「7B fp16 = 14GB」「7B fp32 = 28GB 装不下」。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>RK3576 理论 tok/s 上限</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用 35GB/s 算出 1.5B/3B/7B int4 的理论天花板。</dd>
+      <dt>要掌握</dt><dd>tok/s ≈ 带宽 ÷ 真实占用；为什么实测低于理论。</dd>
+      <dt>实操步骤</dt><dd>算 3 个值写入小表，附一句「实测预期打几折」的说明。</dd>
+      <dt>检验标准</dt><dd>秒答「3B int4 理论 ≈ 17 tok/s」「7B int4 理论 ≈ 8.75 tok/s」。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>Python 手写对称量化器</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按讲义板书④，从零实现 float → int → float。</dd>
+      <dt>要掌握</dt><dd>scale = max|x| / qmax；对称量化三步；误差来源。</dd>
+      <dt>实操步骤</dt><dd>写 <code>quantize.py</code>：函数 <code>quantize(x,bits)</code> / <code>dequantize(q,scale)</code>；用随机数据跑通，打印最大/平均误差；对比 int8 与 int4。</dd>
+      <dt>检验标准</dt><dd>脚本跑通无报错，能指着输出说「int4 误差明显大于 int8」。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>脚本生成内存表</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把上午的手算变成代码，一键复现。</dd>
+      <dt>要掌握</dt><dd>参数化：输入 <code>[参数量, 精度]</code> → 输出表格。</dd>
+      <dt>实操步骤</dt><dd>让脚本输出 <code>memory_table.md</code>（含净值/真实/tok/s），存到 ch01 目录。</dd>
+      <dt>检验标准</dt><dd>目录里有 <code>memory_table.md</code> + <code>quantize.py</code>，重跑结果一致。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把关键数字练成肌肉记忆。</dd>
+      <dt>实操步骤</dt><dd>自问自答 5 次：3B int4 内存？7B int4 理论 tok/s？7B fp16 内存？3576 带宽？为什么实测低于理论？</dd>
+      <dt>检验标准</dt><dd>每题 3 秒内答出，不翻资料。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>precision_bytes.md</code> —— 精度字节对照表。</li>
+    <li><code>memory_table.md</code> —— 16 格内存 + int4 真实列 + 理论 tok/s 列 + 能否部署。</li>
+    <li><code>quantize.py</code> —— 手写对称量化器，跑通并打印误差。</li>
+    <li>一句结论：RK3576 上什么尺寸 + 什么精度能跑，理论多少 tok/s。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>秒答「3B int4 约 2GB」，并说清这是加 overhead 的真实值。</li>
+    <li>秒答「7B int4 理论约 8.75 tok/s」，能解释为何不是 35÷3.5=10（真实占用约 4GB）。</li>
+    <li>能解释「实测 5~10 tok/s 为何低于理论 17 tok/s」——带宽打折、KV Cache、kernel 开销、掉 CPU。</li>
+    <li>量化脚本 int4 误差 &gt; int8 误差。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「端侧选模型第一步是算内存：3B int4 约 2GB，RK3576 内存带宽约 35GB/s，decode 是带宽瓶颈，理论上限 17 tok/s，实测 5~10 tok/s，差距来自 KV Cache 和带宽争用。所以 RK3576 上我优先 1.5B~3B int4，7B int4 内存够但带宽受限，实测只有 2~5 tok/s。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能在选型前就把内存和吞吐算清楚，而不是跑起来才知道。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li>带宽 35GB/s 是<strong>理论峰值</strong>，实际有效带宽通常打 6~8 折，所以「理论 17 tok/s、实测 5~10」是正常的。</li>
+      <li>16GB 内存不代表能装大模型——留给系统、KV Cache、多进程的空间要扣掉，实际安全预算约 8~12GB。</li>
+      <li>3576 的 NPU 是 6 TOPS int8；int4 通常靠 int8 模拟或特定算子支持，第 9 章验证，本章先按理论算。</li>
+    </ul>
+  </div>
+
+  <div class="footer">先听懂讲义 → 再填板书练习 → 再交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>

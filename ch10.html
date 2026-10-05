@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 10 章 · 性能调优与优化手段（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">第 1 章</a>
+    <a href="ch02.html">第 2 章</a>
+    <a href="ch03.html">第 3 章</a>
+    <a href="ch04.html">第 4 章</a>
+    <a href="ch05.html">第 5 章</a>
+    <a href="ch06.html">第 6 章</a>
+    <a href="ch07.html">第 7 章</a>
+    <a href="ch08.html">第 8 章</a>
+    <a href="ch09.html">第 9 章</a>
+    <a href="ch10.html" class="active">第 10 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 10 章：性能调优与优化手段</h1>
+  <p class="lead"><strong>章节目标：</strong>从「能跑」到「跑得快」——掌握 NPU 核心数 / batch / 量化配置 / CPU+NPU 混合 / 投机解码几大手段，能在给定延迟目标下<b>调出达标配置</b>，并说清每一步为什么有效。</p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch10-perf-tuning</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把性能指标和五大优化手段看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的配置矩阵 / 加速比手算自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」跑配置矩阵、出调优报告。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>性能调优不是「多试几次碰运气」，而是<b>先建指标、再测基线、然后一次只动一个变量</b>。你作为架构师要能说：这个配置为什么快、瓶颈在哪、还有多少空间。</p>
+    <div class="callout"><strong>你要能四件事：</strong>① 说清看哪些性能指标；② 会建基线和算 Amdahl 上限；③ 会跑配置矩阵找最优；④ 给一个延迟目标，<span class="key">能反推出该动哪些旋钮</span>。</div>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：性能指标体系（先会量，才会调）</h3>
+    <p>「快」是个模糊词。端侧对话至少拆成两组指标：<b>首响（prefill）</b>和<b>吐字（decode）</b>，二者瓶颈完全不同。</p>
+    <div class="board"><span class="k">五个必测指标</span>
+
+① TTFT（首 token 时延）  用户按下回车到第一个字出现
+     ≈ prompt_tokens ÷ prefill 吞吐(tok/s)
+     受算力影响大（prefill 是算力瓶颈）
+
+② decode tok/s（吐字速度）
+     生成阶段每秒出多少 token
+     <span class="g">受带宽影响大</span>（每 token 读一遍全部权重）
+
+③ 内存占用（RSS / 模型常驻）
+     free -m / nvidia-smi 类比 → 端侧用 free、/proc/self/status
+
+④ NPU 利用率
+     cat /sys/kernel/debug/rknpu/load   （看到百分比）
+
+⑤ 带宽利用率 = decode_tok/s × 模型真实GB ÷ 35
+     判断"是不是带宽瓶颈"的核心尺子
+
+<span class="k">一句话：新用户感受 TTFT，长时间对话感受 decode tok/s。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：基线 + Amdahl（优化前先算天花板）</h3>
+    <p>没基线就没优化。先测「什么都不改」的原始数字，再算理论加速上限，避免白忙。</p>
+    <div class="board"><span class="k">基线表（先填原始配置）</span>
+配置              TTFT    decode   内存     NPU   带宽利用率
+baseline          1200ms  8.0 t/s  2.1GB   70%   45.7%
+...
+
+<span class="k">Amdahl 定律：先看瓶颈占总时间多少</span>
+加速比 = 1 / ( (1−p) + p/S )
+   p = 可优化部分占比， S = 该部分加速倍数
+
+<span class="g">例：耗时 80% 在量化可加速的 NPU 算子，若把它加速 4 倍</span>
+  加速比 = 1 / (0.2 + 0.8/4) = 1 / 0.4 = <span class="g">2.5×</span>
+  → 就算把 NPU 部分优化到极限，整体最多 2.5 倍，别指望 5 倍
+
+<span class="k">结论：先优化占比最大的那部分，收益最大。</span></div>
+    <div class="callout"><strong>面试加分点：</strong>「我会先测 baseline 和 Amdahl 上限，确认瓶颈占比，再决定投入——不做没有上界的优化。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：三旋钮实测矩阵（核心实操）</h3>
+    <p>三大旋钮：<b>量化配置</b>、<b>NPU 核心数</b>、<b>batch size</b>。做法：固定其他，一次动一个，填进矩阵。</p>
+    <div class="board"><span class="k">旋钮一：量化配置</span>
+w4a16  最省内存、最快，精度略降   ← 端侧默认起点
+w8a16  精度更好，慢约 15~30%
+w8a8   最稳，LLM 上未必最快
+
+<span class="k">旋钮二：NPU 核心数 num_npu_core</span>
+<span class="r">3576 单核，固定 1（没得调）</span>；
+3588 三核，实测 1→2 核近线性、2→3 核收益递减（带宽抢用）。
+
+<span class="k">旋钮三：batch size（并发数）</span>
+单路 bandwidth-bound，多路可"摊薄"权重读取：
+  batch=1  → 8.0 t/s，带宽利用率 45.7%
+  batch=4  → <span class="g">14 t/s（合计）</span>，利用率 <span class="g">80%</span>
+  batch=8  → 15 t/s（合计），利用率 85%，但单路 TTFT 变差
+<span class="k">batching 提吞吐、不降延迟——适合多用户服务端场景。</span></div>
+    <p><b>练习（板书填空）：</b>把 batch 提升后的带宽利用率算出来，再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>batch</th><th>合计 tok/s</th><th>模型(GB)</th><th>有效带宽(GB/s)</th><th>利用率(填)</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>8.0</td><td>2.0</td><td>16.0</td><td class="fill">?</td></tr>
+        <tr><td>2</td><td>11.5</td><td>2.0</td><td>23.0</td><td class="fill">?</td></tr>
+        <tr><td>4</td><td>14.0</td><td>2.0</td><td>28.0</td><td class="fill">?</td></tr>
+        <tr><td>8</td><td>15.0</td><td>2.0</td><td>30.0</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案（先自己填！）</summary>
+      <p>利用率 = 有效带宽 ÷ 35：1→<b>45.7%</b>，2→<b>65.7%</b>，4→<b>80.0%</b>，8→<b>85.7%</b>。<br>
+      规律：batch 越大越接近带宽上限，但收益递减；到 8 路只多 1 t/s，成本（内存×8、TTFT 变差）不划算——这就是「甜点」在哪的判断。</p>
+    </details>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：CPU + NPU 混合调度</h3>
+    <p>NPU 不是万能的：有些算子 NPU 不支持或支持差（如某些动态 shape、特殊激活、非标准 attention）。这些会<b>回退（fallback）到 CPU</b>，一旦掉 CPU 就会拖慢整体。</p>
+    <div class="board"><span class="k">混合调度三原则</span>
+
+① 能塞 NPU 的就塞 NPU   —— 主体矩阵乘全部 NPU 化
+② 掉 CPU 的算子要盯住   —— 看 build 日志的 "not supported"
+③ 减少 NPU↔CPU 数据搬运 —— 搬运 = 额外带宽 + 时延
+
+<span class="k">判断是否掉 CPU：</span>
+  跑推理时 top 看主进程 CPU% —— 若 CPU 长期 100%+
+  且 NPU 利用率低 → 多半有算子掉 CPU
+
+<span class="g">典型分工：
+  Prefill 大矩阵乘  → NPU（算力密集）
+  sampling/采样     → CPU（轻量、控制逻辑）
+  tokenizer         → CPU</span>
+<span class="k">目标：让 NPU 干重活、CPU 干调度，别让 CPU 抢带宽。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：投机解码（speculative decoding）</h3>
+    <p>思路：用<b>小模型（draft）</b>先猜几个 token，再用<b>大模型（target）</b>一次验证。猜对了就白赚——因为大模型一次前向能确认多个 token，分摊了权重读取，<b>正好打带宽瓶颈</b>。</p>
+    <div class="board"><span class="k">参数：</span>γ = 每轮猜几个；α = 猜中率(acceptance rate)；r = 小/大模型耗时比
+
+<span class="k">手算（α=0.8, γ=4, r=0.1）</span>
+每轮平均猜中数 = α(1−α^γ)/(1−α)
+              = 0.8 × (1 − 0.8⁴) / 0.2
+              = 0.8 × (1 − 0.4096) / 0.2
+              = 0.8 × 0.5904 / 0.2 = <span class="g">2.3616</span>
+每轮总产出 = 猜中 + 1（大模型兜底）= 1 + 2.3616 = <span class="g">3.36 token</span>
+每轮耗时   = γ·r + 1 = 4×0.1 + 1 = 1.4（相对大模型单次前向）
+
+加速比 = 3.36 / 1.4 = <span class="g">≈ 2.4×</span>
+
+<span class="k">结论：猜中率 α 越高、小模型越便宜(r 越小)，加速比越大。
+α 太低或小模型太重 → 反而变慢，要果断关掉。</span>
+
+<span class="k">llama.cpp 支持：</span>--model big.gguf --model-draft small.gguf
+（-md 指定草稿模型；--draft-max 控制 γ）</div>
+    <div class="callout"><strong>为什么端侧特别值：</strong>decode 是带宽瓶颈，投机解码让一次权重读取服务多个 token，<span class="key">本质是提升带宽利用率</span>——和第 9 章那把尺子对上了。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：找最优组合（配置矩阵 + 帕累托）</h3>
+    <div class="board"><span class="k">实验矩阵（示例，一次动一个变量）</span>
+#  quant  core  batch  TTFT    decode  内存   带宽利用
+1  w4a16   1     1      1200ms  8.0 t/s 2.1GB  45.7%
+2  w8a16   1     1      1300ms  6.5 t/s 2.4GB  44.6%
+3  w4a16   1     4      1500ms  14  t/s 2.9GB  80.0%
+4  w4a16   1     8      1700ms  15  t/s 3.6GB  85.7%
+5  w4a16+投机 1  1      900ms   12  t/s 2.5GB  68.6%
+
+<span class="k">选型原则：按目标选，不是越大越好</span>
+  要低延迟单路对话     → 选 5（投机解码）：TTFT 低、tok/s 高
+  要多用户高吞吐       → 选 3（batch=4）：最平衡
+  要极致精度           → 选 2（w8a16）：慢但准
+  <span class="g">在"满足延迟目标"的候选里，挑内存最小的那个</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：给延迟目标反推配置</h3>
+    <div class="board"><span class="k">任务：3B int4，目标 decode ≥ 15 tok/s，内存 ≤ 4GB</span>
+
+① 理论天花板：35 ÷ 2.0 = 17.5 t/s  → 目标 15 很紧，需高利用率
+② 目标利用率：15 × 2.0 ÷ 35 = <span class="g">85.7%</span>
+③ 单路(w4a16)只有 45.7% → 不够
+④ 手段：
+   - batch=8 → 85.7% ✅ 但内存 3.6GB（≤4GB，勉强过）；单路反而更慢
+   - 投机解码 → 68.6%，再叠 w4a16 微调 → 接近
+   - batching + 投机 组合 → 冲 85%+
+⑤ 结论：<span class="g">选 batch=4~8 或投机解码；若必须单路且低延迟，投机解码优先</span>
+
+<span class="k">被问"给个延迟目标怎么调"→ 标准答：</span>
+「先算理论天花板确认目标可达 → 再算需要的带宽利用率 →
+若单路不够，就上 batch（提吞吐）或投机解码（摊薄权重读取）→
+在满足目标的方案里挑内存最小、最稳的那个。」</div>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手跑配置矩阵。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>性能指标采集脚本</h3></div>
+    <dl>
+      <dt>目标</dt><dd>写一个脚本，一次跑出 TTFT / decode / 内存 / NPU / 带宽利用率五项。</dd>
+      <dt>要掌握</dt><dd>五项指标的取法（<code>free</code>、<code>/sys/kernel/debug/rknpu/load</code>、计时首 token）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>bench.sh</code>：跑一次推理，用 <code>date +%s.%N</code> 计 TTFT，统计 decode tok/s，抓内存与 NPU load，输出 <code>baseline.txt</code>。</dd>
+      <dt>检验标准</dt><dd>脚本一条命令出五项数字，重跑误差在合理范围。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>基线 + Amdahl 上限计算</h3></div>
+    <dl>
+      <dt>目标</dt><dd>建基线表，并用 Amdahl 算出理论加速上限。</dd>
+      <dt>要掌握</dt><dd>Amdahl 公式；如何估「可优化部分占比 p」。</dd>
+      <dt>实操步骤</dt><dd>把 baseline 数字填表；假设 NPU 部分占 80%、能加速 4 倍，手算上限写入 <code>amdahl.md</code>。</dd>
+      <dt>检验标准</dt><dd>能说出「整体最多几倍」并解释为什么不是叠加。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>CPU+NPU 分工排查</h3></div>
+    <dl>
+      <dt>目标</dt><dd>找出哪些算子在 CPU 上跑（fallback）。</dd>
+      <dt>要掌握</dt><dd>怎么从 build 日志 / top 判断掉 CPU；为什么搬运要避免。</dd>
+      <dt>实操步骤</dt><dd>跑推理，<code>top</code> 记录主进程 CPU%；翻 build 日志找 "not supported"；写 <code>cpu_npu_split.md</code> 列出候选 fallback 算子。</dd>
+      <dt>检验标准</dt><dd>能指出至少 1 个疑似掉 CPU 的算子，并说清它对带宽/时延的影响。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>配置矩阵实测（核心实操）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>跑通板书③⑥的矩阵：量化 × batch（× 投机），填满性能表。</dd>
+      <dt>要掌握</dt><dd>「一次只动一个变量」；batch 对吞吐/带宽利用率的影响。</dd>
+      <dt>实操步骤</dt><dd>至少跑 5 组配置，用 <code>bench.sh</code> 采集，写入 <code>perf_matrix.md</code>（含 TTFT/decode/内存/带宽利用率列）。</dd>
+      <dt>检验标准</dt><dd>表里能看出「batch 越大利用率越高、收益递减」的趋势。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>投机解码验证</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用 llama.cpp 草稿模型跑一次投机解码，测实际加速比。</dd>
+      <dt>要掌握</dt><dd>γ/α/r 三参数；加速比手算公式；α 低时为何要关。</dd>
+      <dt>实操步骤</dt><dd>用 <code>llama-cli --model big --model-draft small</code> 对比开关前后 tok/s，记录 α 与实测加速比，写入 <code>spec_decode.md</code>。</dd>
+      <dt>检验标准</dt><dd>能对比手算与实测加速比，并给出「是否值得开」的结论。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>《性能调优报告（含最优配置）》（本章核心产出）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>综合矩阵与实验，给出最优配置与理由——一页纸。</dd>
+      <dt>要掌握</dt><dd>把指标 + Amdahl + 矩阵 + 投机解码串成一个决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>perf_tuning_report.md</code>（一页）：①基线 ②Amdahl 上界 ③配置矩阵 ④最优配置（含延迟/内存/带宽利用率）⑤从目标反推的调优路径。</dd>
+      <dt>检验标准</dt><dd>给定一个延迟目标，拿报告能立刻选出配置——架构决策标准。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>bench.sh</code> + <code>baseline.txt</code> —— 五项性能指标采集脚本与基线。</li>
+    <li><code>amdahl.md</code> —— 基线表 + Amdahl 加速上限手算。</li>
+    <li><code>cpu_npu_split.md</code> —— CPU/NPU 分工排查记录。</li>
+    <li><code>perf_matrix.md</code> —— 配置矩阵实测表（量化 × batch）。</li>
+    <li><code>spec_decode.md</code> —— 投机解码验证（手算 vs 实测加速比）。</li>
+    <li><code>perf_tuning_report.md</code> —— 性能调优报告（含最优配置，核心产出）。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>说清 TTFT 与 decode tok/s 的瓶颈为何不同（prefill 算力密集、decode 带宽密集）。</li>
+    <li>会用 Amdahl 算整体加速上限，并解释「为什么不是叠加」。</li>
+    <li>会算 batch 提升后的带宽利用率，判断收益是否划算。</li>
+    <li>能用公式手算投机解码加速比（α=0.8, γ=4, r=0.1 → ≈2.4×）。</li>
+    <li>给一个延迟目标，能反推出该动 batch 还是投机解码。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「我做端侧性能调优先建指标：TTFT、decode tok/s、内存、NPU 利用率、带宽利用率。先测 baseline 再用 Amdahl 算理论上界，确认瓶颈占比。优化手段上：量化配置在 w4a16/w8a16 间权衡精度与速度；batch size 能提升吞吐和带宽利用率，多用户服务端优先；CPU+NPU 混合调度让 NPU 干矩阵乘、CPU 干采样和 tokenizer，尽量避免算子掉 CPU 造成搬运；单路低延迟场景用投机解码，用小模型猜、大模型验证，让一次权重读取服务多个 token，实测能到 2 倍左右加速。最后按目标在候选里挑内存最小、最稳的配置。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能建指标、定基线、算上界、跑矩阵，给延迟目标调出达标配置——性能调优能力。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li>3576 是<strong>单核 NPU</strong>，<code>num_npu_core</code> 固定 1，调核心数没意义；这一点要说清，别照搬 3588 的经验。</li>
+      <li>带宽 35GB/s 是天花板，batch 与投机解码是<strong>提升带宽利用率的正路</strong>；超过 85% 利用率后收益递减。</li>
+      <li>NPU 利用率看 <code>/sys/kernel/debug/rknpu/load</code>；若 CPU 长期 ≥100% 而 NPU 低，说明有算子掉 CPU（fallback），要回第 9 章查 build 日志。</li>
+      <li>内存有限，batch 翻倍内存也翻倍——3B int4 batch=8 约 3.6GB，别再叠加其它服务。</li>
+    </ul>
+  </div>
+
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>

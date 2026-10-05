@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 7 章 · FFN、MoE 与架构趋势速览（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">第 1 章</a>
+    <a href="ch02.html">第 2 章</a>
+    <a href="ch03.html">第 3 章</a>
+    <a href="ch04.html">第 4 章</a>
+    <a href="ch05.html">第 5 章</a>
+    <a href="ch06.html">第 6 章</a>
+    <a href="ch07.html" class="active">第 7 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 7 章：FFN、MoE 与架构趋势速览</h1>
+  <p class="lead"><strong>章节目标：</strong>搞懂「<b>FFN 存知识、MoE 是云端的省算力游戏、端侧另有答案</b>」——拿到一个端侧场景，能当场说出该选什么架构方向、为什么 MoE 不合适。</p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch07-arch-trends</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点是 MoE 为什么在端侧"省算力但不省时间"。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量手算 / 空表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写 MoE 笔记、架构趋势笔记、选型表。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>第 6 章你搞懂了注意力。但注意力量只占参数的一小部分——<b>真正"装参数、装知识"的是 FFN</b>。这一章你搞清 FFN 和 MoE，再看清整个架构大方向（Transformer / SSM / 混合），最后拿到一张端侧主流模型清单。<span class="key">面试高频题：给一个端侧场景，你选什么架构、用什么模型？</span></p>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：FFN——Transformer 的"知识仓库"</h3>
+    <p>每个 Transformer 层有两个子块：注意力 + FFN。注意力负责"搬运"，FFN 负责"记忆"。</p>
+    <div class="board"><span class="k">FFN = Feed-Forward Network（前馈网络）</span>
+结构：d → 4d → d   （两层线性 + 一个激活函数）
+  中间隐藏层宽度通常是输入的 4 倍
+  （现代模型用 SwiGLU，实际约 8/3 倍，这里按 4d 讲，便于手算）
+
+<span class="k">参数量公式（两层矩阵）</span>
+  W1: d × 4d
+  W2: 4d × d
+  合计 = 2 × 4d² = <span class="g">8d²</span>
+
+<span class="k">手算：d = 2048 的单层 FFN</span>
+  8 × 2048² = 8 × 4,194,304 = <span class="g">33.6M</span> 参数/层
+  36 层 → 33.6M × 36 = <span class="g">约 1.21B</span>
+
+<span class="k">对比同模型的注意力层（GQA）</span>
+  Q: d×d = 4.19M
+  K,V: d×(2×128) = 0.52M 各
+  O: d×d = 4.19M
+  合计 ≈ 9.4M/层 → 36 层 ≈ 0.34B</div>
+    <div class="board"><span class="k">结论：FFN 参数 ≈ 注意力的 3~7 倍</span>
+  3B 这类小模型里，<span class="r">约 2/3 的参数在 FFN</span>。
+
+<span class="k">FFN 到底在干什么：知识存储</span>
+  研究共识（ROME、知识编辑等工作）：
+  · 注意力 = "token 之间搬运/聚合信息"（路由）
+  · FFN     = "把知识写进权重里"（记忆 / 查表）
+  所以：
+  模型"知道多少"  ← 主要由 <span class="g">FFN</span> 决定
+  模型"会不会用上下文" ← 主要由 <span class="g">注意力</span> 决定
+
+<span class="k">直觉：FFN 像一个巨大的 key-value 记忆库，</span>
+每个神经元近似"匹配某种特征 → 输出某条知识"。
+模型越大越"博学"，主要就是 FFN 堆得多。</div>
+    <div class="callout">一句话：<b>注意力管"看关系"，FFN 管"记知识"</b>。所以量化时 FFN 权重占大头，也是 KV Cache 之外最大的内存来源。</div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：MoE——稀疏激活原理 + 手算</h3>
+    <div class="board"><span class="k">MoE = Mixture of Experts（混合专家）</span>
+核心想法：把 1 个 FFN 换成 N 个"专家 FFN"，
+每个 token 只走其中 top-k 个（其余专家不参与计算）。
+
+  · 总参数量   = N × 8d²        （所有专家都要<span class="r">存进内存</span>！）
+  · 激活参数量 = k × 8d²        （每个 token 实际算的）
+
+<span class="k">关键区别（面试点）</span>
+  计算量由"激活参数"决定 → 稀疏 → 省算力
+  内存占用由"总参数量"决定 → 很大 → <span class="r">不省内存</span>
+
+<span class="k">举例：Mixtral 8×7B</span>
+  8 个专家，top-2 路由
+  总参数 ≈ 47B，激活 ≈ 13B
+  → 算力只花 13B（便宜），但要<span class="r">存 47B</span>（贵）
+
+<span class="k">另一端：DeepSeek-V3</span>
+  总 671B / 激活 37B
+  → 推理算力极省，但内存得按 671B 级别准备
+
+<span class="k">一句话：MoE 用"更大的总内存"换"更小的单次算力"。</span></div>
+    <div class="callout"><b>MoE 的本质取舍：</b>它把"算力"和"内存"解耦了——用稀疏激活省算力，代价是总参数量（内存）反而更大。<b>谁的内存便宜、算力贵，谁就用 MoE → 那是云端，不是端侧。</b></div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：为什么端侧少用 MoE</h3>
+    <p>这是本章最重要的判断，四个硬伤，逐个讲：</p>
+    <div class="board"><span class="k">为什么端侧基本不用 MoE？四个硬伤</span>
+
+① 内存装不下（最直接）
+   Mixtral 47B，即便压到 int4 也 ≈ 24 GB
+   RK3576 内存上限 16 GB → <span class="r">装不下</span>。
+   端侧要的是"总参数小"，MoE 天生总参数大。
+
+② batch=1 时 MoE 不省时间（最关键！）
+   decode 阶段是<span class="g">带宽瓶颈</span>：每生成 1 个 token，要把权重读一遍。
+   MoE 只激活 k 个专家 → 少算，但权重<r>还是得从内存读</r>（而且读得更碎）。
+   省算力 ≠ 省带宽 → 单用户场景几乎没收益。
+   只有大 batch（云端、多用户）才把 MoE 的稀疏优势吃满。
+
+③ 调度开销
+   路由 + 动态 shape + 专家分散 → NPU/框架对小算子、动态分支不友好。
+
+④ 随机访存
+   路由后读的是"分散在不同地址"的专家权重 → 带宽利用率更低，
+   对 3576 这种带宽本就紧张的板子雪上加霜。
+
+<span class="k">一句话：MoE 是"云端多用户"的省算力方案；</span>
+端侧单用户、带宽受限 → 用密集小模型 + GQA 更实在。</div>
+    <div class="callout"><b>最容易背错的一点：</b>"MoE 省算力"没错，但在端侧单用户推理里，<b>瓶颈是带宽不是算力</b>，而 MoE 一点都不省带宽（总权重还是那么多，读的还是分散的）。<b>所以 MoE 对端侧 decode 几乎没有加速收益。</b></div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：Transformer vs SSM(Mamba) vs 混合</h3>
+    <table class="tight">
+      <thead><tr><th>范式</th><th>计算复杂度</th><th>推理内存</th><th>长文本</th><th>召回/复制</th><th>NPU 成熟度</th></tr></thead>
+      <tbody>
+        <tr><td><b>Transformer</b></td><td>O(n²)</td><td>随 n 增长（KV Cache）</td><td>一般</td><td><b>强</b></td><td>高</td></tr>
+        <tr><td><b>SSM / Mamba</b></td><td>O(n)</td><td>常数（无 KV）</td><td>好</td><td>弱</td><td>低</td></tr>
+        <tr><td><b>混合架构</b></td><td>O(n)~O(n²)</td><td>小</td><td>好</td><td>强（有注意力层）</td><td>中</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">SSM / Mamba 是什么（一句话）</span>
+  用"状态空间模型"逐 token 递推：h_t = A·h_{t-1} + B·x_t
+  像 RNN 一样，只维护一个<span class="g">固定大小的状态</span> → 内存不随上下文增长。
+  代价：状态"挤"不下太多历史 → 精确回忆/复制能力弱于注意力。
+
+<span class="k">混合架构：两头都要</span>
+  大部分层用 SSM（省内存、长文本好），少量层插注意力（保住召回）。
+  代表：Jamba、Zamba、NVIDIA Hymba、Qwen3-Next、MiniCPM 的部分版本。
+
+<span class="k">端侧意义</span>
+  SSM 的"常数内存"对内存吃紧的板子很有吸引力（终于不怕长上下文爆内存）。
+  但 NPU 对 SSM 的递推 scan 支持还不成熟 →
+  <span class="r">目前落地仍以 Transformer + GQA 为主</span>，SSM 作为观察方向。</div>
+    <div class="callout"><b>架构师结论：</b>端侧现在选 <b>Transformer + GQA</b>（生态成熟、NPU 支持好）；<b>Mixed/SSM</b> 作为 2026 之后的长上下文储备，关注别踩坑（算子支持）。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：端侧主流模型盘点</h3>
+    <table class="tight">
+      <thead><tr><th>模型</th><th>常见规模</th><th>特点</th><th>端侧适配</th><th>许可</th></tr></thead>
+      <tbody>
+        <tr><td><b>Qwen2.5</b></td><td>0.5 / 1.5 / 3 / 7B</td><td>中文强、生态全、GQA + RoPE</td><td><b>好</b>（RKNN 有官方示例）</td><td>Apache-2.0</td></tr>
+        <tr><td><b>MiniCPM</b></td><td>2.4B / 4B</td><td>小尺寸强、端侧导向、多模态版</td><td><b>好</b></td><td>开源（部分需授权）</td></tr>
+        <tr><td><b>Phi-3.5-mini</b></td><td>3.8B</td><td>微软、小模型推理能力突出</td><td>中</td><td>MIT</td></tr>
+        <tr><td><b>Gemma-2</b></td><td>2B / 9B</td><td>Google、质量高、GQA</td><td>中</td><td>Gemma 许可</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">端侧选型口诀（按任务挑规模）</span>
+
+  意图识别 / 分类 / 短语槽位   → <span class="g">0.5B ~ 1.5B</span>（int8 即可）
+  简单对话 / 摘要 / RAG 生成    → <span class="g">1.5B ~ 3B</span>（int8 或 int4）
+  复杂推理 / 代码              → 大概率走云端，端侧只兜底
+
+<span class="k">首选 Qwen2.5-1.5B/3B</span>：中文好、GQA、RKNN 官方示例齐全，
+落地风险最低（这是"能用现成的就别自己造"的工程选择）。</div>
+    <div class="callout">记忆锚点：<b>端侧选型 = 任务复杂度 → 规模 → 量化 → 生态支持</b>。前两步看需求，后两步看板子，最后一步看"有没有现成的 RKNN 示例"。</div>
+
+    <p><b>板书填空 · FFN 参数量，先自己填再展开：</b>设 d = 3072，层数 L = 28。</p>
+    <table class="tight">
+      <thead><tr><th>项目</th><th>公式</th><th>单层参数量</th><th>全模型</th></tr></thead>
+      <tbody>
+        <tr><td>单层 FFN</td><td class="fill">8d² = ?</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案</summary>
+      <p>8d² = 8 × 3072² = 8 × 9,437,184 = <b>75.5M</b> 参数/层；× 28 层 ≈ <b>2.11B</b>。</p>
+      <p>也就是说：一个"3B 级"模型，光 FFN 就可能占 2B 以上——这正是"FFN 是知识仓库"的数字证据。</p>
+    </details>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>FFN 参数量手算笔记</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书①整理成笔记：FFN 结构、参数量公式、在总参数中的占比。</dd>
+      <dt>要掌握</dt><dd>8d² 公式；FFN 为什么是"知识存储"；FFN vs 注意力的参数对比。</dd>
+      <dt>实操步骤</dt><dd>写 <code>ffn_params.md</code>：① d→4d→d 结构与 8d² 推导（一句）；② 用 d=2048/L=36 手算单层与全模型；③ 一句话解释"为什么模型越大越博学"。</dd>
+      <dt>检验标准</dt><dd>能当场算出任意 d、任意层数的 FFN 参数量，并说出它占总参数约 2/3。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>MoE 笔记</h3></div>
+    <dl>
+      <dt>目标</dt><dd>写清 MoE 的原理、参数量拆解、以及端侧不适用的四个理由。</dd>
+      <dt>要掌握</dt><dd>总参数 vs 激活参数；稀疏激活；batch=1 时为什么不省时间。</dd>
+      <dt>实操步骤</dt><dd>写 <code>moe_notes.md</code>：① 用 Mixtral 8×7B 和 DeepSeek-V3 举例算总/激活参数；② 列四个端侧硬伤；③ 一句话结论"MoE 是云端方案"。</dd>
+      <dt>检验标准</dt><dd>能讲清"MoE 省算力但不省带宽"，并说明端侧单用户为什么没收益。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>架构趋势笔记</h3></div>
+    <dl>
+      <dt>目标</dt><dd>梳理 Transformer / SSM(Mamba) / 混合三条路线。</dd>
+      <dt>要掌握</dt><dd>三者复杂度、内存、长文本、召回、NPU 成熟度差异。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_trends.md</code>：① 三范式对比表；② SSM 的一句话原理（h_t = A·h_{t-1} + B·x_t）；③ 混合架构举例；④ 端侧该怎么选。</dd>
+      <dt>检验标准</dt><dd>能说出"SSM 常数内存很香，但 NPU 支持不成熟，端侧暂时还是 Transformer+GQA"。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>架构对比表 + 端侧判断</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把上午的趋势笔记变成一张能直接用于决策的对比表。</dd>
+      <dt>要掌握</dt><dd>用"场景 → 架构"的映射做判断，而不是罗列名词。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_compare.md</code>：6 列对比表（Transformer / SSM / 混合）+ 每个给一句"端侧适用性"结论。</dd>
+      <dt>检验标准</dt><dd>别人拿这张表，能直接决定"这个项目用 Transformer+GQA"。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>端侧主流模型盘点表</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书⑤扩成你自己的模型清单。</dd>
+      <dt>要掌握</dt><dd>各模型规模、特点、端侧适配、许可；不同任务该挑多大。</dd>
+      <dt>实操步骤</dt><dd>写 <code>model_inventory.md</code>：模型清单表（可加 Roboflow 之外你关注的模型）+ "任务复杂度 → 规模"的推荐口诀。</dd>
+      <dt>检验标准</dt><dd>给你一个端侧任务，你能 30 秒报出"用哪个模型、多大、什么量化"。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>场景架构推荐（一页）+ 秒答</h3></div>
+    <dl>
+      <dt>目标</dt><dd>综合本章，给一个真实端侧场景写推荐架构——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把架构方向、模型、量化、理由串成一段决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_recommend.md</code>（一页）：场景设定（如"离线智能音箱，1.5B 意图识别 + 简单对话"）→ 架构（Transformer+GQA）→ 模型（Qwen2.5-1.5B/3B）→ 量化（RKNN int8/int4）→ 为什么不用 MoE / SSM → 风险。</dd>
+      <dt>检验标准</dt><dd>30 秒内把理由讲完，且每条都有数据或机制支撑。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>ffn_params.md</code> —— FFN 结构与参数量手算笔记。</li>
+    <li><code>moe_notes.md</code> —— MoE 原理 + 端侧四硬伤笔记（核心产出）。</li>
+    <li><code>arch_trends.md</code> —— Transformer / SSM / 混合趋势笔记（核心产出）。</li>
+    <li><code>arch_compare.md</code> —— 架构对比表与端侧判断。</li>
+    <li><code>model_inventory.md</code> —— 端侧主流模型盘点表。</li>
+    <li><code>arch_recommend.md</code> —— 场景架构推荐（一页，核心产出）。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>说出 FFN 参数量公式 8d²，并知道它约占总参数 2/3（知识存储）。</li>
+    <li>说清 MoE 的总参数 vs 激活参数，以及"省算力不省内存/带宽"。</li>
+    <li>说清端侧不用 MoE 的四个理由（内存、batch=1 不省时间、调度、随机访存）。</li>
+    <li>对比 Transformer / SSM / 混合，并给出端侧选择。</li>
+    <li>给一个端侧场景，能推荐架构方向 + 模型 + 量化。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「Transformer 层里参数大头是 FFN，结构是 d→4d→d，参数量 8d²，占整个模型约三分之二，它的作用是知识存储——注意力负责搬运信息、FFN 负责把知识写进权重。MoE 是把单个 FFN 换成多个专家、每个 token 只激活 top-k，比如 Mixtral 总参数 47B、激活 13B。但 MoE 在端侧基本不用：一是总参数量大、内存装不下；二是 decode 阶段瓶颈是带宽不是算力，MoE 只省算力、不省带宽，单用户 batch=1 几乎没收益，只有云端大 batch 才划算；三是路由和动态 shape 对 NPU 不友好，还会带来随机访存。架构趋势上，现在有 Transformer、SSM/Mamba 和混合三条路线，SSM 是常数内存、长文本好但精确召回弱、NPU 支持也不成熟；所以端侧我目前选 Transformer + GQA，模型优先用 Qwen2.5-1.5B/3B，生态和 RKNN 支持最稳。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能判断架构方向与模型选型、讲清 MoE 的端侧取舍——架构趋势能力。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li>3576 内存上限 16GB，<strong>MoE 模型（如 Mixtral 47B）根本装不下</strong>，架构评审时直接排除。</li>
+      <li>端侧 decode 是<strong>带宽瓶颈</strong>，MoE 的稀疏优势在 batch=1 场景吃不到，别被"省算力"忽悠。</li>
+      <li>选模型优先看<strong>是否 GQA + 是否有 RKNN 官方示例</strong>（Qwen2.5 / MiniCPM 最省心）。</li>
+      <li>SSM/混合架构作为长上下文储备观察，但落地前先确认 NPU 算子支持，别踩"跑不起来"的坑。</li>
+    </ul>
+  </div>
+
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>

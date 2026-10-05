@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 9 章 · 模型转换与量化部署（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">第 1 章</a>
+    <a href="ch02.html">第 2 章</a>
+    <a href="ch03.html">第 3 章</a>
+    <a href="ch04.html">第 4 章</a>
+    <a href="ch05.html">第 5 章</a>
+    <a href="ch06.html">第 6 章</a>
+    <a href="ch07.html">第 7 章</a>
+    <a href="ch08.html">第 8 章</a>
+    <a href="ch09.html" class="active">第 9 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 9 章：模型转换与量化部署</h1>
+  <p class="lead"><strong>章节目标：</strong>把「会算」变成「会落地」——用 <b>rknn-toolkit2</b> 把 3B 模型转成 NPU 能吃的 <code>.rknn</code>，做完校准、量化、精度对比，最后能拍板回答面试官那句：<span class="key">「这个量化方案能不能上线？」</span></p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch09-quant-deploy</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把整条转换流水线和量化配置看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的配置表 / PPL 手算 / 带宽利用率自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真跑一遍转换与量化，出报告。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>第 1~2 章你在纸上算：模型多大、用哪种量化、多少 tok/s。但架构师不能只会算，还得<b>真的把模型塞进 NPU</b>。这一步 90% 的人会翻车——不是报错就是精度崩，原因几乎都出在<b>校准集和量化配置</b>上。</p>
+    <div class="callout"><strong>你要能三件事：</strong>① 说清整条转换流水线每一步在干嘛；② 用一份配置把模型转出来并跑通；③ 量化前后精度差多少、<span class="key">差到什么程度就不能上线</span>。</div>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：整条流水线（HF → ONNX → RKNN → .rknn）</h3>
+    <p>NPU 不认识 PyTorch，只认识瑞芯微自己的 <b>.rknn</b>。所以中间要有「翻译」：先把 PyTorch 换成通用格式 ONNX，再由 rknn-toolkit2 编译成 .rknn。</p>
+    <div class="board"><span class="k">端侧 LLM 转换流水线（四段）</span>
+
+① 原始权重    HuggingFace  /  PyTorch  (.safetensors)
+        │     取到模型 + tokenizer
+        ▼
+② 转换准备    ONNX 导出 / 直接喂 rkllm 的权重转换脚本
+        │     小模型走 onnx → rknn-toolkit2
+        │     LLM 走 rknn-llm（rkllm）一键转换
+        ▼
+③ 量化 + 编译  <span class="g">rknn-toolkit2</span> / rkllm
+        │     <span class="g">build(do_quantization=True, dataset=校准集)</span>
+        ▼
+④ 产物        <span class="k">.rknn</span>  （NPU 直接加载，与硬件绑定）
+
+<span class="k">关键：.rknn 是"过编译"的</span>——它针对目标平台（rk3576）
+做过算子映射和量化，换个平台要在新平台重转。
+所以 <span class="r">target_platform 一定要写对</span>。</div>
+    <p>两条路线怎么选：小模型/ViT 走 <b>onnx + rknn-toolkit2</b>；LLM 走 <b>rknn-llm（rkllm）</b>，它内部封装了量化与权重打包，一条命令出 .rkllm。</p>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：量化配置三件套</h3>
+    <p>PTQ（训练后量化）能不能成，就看这三个参数。少一个都跑不起来，配错任何一个精度就崩。</p>
+    <div class="board"><span class="k">三件套 —— 缺一不可</span>
+
+① dataset（校准集）     <span class="r">必须给，且要真实</span>
+     作用：让量化器"看"一遍真实输入，统计每个张量的动态范围
+     形态：rknn-toolkit2 用小样本 bin/npy；
+           rkllm 用一段真实 prompt 文本
+
+② quantized_dtype（量化类型）
+     告诉编译器：权重几位、激活几位
+     <span class="g">w8a8</span>  权重 8 / 激活 8   → 最稳，3576 首选
+     <span class="g">w8a16</span> 权重 8 / 激活 16  → 精度更高，慢一些
+     <span class="g">w4a16</span> 权重 4 / 激活 16  → LLM 端侧主流，省内存
+
+③ quantized_algorithm（量化算法）
+     normal         最直接（max 定标），快、够用
+     mmse           最小化量化误差，慢一点、精度更好
+     kl_divergence  分布对齐，对激活敏感场景好
+
+<span class="k">一句话：dtype 决定"多省"，algorithm 决定"多准"。</span></div>
+    <div class="board"><span class="k">rkllm 转换配置示例（config.json）</span>
+{
+  "target_platform": "rk3576",
+  "model_path": "Qwen2.5-3B-Instruct",
+  "quantized_dtype": "w4a16",       <span class="g">// 权重 4 位，激活 16 位</span>
+  "quantized_algorithm": "normal",
+  "num_npu_core": 1,
+  "group_size": 128
+}
+
+<span class="k">rknn-toolkit2（小模型）等价写法</span>
+rknn.config(quantized_dtype='w8a8',
+            quantized_algorithm='mmse',
+            optimization_level=3)
+rknn.build(do_quantization=True, dataset='dataset.txt')</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：校准集怎么做（决定成败）</h3>
+    <p>量化的本质是「给每个张量找一把尺子」。尺子的量程由校准数据决定——<b>你喂什么，它就以为世界长什么样</b>。喂错，线上就崩。</p>
+    <div class="board"><span class="k">校准集三条军规</span>
+
+① 要真实   用产品里真实的输入分布。
+           聊天模型 → 用真实用户问答；别用随机噪声。
+           <span class="r">用随机数据校准 = 上线后精度崩的头号原因</span>
+
+② 要够量   LLM：<span class="g">100 ~ 500 条</span>代表性 prompt；
+           视觉小模型：<span class="g">100 ~ 500 张</span>真实图片。
+           太少 → 统计不稳；太多 → 转换慢，收益递减。
+
+③ 要覆盖   长度覆盖短/中/长（如 64 / 512 / 2048 tok）；
+           内容覆盖你的真实任务（客服/翻译/代码都要有样本）。
+
+<span class="k">dataset.txt 长这样（每行一条样本文件路径）</span>
+calib/sample_000.bin
+calib/sample_001.bin
+...
+（LLM 路线则直接给一个 prompts.txt，每行一句真实问题）</div>
+    <div class="callout"><strong>面试加分点：</strong>「校准集不是随便凑几百条，要匹配线上输入分布，长短和任务类型都覆盖，否则 outlier 会把某些层 scale 撑大、整层精度塌。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：量化前后精度怎么比（PPL + 人肉）</h3>
+    <p>架构师不看「感觉变笨了」，要看<b>数字</b>。语言模型最通用的是<b>困惑度 PPL</b>：模型对下一 token 有多「困惑」，越低越好。</p>
+    <div class="formula">PPL = exp( −(1/N) · Σ ln p(wᵢ) )</div>
+    <p>先看手算，再套到量化对比上：</p>
+    <div class="board"><span class="k">手算：5 个 token 的概率 p = [0.8, 0.6, 0.9, 0.5, 0.7]</span>
+
+ln p = [-0.2231, -0.5108, -0.1054, -0.6931, -0.3567]
+Σ ln p = -1.8891
+平均负对数似然 = 1.8891 / 5 = <span class="g">0.3778</span>
+PPL = exp(0.3778) = <span class="g">1.459</span>
+
+<span class="k">量化后同位置概率变成 p' = [0.7, 0.5, 0.8, 0.4, 0.6]</span>
+Σ ln p' = -2.7001 → 平均 = 0.5400
+PPL' = exp(0.5400) = <span class="r">1.716</span>
+
+ΔPPL = 1.716 − 1.459 = 0.257  →  相对 <span class="r">+17.6%</span>
+
+<span class="k">经验判据（语言模型）：
+  PPL 涨幅 &lt; 5%    → 放心上线
+  5% ~ 10%         → 抽样人肉看，多半可接受
+  &gt; 10%           → 危险，换 w8a16 或调校准集</span></div>
+    <p><b>人肉对比（PPL 之外的必做项）：</b>固定 20 个真实问题，原始模型和量化模型各答一遍，记录「是否跑题 / 是否重复 / 是否截断 / 是否答对」。表格存档，这是给产品经理看的东西。</p>
+    <div class="board"><span class="k">人肉对比记录表（模板）</span>
+#  | 问题        | 原始质量(1-5) | 量化质量(1-5) | 现象
+---|-------------|--------------|--------------|----------------
+ 1 | 北京天气？    |      5       |      5       | 一致
+ 2 | 算 17×23     |      5       |      3       | 量化后算错
+ 3 | 写首五言诗    |      4       |      4       | 少一句
+...
+<span class="k">统计：平均分差 &gt; 0.5 或出现"事实错误"≥2 条 → 不能上线。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：三个调优旋钮 + 带宽利用率</h3>
+    <p>精度/速度不达标时，按下面顺序调。别瞎改，一次动一个变量。</p>
+    <div class="board"><span class="k">旋钮一览（按性价比排序）</span>
+
+① group_size（int4 专用）  常见 32 / 64 / <span class="g">128</span>
+     小 → 组内更精细、精度更高，但 scale 开销↑
+     128 是默认甜点（回顾第 2 章：开销仅 ~3%）
+
+② 校准数据   换更贴近线上、覆盖更全的样本
+     <span class="g">性价比最高的一招</span>，往往比调算法管用
+
+③ NPU 核心数 num_npu_core
+     3576 是<span class="r">单核 6 TOPS</span>（3588 才三核）；
+     3576 上固定 1，调它没意义；迁 3588 时才有 1/2/3 可选
+
+<span class="k">带宽利用率（判断跑没跑满的关键指标）</span>
+  decode 实测 8 tok/s，模型 int4 3B ≈ 2.0 GB
+  有效带宽 = 8 × 2.0 = 16 GB/s
+  利用率   = 16 / 35 = <span class="g">45.7%</span>
+  <span class="k">→ &lt; 60% 说明没跑满，还有调优空间（batch/算子）</span></div>
+    <div class="callout"><strong>一句话记住：</strong><span class="key">带宽利用率 = tok/s × 模型真实GB ÷ 35</span>。它是判断「瓶颈在带宽还是在别处」的尺子，比单纯看 tok/s 有用得多。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：上线判断（本章结论）</h3>
+    <div class="board"><span class="k">能不能上线？三关过完才敢点头</span>
+
+① 精度关   PPL 涨幅 &lt;5% 且人肉对比无事实错误
+② 性能关   tok/s 达产品延迟目标（如 &gt; 8 tok/s）
+           且带宽利用率 ≥ 60%（说明已榨干带宽）
+③ 稳定关   连续对话 30 分钟不 OOM、不崩、显存/内存平稳
+
+三关全过 → <span class="g">可以上线</span>
+任一不过 → <span class="r">回退方案：w4a16 → w8a16，或换校准集重转</span>
+
+<span class="k">被问「这个量化方案能不能上线」→ 标准答：</span>
+「我按三关判：PPL 涨幅、人肉对比、带宽利用率与稳定性。
+3B w4a16 若 PPL 涨幅 &lt;5%、实测 &gt;8 tok/s、利用率 ≥60%、长跑不 OOM、
+人肉无事实错误——就上线；否则退 w8a16 或补校准集重转。」</div>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手真跑一遍。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>转换流水线笔记 + 环境搭建</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书①整理成一张流水线图，并装好 rknn-toolkit2 / rkllm 环境。</dd>
+      <dt>要掌握</dt><dd>HF→ONNX→RKNN→.rknn 每步作用；LLM 走 rkllm、小模型走 toolkit2 的分工。</dd>
+      <dt>实操步骤</dt><dd>写 <code>pipeline.md</code>：四段流水线图 + 每步命令。装环境：<code>pip install rknn-toolkit2 rknn-toolkit-lite2</code>；<code>python -c "from rknn.api import RKNN; print(RKNN())"</code> 验证。</dd>
+      <dt>检验标准</dt><dd>能白板画出四段流程，并说清为什么 .rknn 与平台绑定。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>准备校准集（核心前置）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书③做一份真正匹配线上分布的校准集。</dd>
+      <dt>要掌握</dt><dd>校准集三条军规；为什么不能随机数据；dataset.txt 格式。</dd>
+      <dt>实操步骤</dt><dd>收集 <code>200 条</code>真实 prompt（长短各覆盖）写入 <code>calib/prompts.txt</code>；小模型路线另备 <code>calib/*.bin</code> 并生成 <code>dataset.txt</code>。</dd>
+      <dt>检验标准</dt><dd>校准集长度覆盖短/中/长三档，任务类型 ≥3 类，附一句「为什么不随机」。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>量化配置三件套对比表</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书②扩成 w8a8 / w8a16 / w4a16 三档对比。</dd>
+      <dt>要掌握</dt><dd>dtype 三层含义；algorithm 三种差异；各自适用场景。</dd>
+      <dt>实操步骤</dt><dd>写 <code>quant_config.md</code>：dtype 对比表（位宽/体积/精度/速度/适用）+ algorithm 三行说明 + 你的默认配置结论。</dd>
+      <dt>检验标准</dt><dd>能说清「dtype 决定多省、algorithm 决定多准」，并给出 3576 默认 w4a16 的理由。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>真跑一次转换 + 量化（核心实操）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用 <code>config.json</code> 把 3B 模型转成 <code>.rkllm</code>/.rknn 并成功加载。</dd>
+      <dt>要掌握</dt><dd>do_quantization=True + dataset 的实际调用；build 日志怎么看。</dd>
+      <dt>实操步骤</dt><dd>写 <code>build.sh</code> / <code>build_rknn.py</code>，跑 <code>--target_platform rk3576 --quantized_dtype w4a16</code>；记录 build 日志中的每层量化耗时/告警，存入 <code>build_log.txt</code>。</dd>
+      <dt>检验标准</dt><dd>产出可加载的模型文件，能指着日志说出哪些算子出现了量化告警。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>量化前后精度对比（PPL + 人肉）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用 PPL 和 20 题人肉对比，量化前后各跑一遍。</dd>
+      <dt>要掌握</dt><dd>PPL 公式与手算；PPL 涨幅判据（&lt;5% / 5-10% / &gt;10%）；人肉记录表。</dd>
+      <dt>实操步骤</dt><dd>写 <code>ppl_eval.py</code> 在固定测试集上算 PPL（原始 vs 量化），输出 <code>ppl_compare.md</code>；再填 <code>human_eval.md</code>（20 题，两列打分 + 现象）。</dd>
+      <dt>检验标准</dt><dd>给出 PPL 涨幅百分比 + 人肉平均分差，并套判据下结论。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>《端侧量化部署报告》（本章核心产出）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>综合所有产出，给一个「能不能上线」的明确结论——一页纸。</dd>
+      <dt>要掌握</dt><dd>把流水线 + 配置 + 校准集 + 精度 + 带宽利用率串成一个决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>quant_deploy_report.md</code>（一页）：①模型与配置 ②校准集说明 ③精度对比(PPL/人肉) ④带宽利用率 ⑤上线判断与回退方案。</dd>
+      <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做并复现结论——架构文档标准。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>pipeline.md</code> —— 四段转换流水线图 + 每步命令。</li>
+    <li><code>calib/prompts.txt</code> —— 200 条真实校准 prompt（覆盖长短与任务类型）。</li>
+    <li><code>quant_config.md</code> —— w8a8 / w8a16 / w4a16 三档配置对比与默认结论。</li>
+    <li><code>build.sh</code> / <code>build_rknn.py</code> + <code>build_log.txt</code> —— 真实转换脚本与日志。</li>
+    <li><code>ppl_eval.py</code> + <code>ppl_compare.md</code> + <code>human_eval.md</code> —— 量化前后精度对比。</li>
+    <li><code>quant_deploy_report.md</code> —— 端侧量化部署报告（一页，核心产出）。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>能说清「量化配置三件套」分别是什么、少哪个会怎样。</li>
+    <li>能解释「为什么校准集不能用随机数据」。</li>
+    <li>会用 <span class="key">PPL 涨幅 &lt;5% / 5-10% / &gt;10%</span> 判据给精度下结论。</li>
+    <li>会算带宽利用率（tok/s × 模型GB ÷ 35），并判断是否跑满。</li>
+    <li>给「这个量化方案能不能上线」能按「精度关 / 性能关 / 稳定关」三关作答。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「端侧量化部署我走 rknn-toolkit2 / rkllm：先导出权重，再给一份匹配线上分布的校准集做 PTQ，量化配置三件套是 dataset、quantized_dtype、quantized_algorithm——dtype 决定多省、algorithm 决定多准，3576 上我默认 w4a16 + normal，group_size 128。转完我会量化前后对比：算 PPL，涨幅控制在 5% 以内，再做一轮 20 题人肉对比确认没有事实错误；性能上看带宽利用率，tok/s 乘模型大小除以 35GB/s，到 60% 以上才算榨干带宽。三关都过我才判断可以上线，否则回退 w8a16 或换校准集重转。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能把模型真正转成端侧可用产物，并用数字判断量化方案是否可上线——端侧量化部署能力。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li>RK3576 的 NPU 是 <strong>单核 6 TOPS</strong>，<code>num_npu_core</code> 固定为 1；「试核心数」是 RK3588 三核才有的玩法，3576 上调它没意义。</li>
+      <li>3576 以 <strong>int8 定点加速为主</strong>，<code>w4a16</code> 多为 int8 模拟或部分算子支持——转完务必实测 tok/s 和精度，别想当然。</li>
+      <li>LLM 走 <strong>rknn-llm（rkllm）</strong> 一键转换，比手搓 ONNX 稳；小模型/ViT 才用 rknn-toolkit2。</li>
+      <li><code>target_platform</code> 必须写 <code>rk3576</code>；换板子要重转，产物不通用。</li>
+    </ul>
+  </div>
+
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>

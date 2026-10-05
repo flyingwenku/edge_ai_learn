@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 5 章 · Transformer 结构与参数量（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">第 1 章</a>
+    <a href="ch02.html">第 2 章</a>
+    <a href="ch03.html">第 3 章</a>
+    <a href="ch04.html">第 4 章</a>
+    <a href="ch05.html" class="active">第 5 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 5 章：Transformer 结构与参数量</h1>
+  <p class="lead"><strong>章节目标：</strong>打开 <code>config.json</code> 就能把参数量算出来——<b>拿到 Qwen2.5-3B 的配置文件，5 分钟内手算出 3.09B，并说清每一份权重从哪来</b>。</p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch05-params</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把每个矩阵的参数量算法看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量空表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写计算器、出验证报告。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>前两章都在「用」模型，这一章要「看穿」模型。面试官常丢给你一个 <code>config.json</code> 问「这模型多少参数、内存多少」——你要是能当场手算，身价立刻不一样。定位是<b>架构师不是研究员</b>：公式只讲物理含义，不推导，全部落到可手算的数字。</p>
+    <div class="callout"><strong>一句话记住：</strong>参数量 = 所有「有数值可训练」的矩阵元素总数；看懂 config 就能算，不需要读论文。</div>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：Transformer 一层长什么样</h3>
+    <p>不管多花哨的模型，一个解码层就是<b>两个子块 + 两条残差</b>。先把结构记牢。</p>
+    <div class="board"><span class="k">一个 Transformer 解码层：</span>
+
+  ┌─ ① 注意力块 ─────────────────────────
+  │   LayerNorm → Q/K/V/O 四个投影 → 残差相加
+  └────────────────────────────────────
+
+  ┌─ ② FFN 前馈块 ───────────────────────
+  │   LayerNorm → 上投影 → 激活 → 下投影 → 残差相加
+  └────────────────────────────────────
+
+<span class="k">两个配角（参数极少，先记住作用）：</span>
+  残差 residual：把输入原样加回来，防止深层网络梯度消失
+  LayerNorm  ：逐 token 归一化，每层 2 个，参数量 ≈ 2×hidden
+
+<span class="k">参数大户只有两处：</span>
+  注意力里的 <span class="g">Q/K/V/O 投影</span>　＋　FFN 里的 <span class="g">上/下投影矩阵</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：每个权重矩阵的参数量算法</h3>
+    <p>一个权重矩阵的参数量 = <b>输入维 × 输出维</b>。就这么简单，剩下的是套结构。</p>
+    <div class="formula">矩阵参数量 = 输入维度 × 输出维度</div>
+    <div class="board"><span class="k">先定义符号（背下来）：</span>
+  h = hidden_size          隐藏维（模型主宽度）
+  L = num_hidden_layers    层数
+  I = intermediate_size    FFN 中间维
+  V = vocab_size           词表大小
+  a = num_attention_heads  Q 头数
+  k = num_key_value_heads  KV 头数
+  d = head_dim = h / a     每个头的维度
+
+<span class="k">每层注意力（四个投影）：</span>
+  Q 投影: h × (a·d) = h×h     → <span class="g">h²</span>
+  K 投影: h × (k·d)            → <span class="g">h·k·d</span>
+  V 投影: h × (k·d)            → <span class="g">h·k·d</span>
+  O 投影: (a·d) × h = h×h     → <span class="g">h²</span>
+  合计 ≈ <span class="k">2h² + 2h·k·d</span>　（GQA 时 k 小，K/V 项就小）
+
+<span class="k">每层 FFN（SwiGLU，共 3 个矩阵）：</span>
+  gate: h × I   up: h × I   down: I × h
+  合计 = <span class="k">3·h·I</span>
+
+<span class="k">每层小计 ≈ 2h² + 2h·k·d + 3h·I</span>（忽略 LayerNorm，占比 &lt;0.01%）</div>
+    <div class="callout"><strong>注意点：</strong>GQA 让 K/V 的输入维变成 <code>k·d</code> 而不是 <code>h</code>，所以 K/V 矩阵比 Q/O 小很多——这是省参数的关键。</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：打开 Qwen2.5-3B config.json 手算</h3>
+    <p>现在把真实数字代进去。先把关键字段抄出来，再一层层算。</p>
+    <div class="board"><span class="k">Qwen2.5-3B config.json 关键字段：</span>
+  hidden_size            = <span class="g">2048</span>
+  num_hidden_layers      = <span class="g">36</span>
+  intermediate_size      = <span class="g">11008</span>
+  vocab_size             = <span class="g">151936</span>
+  num_attention_heads    = <span class="g">16</span>
+  num_key_value_heads    = <span class="g">2</span>
+  tie_word_embeddings    = <span class="g">true</span>
+
+  推导：head_dim d = h / a = 2048 / 16 = <span class="g">128</span>
+
+<span class="k">代入每层公式 2h² + 2h·k·d + 3h·I：</span>
+  2h²    = 2 × 2048²        = 2 × 4,194,304  = <span class="g">8,388,608</span>
+  2h·k·d = 2 × 2048 × 2 × 128 = 2 × 524,288  = <span class="g">1,048,576</span>
+  3h·I   = 3 × 2048 × 11008 = 3 × 22,544,384 = <span class="g">67,633,152</span>
+  每层 ≈ 8,388,608 + 1,048,576 + 67,633,152
+       = <span class="g">77,070,336 ≈ 77.07 M</span>
+
+<span class="k">36 层合计：</span>
+  77.07 M × 36 = <span class="g">2,774.5 M ≈ 2.77 B</span>
+
+<span class="k">加 Embedding（V × h）：</span>
+  151936 × 2048 = <span class="g">311.2 M</span>
+  （tie=true → 只算一次，输出层复用）
+
+<span class="k">总计 ≈ 2.77 B + 0.31 B = 3.086 B ≈ 3.09 B</span> ✅
+  官方 3.09B — 对上了！</div>
+    <div class="callout"><strong>看穿模型：</strong>FFN 占了大头（每层约 67.6M，占总参数约 79%）——所以优化模型体积，FFN 才是主战场。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：Embedding 到底算不算？权重共享是什么</h3>
+    <p>这是最容易被问倒的细节，讲清楚就能显专业。</p>
+    <div class="board"><span class="k">Embedding 计不计入参数量？</span>
+  它是真实存在的权重 V × h（151936 × 2048 = 311 M），
+  <span class="g">当然算进「总参数量」</span>。
+  但有些端侧报告只关心「推理时反复读的 transformer 权重」，
+  会把 embedding 单列 —— <span class="k">说清口径就行，别被绕晕</span>。
+
+<span class="k">输出层 lm_head 与权重共享（tie embeddings）：</span>
+  模型最后要一个 V × h 的矩阵把隐藏态映射到词表分数。
+  小模型常让 lm_head <span class="g">直接复用 embedding 矩阵</span>（tie）。
+  Qwen2.5 config 里 <span class="g">tie_word_embeddings = true</span> → 只算一次。
+  若为 false，则要 <span class="r">额外 + 一份 V×h</span>（多 311 M）。
+
+<span class="k">LayerNorm 参数：</span>
+  每层 2 个 × 各 2×h（weight+bias）→ 本模型每层 8192，
+  36 层 ≈ 0.29 M，占总量 &lt;0.01%，<span class="k">手算可直接忽略</span>。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：参数量 → 内存（接回第 1、2 章）</h3>
+    <p>算出参数量只是开始，架构师要立刻换算成内存。乘位宽、除 8。</p>
+    <div class="board"><span class="k">参数量 → 权重内存 = 参数量 × 每参数字节数</span>
+  全 fp16：3.086 B × 2 B = <span class="g">6.17 GB</span>
+  int8   ：3.086 B × 1 B = <span class="g">3.09 GB</span>
+  int4   ：3.086 B × 0.5 B = <span class="g">1.54 GB</span>
+            + scale 开销（约 3%） → 实际 <span class="g">≈ 1.6 GB</span>
+
+<span class="k">这就是第 1 章「3B int4 ≈ 2GB」的来源：</span>
+  参数 1.54 GB + 量化开销 + 运行时缓冲 → 约 2 GB（保守口径）。
+
+<span class="k">再接第 4 章：</span>
+  权重 1.6 GB + KV Cache（8K ≈ 288 MB） → 端侧常驻内存模型。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：5 分钟手算口诀</h3>
+    <div class="board"><span class="k">五步走（背下来，面试现场就能算）：</span>
+
+  1) 抄 6 个数：h, L, I, V, a, k
+  2) 算 head_dim  d = h / a
+  3) 每层 = 2h² + 2h·k·d + 3h·I
+  4) 总权重 = 每层 × L
+  5) 加 embedding：tie 则 +V·h 一次，否则 +2×(V·h)
+
+<span class="k">Qwen2.5-3B 复算：</span>
+  d = 2048/16 = 128
+  每层 ≈ 77.07 M → ×36 = 2.77 B → +0.31 B = <span class="g">≈ 3.09 B</span>
+
+<span class="k">不同口径要报清楚：</span>「transformer 权重 2.77B，含 embedding 3.09B」。</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书填空：参数量拆解空表</h3>
+    <p>填出 Qwen2.5-3B 每层的三项（用 h=2048, k=2, d=128, I=11008），再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>项目</th><th>公式</th><th>参数量</th></tr></thead>
+      <tbody>
+        <tr><td>注意力 Q/O（2h²）</td><td>2 × h²</td><td class="fill">?</td></tr>
+        <tr><td>注意力 K/V（2h·k·d）</td><td>2 × h × k × d</td><td class="fill">?</td></tr>
+        <tr><td>FFN（3h·I）</td><td>3 × h × I</td><td class="fill">?</td></tr>
+        <tr><td>每层合计</td><td>三项相加</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案</summary>
+      <div class="board">Q/O：2 × 2048² = <span class="g">8,388,608</span>
+K/V：2 × 2048 × 2 × 128 = <span class="g">1,048,576</span>
+FFN：3 × 2048 × 11008 = <span class="g">67,633,152</span>
+每层合计 = 8,388,608 + 1,048,576 + 67,633,152
+        = <span class="g">77,070,336 ≈ 77.07 M</span>
+
+<span class="k">× 36 层 = 2.77 B；+ embedding 0.31 B = 3.09 B</span>
+FFN 占比 ≈ 67.63 / 77.07 ≈ <span class="g">88%</span>（每层内）。</div>
+    </details>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>逐矩阵参数量手算表</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书②的公式整理成一张「每个权重矩阵 → 参数量」的对照表。</dd>
+      <dt>要掌握</dt><dd>Q/K/V/O 四个投影、FFN 三个矩阵、Embedding 的算法与符号定义。</dd>
+      <dt>实操步骤</dt><dd>写 <code>param_math.md</code>：矩阵清单表（名称 / 形状 / 参数量公式 / 说明），并把 Qwen2.5-3B 的数字代入填满。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能默写「每层 = 2h² + 2h·k·d + 3h·I」并解释每一项。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>参数量计算器（核心实操）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>写一个读 <code>config.json</code> 就算总参数量的脚本。</dd>
+      <dt>要掌握</dt><dd>从 config 字段推导 head_dim；区分「transformer 权重」与「含 embedding」两个口径；处理 tie_word_embeddings。</dd>
+      <dt>实操步骤</dt><dd>写 <code>param_calc.py</code>：函数 <code>count_params(cfg)</code>，读入 Qwen2.5-3B config，分层打印（每层注意力 / FFN / 总计 / embedding），并与手算表对照。</dd>
+      <dt>检验标准</dt><dd>脚本输出总参数量 ≈ 3.09 B，与官方一致。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>Qwen2.5-3B 手算验证</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用纸笔完整复算一遍 3.09 B，作为对照基准。</dd>
+      <dt>要掌握</dt><dd>手算与脚本结果的一致性；为什么忽略 LayerNorm。</dd>
+      <dt>实操步骤</dt><dd>写 <code>qwen3b_calc.md</code>：逐步手算过程（抄字段 → 算 d → 每层 → ×36 → +embedding），最后与脚本输出并排对照。</dd>
+      <dt>检验标准</dt><dd>手算与脚本结果误差 &lt; 1%，能解释剩下的 0.3 M 是 LayerNorm。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>拆一层看结构图</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把一个解码层的张量流画清楚：输入 → LayerNorm → Q/K/V/O → 残差 → LayerNorm → FFN → 残差。</dd>
+      <dt>要掌握</dt><dd>每步张量形状的变化；参数量集中在哪几处。</dd>
+      <dt>实操步骤</dt><dd>写 <code>layer_breakdown.md</code>：文字框图/箭头图，标注每步形状（如 [hidden] → [a·d]）与对应矩阵参数量。</dd>
+      <dt>检验标准</dt><dd>能对着图讲 3 分钟，说清「参数量为什么 88% 在 FFN」。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>《参数量验证报告》（一页）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>综合本章产出，写一份可交付的验证报告——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把「config 字段 + 手算 + 脚本 + 内存换算」串成结论。</dd>
+      <dt>实操步骤</dt><dd>写 <code>param_verify.md</code>（一页）：①模型与 config 字段 ②手算结论（2.77B / 3.09B 两个口径）③脚本验证 ④内存换算（fp16/int8/int4）⑤风险（tie、口径歧义）。</dd>
+      <dt>检验标准</dt><dd>别人拿这页，不用问你就能复现 3.09B 并换算出内存。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
+      <dt>实操步骤</dt><dd>自问自答：每层参数量公式是什么？Qwen2.5-3B 多少参数？embedding 算不算？tie 是什么？3.09B fp16/int8/int4 各多少 GB？</dd>
+      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>param_math.md</code> —— 逐矩阵参数量手算表（公式 + Qwen2.5-3B 代入）。</li>
+    <li><code>param_calc.py</code> —— 参数量计算器（读 config.json，分层输出）。</li>
+    <li><code>qwen3b_calc.md</code> —— Qwen2.5-3B 手算过程与脚本对照。</li>
+    <li><code>layer_breakdown.md</code> —— 单层结构图（张量流 + 参数量分布）。</li>
+    <li><code>param_verify.md</code> —— 参数量验证报告（一页，核心产出）。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>5 分钟内手算出 Qwen2.5-3B ≈ 3.09B（含 embedding）。</li>
+    <li>能背出每层公式 <code>2h² + 2h·k·d + 3h·I</code> 并解释每项。</li>
+    <li>能说清 GQA 为什么让 K/V 矩阵变小、embedding 是否计入、tie 的含义。</li>
+    <li>能立刻把参数量换算成内存：3.09B fp16 ≈ 6.17GB、int8 ≈ 3.09GB、int4 ≈ 1.54GB。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「给我一个模型的 config.json，我就能算出参数量。每层的参数是 2 倍 hidden 的平方，加 2 乘 hidden 乘 KV 头数乘 head_dim，加 3 乘 hidden 乘 intermediate，后面再乘层数，最后加上 embedding 的 vocab 乘 hidden。以 Qwen2.5-3B 为例，hidden 2048、36 层、intermediate 11008、词表 15 万、Q 头 16、KV 头 2，head_dim 128，每层约 77M，36 层约 2.77B，embedding 约 0.31B，因为 tie_word_embeddings 是 true 只算一次，总共约 3.09B，和官方一致。FFN 占了参数量的将近八成，所以如果要压模型体积，重点在 FFN。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能看懂 config、能现场手算参数量与内存——模型结构与参数分析能力。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li>3.09B int4 ≈ 1.6 GB，加上 KV Cache 与运行时缓冲，3576 的 <strong>16 GB LPDDR5</strong> 余量充足。</li>
+      <li>FFN 占参数近八成，是<strong>量化与压缩的主战场</strong>；注意 FFN 权重对精度更敏感。</li>
+      <li>若 config 里 <strong>tie_word_embeddings = true</strong>，别把输出层重复计一次，否则参数量会算大。</li>
+      <li>回报参数量时<strong>务必说清口径</strong>（是否含 embedding、是否含 lm_head），这是专业度的体现。</li>
+    </ul>
+  </div>
+
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>

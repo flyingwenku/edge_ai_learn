@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 14 章 · 简历与面试准备（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">第 1 章</a>
+    <a href="ch02.html">第 2 章</a>
+    <a href="ch03.html">第 3 章</a>
+    <a href="ch04.html">第 4 章</a>
+    <a href="ch05.html">第 5 章</a>
+    <a href="ch06.html">第 6 章</a>
+    <a href="ch07.html">第 7 章</a>
+    <a href="ch08.html">第 8 章</a>
+    <a href="ch09.html">第 9 章</a>
+    <a href="ch10.html">第 10 章</a>
+    <a href="ch11.html">第 11 章</a>
+    <a href="ch12.html">第 12 章</a>
+    <a href="ch13.html">第 13 章</a>
+    <a href="ch14.html" class="active">第 14 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 14 章：简历与面试准备</h1>
+  <p class="lead"><strong>章节目标：</strong>把 15 年经验 + 端侧 AI 项目，<b>翻译成招聘方听得懂的「架构师语言」</b>——简历能过筛、话术能脱口、讲解稿能讲 5 分钟。这是冲刺计划的收口章。</p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch14-resume-interview</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把经验包装、简历模板、5 话术、讲解稿看懂。</li>
+    <li><strong>第 2 步 填模板：</strong>用讲义给的简历条目模板和讲解稿模板，先填一版草稿。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」改成终稿并做模拟面试。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」，5 句核心话术必须脱口而出才算毕业。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>技术你已经会了，这章解决「<b>怎么把自己卖出去</b>」。你的优势是 15 年嵌入式，短板是叙事——把「老」讲成「稳」，把「底层」讲成「架构底座」。<span class="key">招聘方买的不是你的过去，是你对目标岗位的匹配度。</span></p>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：15 年经验「重新包装」</h3>
+    <p>别把 15 年经验写成一条长河，要写成「<b>一条通往端侧 AI 架构师的因果链</b>」。</p>
+    <div class="board"><span class="k">15 年经验重新包装公式</span>
+
+  过去我做了什么 ：嵌入式底层 / 驱动 / 系统集成（15 年）
+  现在我要讲的   ：<span class="g">系统架构 + 端侧 AI 落地</span>
+  <span class="k">桥接逻辑（核心）</span>：
+  「15 年嵌入式让我比纯算法背景的人更懂<span class="g">硬件边界、
+   内存、功耗、量产</span>——而端侧 AI 恰恰吃这些。」
+
+  <span class="g">强化：</span>架构决策、边界权衡、量产落地、跨团队协作
+  <span class="r">弱化：</span>纯算法调参、发论文、只会写驱动
+
+<span class="k">一句话人设：</span>「懂硬件的 AI 架构师，能把模型真正落到产品上。」</div>
+    <div class="callout"><b>一句话结论：</b>经验包装的关键是<b>把「年限」翻译成「匹配度」</b>——不是「干了 15 年」，而是「15 年硬件功底正好是端侧 AI 落地的稀缺能力」。</div>
+    <p>目标岗位与关键词，简历里必须自然出现（不堆砌）：</p>
+    <div class="board"><span class="k">岗位关键词（自然嵌入简历与话术）</span>
+  · 端侧 AI 架构师
+  · 边缘 AI 架构师
+  · AI 系统架构师
+<span class="g">配套技术词：</span>RKNN / RK3576 / 量化(int4/int8) / KV Cache /
+  内存带宽 / 端云协同 / RAG / function calling / BOM / 功耗</div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：简历项目条目模板（STAR）</h3>
+    <p>项目条目不要写成「负责了什么」，要写成 <b>问题 / 方案 / 数据 / 结果</b>四段，每段带数字、能扛追问。</p>
+    <div class="board"><span class="k">简历项目条目模板（STAR）</span>
+
+项目名：RK3576 端侧 AI 语音助手（离线可演示）
+角色  ：端侧 AI 架构师 / 负责人
+时间  ：2024.xx - 2025.xx
+技术  ：RK3576 / 1.5B~3B int4 / RKNN / 本地 RAG / function calling
+
+· <span class="k">问题(S)</span>：产品要求离线可用、隐私不出端、成本控制在 $50，
+          云端方案延迟高且断网即废。
+· <span class="k">方案(A)</span>：端侧跑 1.5B~3B int4 做意图识别与简单对话，
+          复杂推理走云端；用 RKNN 吃 NPU；接本地 RAG +
+          function calling；设计断网降级到本地 1.5B。
+· <span class="k">数据(M)</span>：TTFT ___ms；生成 <span class="g">5~10 tok/s</span>；内存峰值约 <span class="g">2GB</span>；
+          BOM ≈ <span class="g">$42</span>；平均功耗 2.5W → 续航 <span class="g">8h</span>。
+· <span class="k">结果(R)</span>：___（如：完成端到端 demo 并演示通过 / 成本较云端
+          方案降 ___% / 断网可用率 100%）。
+
+写法要求：每行动词开头、带数字、≤5 行、经得起追问。</div>
+    <div class="callout"><b>一句话结论：</b>项目条目 = <b>STAR 四段 × 硬数字</b>；没有数字的简历条目，面试官会自动降权。</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：5 句核心话术（必须脱口而出）</h3>
+    <p>这 5 句覆盖面试官最常问的五个技术点。<b>先背结论，再补推理。</b></p>
+    <div class="board"><span class="k">① 内存估算</span>
+  3B int4 约 <span class="g">2GB</span>，RK3576 带宽约 <span class="k">35GB/s</span>，
+  理论 35/2 ≈ <span class="g">17 tok/s</span>，实测 <span class="r">5~10 tok/s</span>，
+  瓶颈在<span class="r">带宽</span>。
+
+<span class="k">② 框架选型</span>
+  RK3576 用 <span class="g">RKNN</span>（原生吃 NPU）；
+  跨平台验证用 <span class="g">llama.cpp + GGUF</span>。
+
+<span class="k">③ KV Cache</span>
+  3B 模型 8K 上下文 KV Cache 约<span class="g">几百 MB</span>；
+  3576 内存够，但要注意<span class="r">争带宽</span>。
+
+<span class="k">④ 架构决策</span>
+  端侧跑 <span class="g">1.5B~3B int4</span> 做意图识别和简单对话，
+  复杂推理走<span class="g">云端</span>，断网降级<span class="g">本地 1.5B</span>。
+
+<span class="k">⑤ 成本权衡</span>
+  RK3576 比 3588 便宜，带宽低些但够用，
+  适合<span class="g">中端端侧 AI 产品</span>。</div>
+    <div class="callout"><b>一句话结论：</b>这 5 句是面试的「基本盘」——<b>内存估算、框架选型、KV Cache、架构决策、成本权衡</b>，每句都要能在 3 秒内说出口并接得住追问。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：项目讲解稿模板（5 分钟口播）</h3>
+    <p>面试让你「讲讲你的项目」时，用这条 5 分钟线，别自由发挥。</p>
+    <div class="board"><span class="k">项目讲解稿模板（5 分钟）</span>
+
+① 30s  背景  ：产品是什么 + 约束（离线/隐私/成本/功耗）
+② 60s  架构  ：分层图（应用 / 编排 / 推理 / 硬件）+ 端云分工
+③ 60s  关键决策：3 条 ADR（量化 / 框架 / 端云降级）——讲"为什么不选另一个"
+④ 60s  数据  ：四件套实测 + BOM + 续航
+⑤ 30s  结果与反思：达成什么；如果重来会改什么（体现复盘能力）
+
+<span class="g">节奏：结论先行 → 再给推理 → 留一个坑给面试官问。</span>
+<span class="r">禁忌：从头讲历史、念 PPT、堆术语不解释。</span></div>
+    <div class="callout"><b>一句话结论：</b>讲解稿 = <b>结论先行 + 三段 ADR + 硬数据 + 一句反思</b>；5 分钟内让面试官记住「这是个能落地、会权衡的架构师」。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：模拟面试流程</h3>
+    <p>自己练不出来，必须「有人问、有反馈」。按下面流程跑至少一轮完整模拟。</p>
+    <div class="board"><span class="k">模拟面试流程（60 分钟）</span>
+
+第一轮 自我介绍   ：2 分钟，练「15 年 → 端侧 AI 架构师」的桥接句
+第二轮 项目追问   ：5 句核心话术逐条被问，要求脱口出 + 接得住追问
+第三轮 架构设计   ：随机给需求，10 分钟出一页纸方案（用第 13 章模板）
+第四轮 反问问面试 ：准备 3 个高质量反问（技术栈/团队/产品形态）
+
+<span class="k">反馈表：</span>每题记「秒答 / 卡顿 / 答不出」，卡住的当场补进话术本。
+<span class="g">目标：一轮下来，「卡顿」项清零。</span></div>
+    <div class="callout"><b>一句话结论：</b>模拟面试的价值在<b>暴露卡点</b>；把每个卡点补进话术本，直到能连续答完三轮不卡。</div>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>简历项目条目（STAR，核心产出）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用板书②模板，把 RK3576 端侧 AI 项目写成一条 ≤5 行的 STAR 条目。</dd>
+      <dt>要掌握</dt><dd>问题/方案/数据/结果四段齐全；每行动词开头、带数字。</dd>
+      <dt>实操步骤</dt><dd>写 <code>resume-project.md</code>：STAR 四段 + 岗位关键词自然嵌入（端侧 AI 架构师 / 边缘 AI 架构师 / AI 系统架构师）。数据段填真实或标注「待补」的指标（TTFT/tok/s/内存/BOM/续航）。</dd>
+      <dt>检验标准</dt><dd>陌生人读 30 秒能说出「他做了什么、结果多好」；每个数字都能被追问并答得出。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>5 句核心话术本</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书③的 5 句话术扩展成「结论 + 一句推理 + 一个可延伸的点」。</dd>
+      <dt>要掌握</dt><dd>内存估算 / 框架选型 / KV Cache / 架构决策 / 成本权衡 的完整回答逻辑。</dd>
+      <dt>实操步骤</dt><dd>写 <code>core-answers.md</code>：5 个问题各写标准答案（先背的那句）+ 补充推理（如带宽推算过程）+ 可能的追问与应对。</dd>
+      <dt>检验标准</dt><dd>每条 3 秒内说出结论，并能展开 30 秒讲清推理。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>自我介绍稿（2 分钟）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>写一段 2 分钟自我介绍，完成「15 年经验 → 端侧 AI 架构师」的桥接。</dd>
+      <dt>要掌握</dt><dd>桥接逻辑：硬件功底 → 端侧 AI 落地稀缺能力；弱化算法、强化架构。</dd>
+      <dt>实操步骤</dt><dd>写 <code>self-intro.md</code>：结构 = 现状定位 + 15 年经验提炼 + 端侧 AI 项目 + 求职意向（三类岗位关键词）。掐表控制在 2 分钟。</dd>
+      <dt>检验标准</dt><dd>读一遍，听者能立刻记住「懂硬件的 AI 架构师」这个人设。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>项目讲解稿（5 分钟口播，核心产出）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书④模板，写一份 5 分钟项目讲解稿，并掐表彩排。</dd>
+      <dt>要掌握</dt><dd>结论先行；三段 ADR；硬数据；一句反思。</dd>
+      <dt>实操步骤</dt><dd>写 <code>project-pitch.md</code>：五段结构（背景/架构/关键决策/数据/结果反思），每段标时长；照稿口播 ≥2 遍，确保 5 分钟内、无口头禅。</dd>
+      <dt>检验标准</dt><dd>不看稿能讲出 80%；面试官追问任意一段都能展开。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>模拟面试 + 反馈表</h3></div>
+    <dl>
+      <dt>目标</dt><dd>约人（或自测录音）跑一轮 60 分钟模拟面试，记录卡点。</dd>
+      <dt>要掌握</dt><dd>五句核心话术脱口；随机需求出方案；高质量反问。</dd>
+      <dt>实操步骤</dt><dd>写 <code>mock-interview.md</code>：四轮记录 + 反馈表（秒答/卡顿/答不出）；把「卡顿 / 答不出」项补进 <code>core-answers.md</code>，重跑到卡点清零。</dd>
+      <dt>检验标准</dt><dd>第二轮模拟中，五句核心话术全部「秒答」，无卡顿。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>投递简历终稿 + 求职清单</h3></div>
+    <dl>
+      <dt>目标</dt><dd>整合成一份可投递的简历（PDF）+ 一份目标岗位清单。</dd>
+      <dt>要掌握</dt><dd>简历结构：一句话人设 + 技能关键词 + STAR 项目 + 15 年经历压缩。</dd>
+      <dt>实操步骤</dt><dd>写 <code>resume-final.md</code>（再导出 PDF）：①一句话人设 ②技能关键词区 ③STAR 项目（本节任务 1）④15 年经历压缩成 3~5 行 ⑤教育/证书。另写 <code>job-targets.md</code>：10 个目标岗位 + 匹配点 + 打招呼话术。</dd>
+      <dt>检验标准</dt><dd>简历一页或两页内；HR 扫 30 秒能命中三类岗位关键词。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>resume-project.md</code> —— 简历项目条目（STAR，核心产出）。</li>
+    <li><code>core-answers.md</code> —— 5 句核心话术本（含推理与追问应对）。</li>
+    <li><code>self-intro.md</code> —— 2 分钟自我介绍稿。</li>
+    <li><code>project-pitch.md</code> —— 5 分钟项目讲解稿。</li>
+    <li><code>mock-interview.md</code> —— 模拟面试记录 + 反馈表。</li>
+    <li><code>resume-final.md</code> —— 可投递简历终稿（导出 PDF）。</li>
+    <li><code>job-targets.md</code> —— 目标岗位清单 + 打招呼话术。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>5 句核心话术能脱口而出（3 秒内），且能各展开 30 秒。</li>
+    <li>简历项目条目是 STAR 四段、每段带数字、≤5 行。</li>
+    <li>2 分钟自我介绍能完成「15 年 → 端侧 AI 架构师」的桥接。</li>
+    <li>5 分钟项目讲解稿能不看稿讲出 80%。</li>
+    <li>三轮模拟面试，「卡顿 / 答不出」项清零。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「我是懂硬件的 AI 架构师。15 年嵌入式让我比纯算法背景的人更懂硬件边界、内存、功耗和量产，而这正是端侧 AI 落地最缺的。我的代表作是一个跑在 RK3576 上的端侧 AI 语音助手：端侧用 1.5B~3B int4 做意图识别和简单对话，复杂推理走云端，断网降级到本地 1.5B。技术上，3B int4 约 2GB、RK3576 带宽约 35GB/s，理论 17 tok/s、实测 5~10，瓶颈在带宽；框架上 3576 用 RKNN、跨平台验证用 llama.cpp + GGUF；KV Cache 在 8K 上下文约几百 MB，够用但要防争带宽。项目落地时我按 STAR 拆：离线可用、隐私不出端、BOM 约 $42、平均功耗 2.5W 做到 8 小时续航。我应聘端侧 AI 架构师、边缘 AI 架构师、AI 系统架构师这类岗位，因为我做的就是把模型真正落到产品上的架构决策。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>求职准备到位——简历能过筛、话术能脱口、讲解稿能讲 5 分钟，具备端侧 AI 架构师岗位的完整表达能力。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li><strong>数字要背熟：</strong>3B int4 ≈ 2GB、带宽 ≈ 35GB/s、理论 17 tok/s、实测 5~10——被追问时直接报，别含糊。</li>
+      <li><strong>选型对比要会说：</strong>RK3576 vs RK3588 的取舍（便宜、带宽低些但够用、适合中端），体现你的成本与能力权衡意识。</li>
+      <li><strong>项目要能演示：</strong>面试若要求，能当场跑第 12 章的 demo（对话 + 工具 + RAG + 断网降级）。</li>
+      <li><strong>面向三类岗位微调措辞：</strong>端侧 AI 架构师重"落地"，边缘 AI 架构师重"部署与运维"，AI 系统架构师重"系统分层与端云协同"。</li>
+    </ul>
+  </div>
+
+  <div class="footer">听懂讲义 → 填简历/讲解稿模板 → 交作业 → 自测 · 5 句核心话术脱口 = 毕业 🎓</div>
+</div>
+</body>
+</html>

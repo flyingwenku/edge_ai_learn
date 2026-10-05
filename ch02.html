@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 2 章 · 量化粒度与方案对比（讲义 + 作业）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">第 1 章</a>
+    <a href="ch02.html" class="active">第 2 章</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 2 章：量化粒度与方案对比</h1>
+  <p class="lead"><strong>章节目标：</strong>搞懂「<b>粒度决定精度、方案决定落地</b>」——拿到「RK3576 + 3B」，能 3 秒报出该用哪个量化方案。</p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch02-granularity</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把粒度和方案看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的空表 / 手算自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写脚本、出报告。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>第 1 章你学会了「模型多大」。但同样 int4，做法不同，精度能差一大截——差别就在<b>量化粒度</b>。搞懂粒度 + 三个主流方案，你就能回答面试官最爱问的那句：<span class="key">「这个 3B 模型你打算怎么量化、为什么？」</span></p>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：量化粒度三级</h3>
+    <p>回顾：量化的关键是那把「尺子」——<b>scale</b>。粒度 = <b>一把尺子管多少个权重</b>。</p>
+    <div class="board"><span class="k">粒度三级（从粗到细）</span>
+
+① per-tensor   整个权重矩阵 <span class="r">共用 1 把尺子</span>
+                 scale 最少，精度最差
+
+② per-channel  每一行（每个输出通道）<span class="k">各用 1 把尺子</span>
+                 int8 的标配做法
+
+③ group-wise   每 <span class="g">group_size</span>（常见 128）个权重 1 把尺子
+                 int4 的标配做法；组越小组内越精细
+
+<span class="k">一句话：尺子越细，精度越高，但要额外存 scale。</span>
+粒度本质是「精度 ↔ 存储开销」的权衡。</div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：为什么 int4 必须 group-wise</h3>
+    <p>核心矛盾：<b>权重里有个别「离群点」（outlier）数值特别大</b>。一把尺子若被 outlier 撑大，其他正常的权重就全被压到 0 附近，精度直接崩。看数字：</p>
+    <div class="board"><span class="k">权重 W = [0.10, 0.15, -0.12, 0.09, 10.0]   （最后一个是 outlier）</span>
+int4 对称量化：qmax = 7，刻度只有 -7 ~ 7，共 15 档
+
+<span class="r">【per-tensor】一把尺子</span>
+  scale = max|W| / 7 = 10.0 / 7 = 1.4286
+  q = round(W / scale)
+    = round([0.07, 0.105, -0.084, 0.063, 7])
+    = [0, 0, 0, 0, 7]          ← 前 4 个全变 0 ！
+  W' = [0, 0, 0, 0, 10]
+  <span class="r">小权重信息 100% 丢失，模型废了</span>
+
+<span class="g">【group-wise，group_size=4】一组一把尺子</span>
+  A 组 [0.10, 0.15, -0.12, 0.09]：scale = 0.15/7 = 0.02143
+     q = [5, 7, -6, 4] → W' = [0.107, 0.150, -0.129, 0.086]  误差≈0 ✅
+  B 组 [10.0]：scale = 10/7，q = 7 → W' = 10.0  ✅
+  <span class="g">把 outlier 关进它自己那组，不祸害别人</span>
+
+<span class="k">结论：int4 只有 15 个刻度，不用 group-wise 就会被 outlier 一锅端。</span>
+这就是「int4 必须 group-wise（group_size=128）」的物理原因。</div>
+    <p><b>为什么是 128？</b>存 scale 有开销，太大就亏：</p>
+    <div class="board">int4 权重：每 128 个 ≈ 128 × 0.5 = 64 字节
+每个组存 1 个 scale（fp16）= 2 字节
+额外开销 = 2 / 64 = <span class="g">3.1%</span>   ← 几乎可忽略
+（若 group_size=32：开销 = 2/16 = 12.5%，太亏）
+<span class="k">所以 128 是「精度够用 + 开销小」的工程折中。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：三大方案对比（GPTQ / AWQ / RKNN）</h3>
+    <p>粒度是「怎么切」，方案是「用哪条生产线」。三条线目标不同，别混：</p>
+    <table class="tight">
+      <thead><tr><th>方案</th><th>类型</th><th>典型精度</th><th>要校准集?</th><th>产物</th><th>端侧/NPU 适配</th></tr></thead>
+      <tbody>
+        <tr><td><b>GPTQ</b></td><td>训练后量化 + 二阶误差补偿</td><td>int4 / int3</td><td>是</td><td>通用权重文件</td><td>弱（NPU 不直接吃）</td></tr>
+        <tr><td><b>AWQ</b></td><td>训练后量化，<b>激活感知</b>（保护重要通道）</td><td>int4</td><td>是</td><td>通用权重文件</td><td>弱（同上）</td></tr>
+        <tr><td><b>RKNN</b></td><td>瑞芯微官方工具链，per-channel PTQ</td><td>int8 为主</td><td>是</td><td><code>.rknn</code></td><td><b>强（3576 原生）</b></td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">记住这条分工，面试直接说：</span>
+  GPTQ / AWQ  =「<span class="r">通用量化算法</span>」，精度好、压缩狠，
+                 但产物是给 GPU/CPU 框架的，<span class="r">NPU 不直接吃</span>。
+  RKNN        =「<span class="g">平台落地工具</span>」，直接编译成 NPU 能跑的 .rknn，
+                 <span class="g">端侧落地认它</span>。
+
+<span class="k">一句话：算法选 GPTQ/AWQ，落地选 RKNN。</span>
+在 RK3576 上，最终一定走 RKNN。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：GGUF 格式（llama.cpp）</h3>
+    <p>GGUF 是 llama.cpp 的模型格式，端侧/CPU 验证最常用。它用<b>块量化</b>（每 32 个一组）实现 group-wise。名字看着乱，看两个就够：</p>
+    <table class="tight">
+      <thead><tr><th>格式</th><th>位宽/每权重</th><th>3B 体积</th><th>特点</th></tr></thead>
+      <tbody>
+        <tr><td><b>Q8_0</b></td><td>≈ 8.5 bit</td><td>≈ 3.2 GB</td><td>接近原始精度，体积大</td></tr>
+        <tr><td><b>Q4_K_M</b></td><td>≈ 4.5 bit（混合）</td><td>≈ 1.9 GB</td><td>体积/质量最佳，端侧首选</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">为什么是 8.5 / 4.5 而不是 8 / 4？</span>
+  块量化每组要存一个 scale → 有效位宽 = 数据位 + scale 分摊。
+  Q8_0：8 bit 数据 + 每 32 个 1 个 fp16 scale ≈ +0.5 → <span class="g">8.5</span>
+  Q4_K_M：4 bit 为主 + 混合精度 + scale ≈ <span class="g">4.5</span>
+
+<span class="k">Q4_K_M 是「质量/体积」甜点</span>：比 Q4_0 聪明（重要层用高精度），
+端侧跑 3B 通常就选它做跨平台验证。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：选型决策（背下来）</h3>
+    <div class="board"><span class="k">场景 → 方案</span>
+
+RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU 原生、最稳）
+跨平台 / CPU 验证  → <span class="g">llama.cpp + GGUF Q4_K_M</span>
+云侧 / 大模型压榨   → GPTQ / AWQ
+
+<span class="k">被问「RK3576 + 3B 用什么量化」→ 标准答：</b>
+「优先 RKNN int8 per-channel，直接吃 NPU；如果要 int4 且想跨平台验证，
+用 llama.cpp GGUF Q4_K_M。GPTQ/AWQ 精度好，但 NPU 不直接支持，
+不如用 RKNN。」</div>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>粒度三级对比笔记</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书①整理成一张表：粒度 / 每把尺子管多少 / 常见精度 / 优缺点。</dd>
+      <dt>要掌握</dt><dd>三级的区别；为什么 int8 用 per-channel、int4 用 group-wise。</dd>
+      <dt>实操步骤</dt><dd>写 <code>granularity.md</code>：三级对比表 + 「group_size=128 的 scale 开销 3.1%」手算过程。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能说出三级谁最省、谁最准、int4 为什么不能用 per-tensor。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>用 Python 复现 outlier 陷阱（核心实操）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用代码证明「per-tensor 会被 outlier 一锅端，group-wise 能救」。</dd>
+      <dt>要掌握</dt><dd>把板书②的数字用代码跑出来；量化误差对比。</dd>
+      <dt>实操步骤</dt><dd>写 <code>granularity_demo.py</code>：取 <code>W=[0.10,0.15,-0.12,0.09,10.0]</code>，分别做 per-tensor 和 group-wise(=4) 的 int4 量化，打印量化值、反量化值、最大误差；对比误差差距。复用第 1 章的 quantize 思路。</dd>
+      <dt>检验标准</dt><dd>脚本跑通，输出能看出「per-tensor 小权重全变 0，group-wise 几乎无损」。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>三方案对比表</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书③扩成你的选型表：GPTQ / AWQ / RKNN。</dd>
+      <dt>要掌握</dt><dd>三者「类型 / 精度 / 要不要校准集 / 产物 / NPU 适配」的差别。</dd>
+      <dt>实操步骤</dt><dd>写 <code>scheme_compare.md</code>：5 列对比表 + 一句话「谁适合端侧落地」。</dd>
+      <dt>检验标准</dt><dd>能说出「GPTQ/AWQ 是通用算法、RKNN 是平台落地工具，端侧最终走 RKNN」。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>GGUF 格式对比报告</h3></div>
+    <dl>
+      <dt>目标</dt><dd>搞清 Q8_0 与 Q4_K_M 的位宽、体积、质量差异。</dd>
+      <dt>要掌握</dt><dd>块量化=group-wise；为什么是 8.5/4.5 bit 而不是 8/4；Q4_K_M 为什么是甜点。</dd>
+      <dt>实操步骤</dt><dd>写 <code>gguf_compare.md</code>：Q8_0 vs Q4_K_M 对比表（位宽/3B 体积/质量/适用场景）；如能上网，查 llama.cpp 官方量化说明补充证据。</dd>
+      <dt>检验标准</dt><dd>能解释「Q4_K_M 体积约 1.9GB，质量损失可接受，端侧跨平台首选」。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>《RK3576 + 3B 量化方案选型报告》（一页）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>综合上面所有产出，给一个明确结论——这是本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把「粒度 + 方案 + GGUF」串成一个决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>selection_report.md</code>（一页）：①场景 ②候选方案 ③取舍理由 ④最终结论（RKNN int8 per-channel 落地；int4 跨平台用 GGUF Q4_K_M）⑤风险（int4 在 NPU 支持有限）。</dd>
+      <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做——这就是架构文档的标准。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
+      <dt>实操步骤</dt><dd>自问自答：int4 为什么要 group-wise？group_size 多少、开销多少？GPTQ/AWQ/RKNN 谁落地端侧？RK3576+3B 用什么量化？Q4_K_M 多少 GB？</dd>
+      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>granularity.md</code> —— 粒度三级对比 + group-wise 开销手算。</li>
+    <li><code>granularity_demo.py</code> —— outlier 陷阱的代码复现（per-tensor vs group-wise）。</li>
+    <li><code>scheme_compare.md</code> —— GPTQ / AWQ / RKNN 三方案对比。</li>
+    <li><code>gguf_compare.md</code> —— Q8_0 vs Q4_K_M 对比。</li>
+    <li><code>selection_report.md</code> —— RK3576 + 3B 量化方案选型报告（一页，核心产出）。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>说出 int4 必须 group-wise 的原因（outlier 撑大 scale → 小权重归零）。</li>
+    <li>说出 group_size=128 的 scale 开销约 3.1%。</li>
+    <li>给「RK3576 + 3B」秒答「RKNN int8 per-channel；int4 跨平台用 GGUF Q4_K_M」。</li>
+    <li>能讲清 GPTQ/AWQ 是算法、RKNN 是平台落地工具。</li>
+  </ul>
+
+  <h2>面试话术</h2>
+  <div class="quote">
+    <span class="tag">可直接背</span>
+    <p>「量化粒度决定精度：int8 用 per-channel 就够，int4 必须 group-wise，group_size 取 128，因为 4 位只有 15 个刻度、权重的 outlier 会把 scale 撑爆，不分组小权重直接归零。方案上，GPTQ 和 AWQ 是通用量化算法、精度好，但 NPU 不直接支持；端侧落地我用 RKNN 做 int8 per-channel，直接吃 NPU；如果需要 int4 且要跨平台验证，就用 llama.cpp 的 GGUF Q4_K_M，3B 大概 1.9GB。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能说清「怎么量化、为什么这么量化、在哪落地」——量化选型能力。</p>
+  </div>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li>3576 的 NPU 是 <strong>int8 定点加速器为主</strong>，int4 支持有限且多为 int8 模拟，所以生产上优先 <strong>int8 per-channel</strong>。</li>
+      <li>RKNN 量化必须给<strong>校准集</strong>，且要覆盖真实输入分布（后面第 9 章会用真实数据校准）。</li>
+      <li>GPTQ/AWQ 的产物不能直接塞给 NPU，需要转 RKNN——所以端侧落地环节认 RKNN。</li>
+    </ul>
+  </div>
+
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>
