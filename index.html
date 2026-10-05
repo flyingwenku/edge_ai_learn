@@ -35,9 +35,9 @@
   <div class="grid cols-3" style="margin-top:18px">
     <div class="card"><div class="k">开发板</div><div class="v">RK3576</div></div>
     <div class="card"><div class="k">NPU 算力</div><div class="v">6 TOPS</div></div>
-    <div class="card"><div class="k">内存带宽</div><div class="v">35 GB/s</div></div>
+    <div class="card"><div class="k">内存带宽(理论/独占/产品)</div><div class="v" style="font-size:15px">19 / 12–16 / 7–11 GB/s</div></div>
     <div class="card"><div class="k">CPU</div><div class="v">4×A72 + 4×A53</div></div>
-    <div class="card"><div class="k">内存上限</div><div class="v">16 GB LPDDR5</div></div>
+    <div class="card"><div class="k">内存上限</div><div class="v">16 GB LPDDR5-4800</div></div>
     <div class="card"><div class="k">每日投入</div><div class="v">8~10 h</div></div>
   </div>
 
@@ -84,7 +84,7 @@
 
   <h2>面试 5 句核心话术（最终脱口而出）</h2>
   <div class="grid cols-2">
-    <div class="card"><div class="k">内存估算</div><p>3B int4 约 2GB，RK3576 内存带宽约 35GB/s，理论 17 tok/s，实测 5~10 tok/s，瓶颈在带宽。</p></div>
+    <div class="card"><div class="k">内存估算</div><p>RK3576 是 LPDDR5-4800、32-bit，理论峰值约 19 GB/s；NPU 独占实测 12~16 GB/s；产品里同时开摄像头、NPU、屏幕，带宽被抢到 7~11 GB/s。decode 是带宽瓶颈，tok/s≈带宽÷模型字节。3B int4 约 2GB，产品场景只有 3.5~5.5 tok/s，NPU 独占 6~8；1.5B int4 约 1GB，产品场景 7~11 tok/s，最稳。所以我端侧选 1.5B~3B，7B 只有 2 tok/s 上下，不做实时对话。</p></div>
     <div class="card"><div class="k">框架选型</div><p>RK3576 用 RKNN，官方 NPU 支持最好；跨平台验证用 llama.cpp + GGUF。</p></div>
     <div class="card"><div class="k">KV Cache</div><p>3B 模型 8K 上下文的 KV Cache 约几百 MB，3576 内存够但要注意和模型本身争带宽。</p></div>
     <div class="card"><div class="k">架构决策</div><p>端侧跑 1.5B~3B int4 做意图识别和简单对话，复杂推理走云端，断网降级到本地 1.5B。</p></div>

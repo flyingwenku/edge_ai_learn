@@ -19,7 +19,7 @@
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
   <h1>第 1 章：量化基础与内存估算</h1>
-  <p class="lead"><strong>章节目标：</strong>建立「给一个模型尺寸 + 精度，3 秒算出内存占用和理论 tok/s 上限」的条件反射——端侧架构师的第一块敲门砖。</p>
+  <p class="lead"><strong>章节目标：</strong>建立「给一个模型尺寸 + 精度，3 秒算出内存占用和 tok/s 区间」的条件反射——端侧架构师的第一块敲门砖。</p>
   <div class="pill-row">
     <span class="chip">状态：已完成</span>
     <span class="chip">上午 4h · 3 个任务</span>
@@ -92,7 +92,7 @@ int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关�
 
     <p><b>练习（板书填空）：</b>先自己算，再展开答案。</p>
     <table class="tight">
-      <thead><tr><th>模型</th><th>fp32</th><th>fp16/bf16</th><th>int8</th><th>int4 净值</th><th>int4 真实(填)</th><th>理论 tok/s(填)</th></tr></thead>
+      <thead><tr><th>模型</th><th>fp32</th><th>fp16/bf16</th><th>int8</th><th>int4 净值</th><th>int4 真实(填)</th><th>tok/s NPU独占/产品(填)</th></tr></thead>
       <tbody>
         <tr><td>0.5B</td><td>2.0 GB</td><td>1.0 GB</td><td>0.5 GB</td><td>0.25 GB</td><td class="fill">?</td><td class="fill">?</td></tr>
         <tr><td>1.5B</td><td>6.0 GB</td><td>3.0 GB</td><td>1.5 GB</td><td>0.75 GB</td><td class="fill">?</td><td class="fill">?</td></tr>
@@ -102,21 +102,26 @@ int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关�
     </table>
     <details>
       <summary>点击展开答案（先自己填！）</summary>
-      <p>int4 真实占用（工程取整）：0.5B ≈ 0.3GB，1.5B ≈ 1.0GB，3B ≈ 2.0GB，7B ≈ 4.0GB。<br>
-      理论 tok/s（= 35 ÷ 真实GB）：0.5B ≈ 117，1.5B ≈ 35，3B ≈ 17.5，7B ≈ 8.75。<br>
+      <p>int4 真实占用（工程取整）：0.5B ≈ 0.3GB，1.5B ≈ 1.0GB，3B ≈ 2.0GB，7B ≈ 4.5GB。<br>
+      tok/s（= 带宽 ÷ 真实GB；NPU 独占 12~16 ／ 产品真实 7~11 GB/s）：<br>
+      0.5B ≈ 40~53 ／ 23~37，1.5B ≈ 12~16 ／ 7~11，3B ≈ 6~8 ／ 3.5~5.5，7B ≈ 2.7~3.6 ／ 1.6~2.4。<br>
       塞进 16GB（安全预算 8~12GB）：4 行都塞得下；fp32 的 7B（28GB）、3B（12GB）直接出局。</p>
     </details>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书③：带宽 → 理论 tok/s</h3>
+    <h3><span class="tag-lesson">讲解</span>4. 板书③：带宽 → tok/s（三档口径）</h3>
     <p>这是本章的灵魂。大模型<b>生成文字时（decode）</b>，每吐 1 个 token，NPU 都要把整个模型权重从内存里<b>读一遍</b>。所以速度不由算力决定，由<b>内存带宽</b>决定。</p>
-    <div class="formula">理论 tok/s ≈ 内存带宽 ÷ 模型真实占用(GB)</div>
-    <div class="board"><span class="k">示范（RK3576，带宽 35 GB/s）</span>
+    <div class="formula">tok/s ≈ 有效带宽 ÷ 模型真实占用(GB)</div>
+    <div class="board"><span class="k">示范（RK3576，LPDDR5-4800、32-bit，带宽三档）</span>
 
-3B int4： 35 ÷ 2.0  = 17.5  ≈ <span class="g">17 tok/s</span>   （理论天花板）
-7B int4： 35 ÷ 4.0  = 8.75  ≈ <span class="g">8.75 tok/s</span>  （理论天花板）
+理论峰值     ≈ 19 GB/s   （4800 MT/s × 4 B ≈ 19.2）
+NPU 独占实测 ≈ 12~16 GB/s（无视频解码/ISP/GPU 渲染）
+产品真实场景 ≈ 7~11 GB/s （摄像头 + NPU + 屏幕同开，带宽被抢）
 
-<span class="k">为什么实测只有 5~10 tok/s，远低于理论？</span>
-  ① 有效带宽达不到峰值，通常打 6~8 折
+3B int4： /2.0GB → NPU 独占 <span class="g">6~8 tok/s</span> ；产品 <span class="g">3.5~5.5 tok/s</span>
+7B int4： /4.5GB → NPU 独占 <span class="g">2.7~3.6 tok/s</span>；产品 <span class="g">1.6~2.4 tok/s</span>
+
+<span class="k">为什么产品实测只有几 tok/s，远低于理论峰值？</span>
+  ① 产品里带宽被摄像头/ISP/屏幕瓜分，有效带宽只剩 7~11 GB/s
   ② KV Cache 也在抢带宽（第 5 章细讲）
   ③ kernel 调度、算子切换有开销
   ④ 有些算子没跑到 NPU，掉回 CPU</div>
@@ -159,17 +164,17 @@ int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关�
     <dl>
       <dt>目标</dt><dd>把讲义板书②的填空表，扩成完整 16 格（0.5B/1.5B/3B/7B × 4 精度）。</dd>
       <dt>要掌握</dt><dd>净值 vs 真实占用（×1.3）；标出哪几格能进 16GB（安全预算 8~12GB）。</dd>
-      <dt>实操步骤</dt><dd>写 <code>memory_table.md</code>：净值 16 格 + int4 真实列 + 理论 tok/s 列 + 「能否部署」判断列。</dd>
+      <dt>实操步骤</dt><dd>写 <code>memory_table.md</code>：净值 16 格 + int4 真实列 + tok/s（NPU 独占/产品）列 + 「能否部署」判断列。</dd>
       <dt>检验标准</dt><dd>秒答「3B int4 约 2GB」「7B fp16 = 14GB」「7B fp32 = 28GB 装不下」。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>RK3576 理论 tok/s 上限</h3></div>
+    <div class="head"><span class="num">3</span><h3>RK3576 带宽三档与 tok/s 上限</h3></div>
     <dl>
-      <dt>目标</dt><dd>用 35GB/s 算出 1.5B/3B/7B int4 的理论天花板。</dd>
-      <dt>要掌握</dt><dd>tok/s ≈ 带宽 ÷ 真实占用；为什么实测低于理论。</dd>
-      <dt>实操步骤</dt><dd>算 3 个值写入小表，附一句「实测预期打几折」的说明。</dd>
-      <dt>检验标准</dt><dd>秒答「3B int4 理论 ≈ 17 tok/s」「7B int4 理论 ≈ 8.75 tok/s」。</dd>
+      <dt>目标</dt><dd>用三档带宽（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）算出 1.5B/3B/7B int4 的 tok/s 区间。</dd>
+      <dt>要掌握</dt><dd>tok/s ≈ 带宽 ÷ 真实占用；为什么产品实测远低于理论峰值。</dd>
+      <dt>实操步骤</dt><dd>每档带宽各算一遍（NPU 独占 + 产品两列），写入小表并标出哪一档才是落地数字。</dd>
+      <dt>检验标准</dt><dd>秒答「3B int4：NPU 独占 6~8、产品 3.5~5.5 tok/s」。</dd>
     </dl>
   </div>
 
@@ -188,7 +193,7 @@ int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关�
     <dl>
       <dt>目标</dt><dd>把上午的手算变成代码，一键复现。</dd>
       <dt>要掌握</dt><dd>参数化：输入 <code>[参数量, 精度]</code> → 输出表格。</dd>
-      <dt>实操步骤</dt><dd>让脚本输出 <code>memory_table.md</code>（含净值/真实/tok/s），存到 ch01 目录。</dd>
+      <dt>实操步骤</dt><dd>让脚本输出 <code>memory_table.md</code>（含净值/真实/tok/s 两档），存到 ch01 目录。</dd>
       <dt>检验标准</dt><dd>目录里有 <code>memory_table.md</code> + <code>quantize.py</code>，重跑结果一致。</dd>
     </dl>
   </div>
@@ -196,7 +201,7 @@ int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关�
     <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
     <dl>
       <dt>目标</dt><dd>把关键数字练成肌肉记忆。</dd>
-      <dt>实操步骤</dt><dd>自问自答 5 次：3B int4 内存？7B int4 理论 tok/s？7B fp16 内存？3576 带宽？为什么实测低于理论？</dd>
+      <dt>实操步骤</dt><dd>自问自答 5 次：3B int4 内存？7B int4 产品 tok/s？7B fp16 内存？3576 带宽三档？为什么产品低于 NPU 独占？</dd>
       <dt>检验标准</dt><dd>每题 3 秒内答出，不翻资料。</dd>
     </dl>
   </div>
@@ -204,30 +209,30 @@ int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关�
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
     <li><code>precision_bytes.md</code> —— 精度字节对照表。</li>
-    <li><code>memory_table.md</code> —— 16 格内存 + int4 真实列 + 理论 tok/s 列 + 能否部署。</li>
+    <li><code>memory_table.md</code> —— 16 格内存 + int4 真实列 + tok/s（NPU 独占/产品）列 + 能否部署。</li>
     <li><code>quantize.py</code> —— 手写对称量化器，跑通并打印误差。</li>
-    <li>一句结论：RK3576 上什么尺寸 + 什么精度能跑，理论多少 tok/s。</li>
+    <li>一句结论：RK3576 上什么尺寸 + 什么精度能跑，NPU 独占与产品场景各多少 tok/s。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
     <li>秒答「3B int4 约 2GB」，并说清这是加 overhead 的真实值。</li>
-    <li>秒答「7B int4 理论约 8.75 tok/s」，能解释为何不是 35÷3.5=10（真实占用约 4GB）。</li>
-    <li>能解释「实测 5~10 tok/s 为何低于理论 17 tok/s」——带宽打折、KV Cache、kernel 开销、掉 CPU。</li>
+    <li>秒答「7B int4 产品仅 1.6~2.4 tok/s」，能解释为何不是 19÷3.5≈5.4（真实占用约 4.5GB，且产品带宽被抢到 7~11）。</li>
+    <li>能解释「产品 7~11 GB/s 下 3B int4 只有 3.5~5.5 tok/s 为何低于 NPU 独占的 6~8」——带宽被摄像头/ISP/屏抢、KV Cache、kernel 开销、掉 CPU。</li>
     <li>量化脚本 int4 误差 &gt; int8 误差。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「端侧选模型第一步是算内存：3B int4 约 2GB，RK3576 内存带宽约 35GB/s，decode 是带宽瓶颈，理论上限 17 tok/s，实测 5~10 tok/s，差距来自 KV Cache 和带宽争用。所以 RK3576 上我优先 1.5B~3B int4，7B int4 内存够但带宽受限，实测只有 2~5 tok/s。」</p>
+    <p>「端侧选模型第一步是算内存：3B int4 约 2GB，RK3576 是 LPDDR5-4800、32-bit，理论峰值约 19GB/s，NPU 独占 12~16GB/s，产品里同时开摄像头、NPU、屏幕会被抢到 7~11GB/s。decode 是带宽瓶颈，tok/s≈带宽÷模型字节：3B int4 产品场景只有 3.5~5.5 tok/s、NPU 独占 6~8；1.5B int4 约 1GB，产品 7~11 tok/s，最稳。所以我优先 1.5B~3B int4，7B int4 内存够但带宽受限，只有 2 tok/s 上下。」</p>
     <p style="margin:0"><strong>能力标签：</strong>能在选型前就把内存和吞吐算清楚，而不是跑起来才知道。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>带宽 35GB/s 是<strong>理论峰值</strong>，实际有效带宽通常打 6~8 折，所以「理论 17 tok/s、实测 5~10」是正常的。</li>
+      <li>带宽分三档：<strong>理论峰值 ≈ 19 GB/s</strong>（LPDDR5-4800 × 32-bit），<strong>NPU 独占实测 12~16 GB/s</strong>，<strong>产品真实场景（摄像头 + NPU + 屏幕同开）只剩 7~11 GB/s</strong>。产品落地要看最后一档，「3B int4 只有 3.5~5.5 tok/s」才是真实数字。</li>
       <li>16GB 内存不代表能装大模型——留给系统、KV Cache、多进程的空间要扣掉，实际安全预算约 8~12GB。</li>
       <li>3576 的 NPU 是 6 TOPS int8；int4 通常靠 int8 模拟或特定算子支持，第 9 章验证，本章先按理论算。</li>
     </ul>

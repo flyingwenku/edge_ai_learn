@@ -158,7 +158,7 @@ qwen2.5-1.5b, w8a8, 512, ___, ___, ___, ___, 长 prompt（看 TTFT 上升）</di
       <summary>点击展开答案（参考量级，实测为准）</summary>
       <div class="board">qwen2.5-1.5b w8a8，RK3576 参考量级：
   · TTFT：短 prompt 数百 ms；512 token prompt 明显上升到 ~1 s
-  · tok/s：约 10 ~ 20 tok/s（带宽受限）
+  · tok/s：约 5 ~ 10 tok/s（带宽受限；NPU 独占 12~16 GB/s，产品场景只有 7~11 GB/s）
   · 内存：模型 ~1.8 GB + 运行时 ≈ 2.5 GB 量级
   · NPU：生成阶段 Core0 常见 60 ~ 90%
 
@@ -169,7 +169,7 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
     <h3><span class="tag-lesson">讲解</span>5. 板书⑤：RK3576 性能画像与三条铁律</h3>
     <div class="board"><span class="k">RK3576 性能画像（架构师必须背）</span>
   NPU 6 TOPS            ← 算力够（对 1.5B~3B）
-  内存带宽 ~35 GB/s      ← <span class="r">真正的瓶颈</span>（decode 打这个）
+  内存带宽 19 / 12~16 / 7~11 GB/s ← <span class="r">真正的瓶颈</span>（理论/NPU 独占/产品，decode 打产品档）
   CPU 4×A72 + 4×A53     ← CPU 弱，别指望 CPU 兜底
   内存 ≤ 16 GB LPDDR5
 
@@ -181,7 +181,7 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
    长 prompt 的 TTFT 会明显上升。
 
 <span class="k">自测基准（参考，实测为准）</span>
-  Qwen2.5-1.5B w8a8：TTFT 数百 ms ~ 1 s，生成 10 ~ 20 tok/s
+  Qwen2.5-1.5B w8a8：TTFT 数百 ms ~ 1 s，生成 5 ~ 10 tok/s
   如果实测远低于此 → 查两件事：
     (a) 有没有算子回落到 CPU？（看日志 fallback / cpu 提示）
     (b) 模型是不是没跑在 NPU 上？（NPU load 一直 0% = 没上 NPU）</div>
@@ -265,13 +265,13 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
     <li>知道 RKNN 工具链分上位机（转换）和板端（推理）两半，且版本必须对齐。</li>
     <li>能用 <code>rknpu/load</code> 判断推理是否跑在 NPU 上。</li>
     <li>能记录并解释 TTFT / tok/s / 内存 / NPU 四项指标及其趋势。</li>
-    <li>能说出 3576 的瓶颈是带宽（35 GB/s）与弱 CPU，因此优先纯 NPU。</li>
+    <li>能说出 3576 的瓶颈是带宽（产品场景仅 7~11 GB/s）与弱 CPU，因此优先纯 NPU。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「我手里有一块 RK3576，完整部署流程我自己走过：先用厂商镜像加 RKDevTool 烧 Debian/Ubuntu 系统，确认 <code>rknpu/version</code> 能读出驱动；然后上位机装 rknn-toolkit2 负责转换、板端配 librknnrt.so 和 rknn-toolkit-lite2 负责推理，两边版本必须对齐；转换用 rknn_model_zoo 的 LLM 脚本导出 ONNX、给校准集做 w8a8 量化，产出 .rknn；最后推到板子上跑 llm_demo，记录首 token 延迟、tok/s、内存和 NPU 利用率。3576 的特点是 NPU 6 TOPS 够用，但内存带宽只有 35GB/s、CPU 弱，所以一定要优先纯 NPU 推理，一旦算子回落到 CPU 速度就崩；瓶颈在带宽，优化方向就是量化和 GQA 减 KV。因为我有真板子、走过全流程，所以性能数字不是纸上算的，是实测的。」</p>
+    <p>「我手里有一块 RK3576，完整部署流程我自己走过：先用厂商镜像加 RKDevTool 烧 Debian/Ubuntu 系统，确认 <code>rknpu/version</code> 能读出驱动；然后上位机装 rknn-toolkit2 负责转换、板端配 librknnrt.so 和 rknn-toolkit-lite2 负责推理，两边版本必须对齐；转换用 rknn_model_zoo 的 LLM 脚本导出 ONNX、给校准集做 w8a8 量化，产出 .rknn；最后推到板子上跑 llm_demo，记录首 token 延迟、tok/s、内存和 NPU 利用率。3576 的特点是 NPU 6 TOPS 够用，但内存带宽很小（理论峰值 19GB/s，NPU 独占 12~16，产品场景只有 7~11GB/s）、CPU 弱，所以一定要优先纯 NPU 推理，一旦算子回落到 CPU 速度就崩；瓶颈在带宽，优化方向就是量化和 GQA 减 KV。因为我有真板子、走过全流程，所以性能数字不是纸上算的，是实测的。」</p>
     <p style="margin:0"><strong>能力标签：</strong>能独立完成 RK3576 端侧部署全流程并有实测数据——端侧部署能力（有真板子是最大优势）。</p>
   </div>
 
@@ -279,7 +279,7 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
       <li>镜像务必选<strong>带 NPU 驱动</strong>的固件；烧完先验证 <code>/sys/kernel/debug/rknpu/version</code>。</li>
-      <li>带宽只有 <strong>~35 GB/s</strong>，CPU 弱——一旦算子回落 CPU，速度会被拖垮，<strong>优先纯 NPU</strong>。</li>
+      <li>带宽三档：峰值 <strong>19</strong> / NPU 独占 <strong>12~16</strong> / 产品 <strong>7~11 GB/s</strong>，CPU 弱——一旦算子回落 CPU，速度会被拖垮，<strong>优先纯 NPU</strong>。</li>
       <li>日志里搜 <strong>fallback / cpu</strong>；性能差先看 <code>rknpu/load</code>，NPU 利用率为 0 说明没好利用 NPU。</li>
       <li>优先用 <strong>rknn_model_zoo 已支持</strong>的模型（Qwen2.5 等），别一上来自己写 LLM 导出脚本。</li>
       <li>长 prompt 的 TTFT 上升属正常（prefill），别误判为"模型有问题"。</li>

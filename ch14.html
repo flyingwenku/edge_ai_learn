@@ -89,7 +89,7 @@
 · <span class="k">方案(A)</span>：端侧跑 1.5B~3B int4 做意图识别与简单对话，
           复杂推理走云端；用 RKNN 吃 NPU；接本地 RAG +
           function calling；设计断网降级到本地 1.5B。
-· <span class="k">数据(M)</span>：TTFT ___ms；生成 <span class="g">5~10 tok/s</span>；内存峰值约 <span class="g">2GB</span>；
+· <span class="k">数据(M)</span>：TTFT ___ms；生成 <span class="g">3.5~5.5 tok/s</span>（产品；NPU 独占 6~8）；内存峰值约 <span class="g">2GB</span>；
           BOM ≈ <span class="g">$42</span>；平均功耗 2.5W → 续航 <span class="g">8h</span>。
 · <span class="k">结果(R)</span>：___（如：完成端到端 demo 并演示通过 / 成本较云端
           方案降 ___% / 断网可用率 100%）。
@@ -100,8 +100,8 @@
     <h3><span class="tag-lesson">讲解</span>3. 板书③：5 句核心话术（必须脱口而出）</h3>
     <p>这 5 句覆盖面试官最常问的五个技术点。<b>先背结论，再补推理。</b></p>
     <div class="board"><span class="k">① 内存估算</span>
-  3B int4 约 <span class="g">2GB</span>，RK3576 带宽约 <span class="k">35GB/s</span>，
-  理论 35/2 ≈ <span class="g">17 tok/s</span>，实测 <span class="r">5~10 tok/s</span>，
+  3B int4 约 <span class="g">2GB</span>，RK3576 带宽是 LPDDR5-4800 的 <span class="k">19GB/s</span> 峰值、NPU 独占 <span class="k">12~16</span>、产品 <span class="k">7~11GB/s</span>；
+  产品场景只有 <span class="r">3.5~5.5 tok/s</span>（NPU 独占 6~8），
   瓶颈在<span class="r">带宽</span>。
 
 <span class="k">② 框架选型</span>
@@ -155,8 +155,8 @@
 <span class="k">(a) 选型 trade-off</span>
 Q：为什么选 3B 不选 1.5B？
 A：看任务难度。1.5B 够「意图识别 + 简单多轮」，更省内存带宽
-   （int4 ≈1GB、实测 15~25 tok/s）；3B 多轮 / 工具调用更稳，
-   但 int4 ≈2GB、带宽翻倍，实测 <span class="r">5~10 tok/s</span>。
+   （int4 ≈1GB、产品 7~11 tok/s、NPU 独占 12~16）；3B 多轮 / 工具调用更稳，
+   但 int4 ≈2GB、带宽翻倍，产品只有 <span class="r">3.5~5.5 tok/s</span>。
    要「稍复杂对话 + function calling 准确率」→ 3B；
    只要「唤醒 + 意图」→ 1.5B 性价比更高。
 
@@ -282,7 +282,7 @@ C 8GB LPDDR5 ：同容量带宽更高，3B tok/s 更好
     <dl>
       <dt>目标</dt><dd>把板书⑥的三组高频问题整理成你的答题卡：每题「结论 + 推理 + 反问」。</dd>
       <dt>要掌握</dt><dd>选型 trade-off（3B vs 1.5B / 内存溢出 / 降级边界）；稳定性（长跑泄漏 / NPU 复位）；成本（DDR 选型 / 带宽权衡 / BOM 占比）。</dd>
-      <dt>实操步骤</dt><dd>写 <code>qa-card.md</code>：三组共 7 题，每题写「一句话结论 + 30 秒推理 + 可能的追问与应对」，并标出答案里的硬数字（2GB / 2.8GB / 5~10 tok/s / $6 / $42 / 1GB 水位）。掐表练到每题 30 秒讲完。</dd>
+      <dt>实操步骤</dt><dd>写 <code>qa-card.md</code>：三组共 7 题，每题写「一句话结论 + 30 秒推理 + 可能的追问与应对」，并标出答案里的硬数字（2GB / 2.8GB / 3.5~5.5 tok/s / $6 / $42 / 1GB 水位）。掐表练到每题 30 秒讲完。</dd>
       <dt>检验标准</dt><dd>随机抽一题能立刻答出结论并展开推理；被追问「为什么不选另一个」不卡。</dd>
     </dl>
   </div>
@@ -312,14 +312,14 @@ C 8GB LPDDR5 ：同容量带宽更高，3B tok/s 更好
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「我是懂硬件的 AI 架构师。15 年嵌入式让我比纯算法背景的人更懂硬件边界、内存、功耗和量产，而这正是端侧 AI 落地最缺的。我的代表作是一个跑在 RK3576 上的端侧 AI 语音助手：端侧用 1.5B~3B int4 做意图识别和简单对话，复杂推理走云端，断网降级到本地 1.5B。技术上，3B int4 约 2GB、RK3576 带宽约 35GB/s，理论 17 tok/s、实测 5~10，瓶颈在带宽；框架上 3576 用 RKNN、跨平台验证用 llama.cpp + GGUF；KV Cache 在 8K 上下文约几百 MB，够用但要防争带宽。项目落地时我按 STAR 拆：离线可用、隐私不出端、BOM 约 $42、平均功耗 2.5W 做到 8 小时续航。我应聘端侧 AI 架构师、边缘 AI 架构师、AI 系统架构师这类岗位，因为我做的就是把模型真正落到产品上的架构决策。」</p>
+    <p>「我是懂硬件的 AI 架构师。15 年嵌入式让我比纯算法背景的人更懂硬件边界、内存、功耗和量产，而这正是端侧 AI 落地最缺的。我的代表作是一个跑在 RK3576 上的端侧 AI 语音助手：端侧用 1.5B~3B int4 做意图识别和简单对话，复杂推理走云端，断网降级到本地 1.5B。技术上，3B int4 约 2GB、RK3576 带宽是 LPDDR5-4800 的 19GB/s 峰值（NPU 独占 12~16、产品 7~11），产品场景 3B int4 只有 3.5~5.5 tok/s，瓶颈在带宽；框架上 3576 用 RKNN、跨平台验证用 llama.cpp + GGUF；KV Cache 在 8K 上下文约几百 MB，够用但要防争带宽。项目落地时我按 STAR 拆：离线可用、隐私不出端、BOM 约 $42、平均功耗 2.5W 做到 8 小时续航。我应聘端侧 AI 架构师、边缘 AI 架构师、AI 系统架构师这类岗位，因为我做的就是把模型真正落到产品上的架构决策。」</p>
     <p style="margin:0"><strong>能力标签：</strong>求职准备到位——简历能过筛、话术能脱口、讲解稿能讲 5 分钟，具备端侧 AI 架构师岗位的完整表达能力。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li><strong>数字要背熟：</strong>3B int4 ≈ 2GB、带宽 ≈ 35GB/s、理论 17 tok/s、实测 5~10——被追问时直接报，别含糊。</li>
+      <li><strong>数字要背熟：</strong>3B int4 ≈ 2GB、带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）、3B int4 产品 3.5~5.5 tok/s（NPU 独占 6~8）——被追问时直接报，别含糊。</li>
       <li><strong>选型对比要会说：</strong>RK3576 vs RK3588 的取舍（便宜、带宽低些但够用、适合中端），体现你的成本与能力权衡意识。</li>
       <li><strong>项目要能演示：</strong>面试若要求，能当场跑第 12 章的 demo（对话 + 工具 + RAG + 断网降级）。</li>
       <li><strong>面向三类岗位微调措辞：</strong>端侧 AI 架构师重"落地"，边缘 AI 架构师重"部署与运维"，AI 系统架构师重"系统分层与端云协同"。</li>

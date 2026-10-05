@@ -67,7 +67,7 @@
 ④ NPU 利用率
      cat /sys/kernel/debug/rknpu/load   （看到百分比）
 
-⑤ 带宽利用率 = decode_tok/s × 模型真实GB ÷ 35
+⑤ 带宽利用率 = decode_tok/s × 模型真实GB ÷ 有效带宽上限（NPU 独占 12~16 GB/s）
      判断"是不是带宽瓶颈"的核心尺子
 
 <span class="k">一句话：新用户感受 TTFT，长时间对话感受 decode tok/s。</span></div>
@@ -76,7 +76,7 @@
     <p>没基线就没优化。先测「什么都不改」的原始数字，再算理论加速上限，避免白忙。</p>
     <div class="board"><span class="k">基线表（先填原始配置）</span>
 配置              TTFT    decode   内存     NPU   带宽利用率
-baseline          1200ms  8.0 t/s  2.1GB   70%   45.7%
+baseline          1200ms  6.0 t/s  2.1GB   70%   75.0%
 ...
 
 <span class="k">Amdahl 定律：先看瓶颈占总时间多少</span>
@@ -103,24 +103,24 @@ w8a8   最稳，LLM 上未必最快
 
 <span class="k">旋钮三：batch size（并发数）</span>
 单路 bandwidth-bound，多路可"摊薄"权重读取：
-  batch=1  → 8.0 t/s，带宽利用率 45.7%
-  batch=4  → <span class="g">14 t/s（合计）</span>，利用率 <span class="g">80%</span>
-  batch=8  → 15 t/s（合计），利用率 85%，但单路 TTFT 变差
+  batch=1  → 6.0 t/s，带宽利用率 75.0%
+  batch=4  → <span class="g">7.6 t/s（合计）</span>，利用率 <span class="g">95%</span>
+  batch=8  → 7.9 t/s（合计），利用率 98%，但单路 TTFT 变差
 <span class="k">batching 提吞吐、不降延迟——适合多用户服务端场景。</span></div>
     <p><b>练习（板书填空）：</b>把 batch 提升后的带宽利用率算出来，再展开答案。</p>
     <table class="tight">
       <thead><tr><th>batch</th><th>合计 tok/s</th><th>模型(GB)</th><th>有效带宽(GB/s)</th><th>利用率(填)</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td>8.0</td><td>2.0</td><td>16.0</td><td class="fill">?</td></tr>
-        <tr><td>2</td><td>11.5</td><td>2.0</td><td>23.0</td><td class="fill">?</td></tr>
-        <tr><td>4</td><td>14.0</td><td>2.0</td><td>28.0</td><td class="fill">?</td></tr>
-        <tr><td>8</td><td>15.0</td><td>2.0</td><td>30.0</td><td class="fill">?</td></tr>
+        <tr><td>1</td><td>6.0</td><td>2.0</td><td>12.0</td><td class="fill">?</td></tr>
+        <tr><td>2</td><td>7.0</td><td>2.0</td><td>14.0</td><td class="fill">?</td></tr>
+        <tr><td>4</td><td>7.6</td><td>2.0</td><td>15.2</td><td class="fill">?</td></tr>
+        <tr><td>8</td><td>7.9</td><td>2.0</td><td>15.8</td><td class="fill">?</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案（先自己填！）</summary>
-      <p>利用率 = 有效带宽 ÷ 35：1→<b>45.7%</b>，2→<b>65.7%</b>，4→<b>80.0%</b>，8→<b>85.7%</b>。<br>
-      规律：batch 越大越接近带宽上限，但收益递减；到 8 路只多 1 t/s，成本（内存×8、TTFT 变差）不划算——这就是「甜点」在哪的判断。</p>
+      <p>利用率 = 有效带宽 ÷ 16：1→<b>75.0%</b>，2→<b>87.5%</b>，4→<b>95.0%</b>，8→<b>98.8%</b>。<br>
+      规律：batch 越大越接近带宽上限，但收益递减；到 8 路只多 0.3 t/s，成本（内存×8、TTFT 变差）不划算——这就是「甜点」在哪的判断。</p>
     </details>
 
     <h3><span class="tag-lesson">讲解</span>4. 板书④：CPU + NPU 混合调度</h3>
@@ -165,11 +165,11 @@ w8a8   最稳，LLM 上未必最快
     <h3><span class="tag-lesson">讲解</span>6. 板书⑥：找最优组合（配置矩阵 + 帕累托）</h3>
     <div class="board"><span class="k">实验矩阵（示例，一次动一个变量）</span>
 #  quant  core  batch  TTFT    decode  内存   带宽利用
-1  w4a16   1     1      1200ms  8.0 t/s 2.1GB  45.7%
-2  w8a16   1     1      1300ms  6.5 t/s 2.4GB  44.6%
-3  w4a16   1     4      1500ms  14  t/s 2.9GB  80.0%
-4  w4a16   1     8      1700ms  15  t/s 3.6GB  85.7%
-5  w4a16+投机 1  1      900ms   12  t/s 2.5GB  68.6%
+1  w4a16   1     1      1200ms  6.0 t/s 2.1GB  75.0%
+2  w8a16   1     1      1300ms  5.0 t/s 2.4GB  62.5%
+3  w4a16   1     4      1500ms  7.6 t/s 2.9GB  95.0%
+4  w4a16   1     8      1700ms  7.9 t/s 3.6GB  98.8%
+5  w4a16+投机 1  1      900ms   7.2 t/s 2.5GB  90.0%
 
 <span class="k">选型原则：按目标选，不是越大越好</span>
   要低延迟单路对话     → 选 5（投机解码）：TTFT 低、tok/s 高
@@ -178,16 +178,16 @@ w8a8   最稳，LLM 上未必最快
   <span class="g">在"满足延迟目标"的候选里，挑内存最小的那个</span></div>
 
     <h3><span class="tag-lesson">讲解</span>7. 板书⑦：给延迟目标反推配置</h3>
-    <div class="board"><span class="k">任务：3B int4，目标 decode ≥ 15 tok/s，内存 ≤ 4GB</span>
+    <div class="board"><span class="k">任务：3B int4，目标 decode ≥ 6 tok/s（NPU 独占），内存 ≤ 4GB</span>
 
-① 理论天花板：35 ÷ 2.0 = 17.5 t/s  → 目标 15 很紧，需高利用率
-② 目标利用率：15 × 2.0 ÷ 35 = <span class="g">85.7%</span>
-③ 单路(w4a16)只有 45.7% → 不够
+① 理论天花板（NPU 独占）：16 ÷ 2.0 = 8.0 t/s  → 目标 6 可达，需高利用率
+② 目标利用率：6 × 2.0 ÷ 16 = <span class="g">75%</span>
+③ 单路(w4a16) 6.0 t/s = 75%，刚好达标；产品场景会掉到 3.5~5.5
 ④ 手段：
-   - batch=8 → 85.7% ✅ 但内存 3.6GB（≤4GB，勉强过）；单路反而更慢
-   - 投机解码 → 68.6%，再叠 w4a16 微调 → 接近
-   - batching + 投机 组合 → 冲 85%+
-⑤ 结论：<span class="g">选 batch=4~8 或投机解码；若必须单路且低延迟，投机解码优先</span>
+   - batch=4 → 7.6 t/s（95%）✅ 内存 2.9GB（≤4GB）；单路 TTFT 变差
+   - 投机解码 → 7.2 t/s（90%），单路低延迟优先
+   - batching + 投机 组合 → 冲 95%+
+⑤ 结论：<span class="g">先保单路达 6 tok/s，再用 batch 或投机解码冲利用率</span>
 
 <span class="k">被问"给个延迟目标怎么调"→ 标准答：</span>
 「先算理论天花板确认目标可达 → 再算需要的带宽利用率 →
@@ -378,7 +378,7 @@ w8a8   最稳，LLM 上未必最快
   <div class="note">
     <ul class="clean" style="padding-left:2px">
       <li>3576 是<strong>单核 NPU</strong>，<code>num_npu_core</code> 固定 1，调核心数没意义；这一点要说清，别照搬 3588 的经验。</li>
-      <li>带宽 35GB/s 是天花板，batch 与投机解码是<strong>提升带宽利用率的正路</strong>；超过 85% 利用率后收益递减。</li>
+      <li>带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s），batch 与投机解码是<strong>提升带宽利用率的正路</strong>；超过 ~95% 利用率后收益递减。</li>
       <li>NPU 利用率看 <code>/sys/kernel/debug/rknpu/load</code>；若 CPU 长期 ≥100% 而 NPU 低，说明有算子掉 CPU（fallback），要回第 9 章查 build 日志。</li>
       <li>内存有限，batch 翻倍内存也翻倍——3B int4 batch=8 约 3.6GB，别再叠加其它服务。</li>
     </ul>

@@ -109,13 +109,15 @@
   AI 小 → 数据搬进来还没算几下就没了 → <span class="r">带宽瓶颈</span>（memory-bound）
 
 <span class="k">机器的「脊点」= 峰值算力 ÷ 内存带宽：</span>
-  RK3576：6 TOPS int8 ÷ 35 GB/s = 6000 / 35 ≈ <span class="g">171 FLOP / Byte</span>
-  只要任务 AI &lt; 171 → 判为带宽瓶颈
+  RK3576：6 TOPS int8 = 6000 GFLOP/s
+  · 用 NPU 独占 12~16 GB/s → 脊点 ≈ <span class="g">375~500 FLOP / Byte</span>
+  · 用理论峰值 19 GB/s     → 脊点 ≈ <span class="g">316 FLOP / Byte</span>
+  只要任务 AI &lt; 脊点（≥316）→ 判为带宽瓶颈
 
 <span class="k">decode 的 AI 有多小？</span>
   3B int4 权重 ≈ 2 GB，生成 1 token ≈ 2×3G = 6 GFLOP
   AI ≈ 6 GFLOP ÷ 2 GB = <span class="r">3 FLOP / Byte</span>
-  3 ≪ 171 → <span class="r">严重带宽瓶颈</span>
+  3 ≪ 316 → <span class="r">严重带宽瓶颈</span>
 
 <span class="k">prefill 的 AI 呢？</span>
   512 token 一次并行，权重读一次算一大片 → AI 高，<span class="g">偏算力瓶颈</span></div>
@@ -124,12 +126,13 @@
     <p>三个数字摆一起，结论自动浮现。</p>
     <div class="board"><span class="k">三个数字：</span>
   NPU 算力 6 TOPS int8      （很快，够用）
-  内存带宽 ≈ <span class="r">35 GB/s</span>        （真正瓶颈）
+  内存带宽三档：理论 19 / NPU 独占 12~16 / 产品 <span class="r">7~11 GB/s</span>
   模型 int4 3B ≈ 2 GB       （每步都要整个读一遍）
 
-<span class="k">理论天花板：</span>
-  decode 理论最高 = 35 GB/s ÷ 2 GB = <span class="g">17.5 token/s</span>
-  再扣掉读 KV Cache、算子开销、非理想访存 → <span class="g">实测 5~10 tok/s</span>
+<span class="k">tok/s 区间（带宽 ÷ 2 GB）：</span>
+  NPU 独占 = 12~16 ÷ 2 = <span class="g">6~8 tok/s</span>
+  产品真实 =  7~11 ÷ 2 = <span class="g">3.5~5.5 tok/s</span>
+  再扣掉读 KV Cache、算子开销、非理想访存 → 实际还会更低
 
 <span class="k">推论（重要）：</span>
   把 NPU 换成算力翻倍的芯片、但带宽不变 → decode <span class="r">几乎不变</span>
@@ -137,7 +140,7 @@
 
 <span class="k">结论：3576 上 LLM decode 的天花板由带宽决定，不是算力。</span>
   优化方向 = 「少读、少存」，不是「堆算力」。</div>
-    <div class="callout"><strong>一句话结论：</strong>带宽 35 GB/s ÷ 模型 2 GB ≈ 17 tok/s，这就是端侧 LLM 的物理上限。</div>
+    <div class="callout"><strong>一句话结论：</strong>带宽 12~16 GB/s ÷ 模型 2 GB ≈ 6~8 tok/s（产品场景 7~11 GB/s → 3.5~5.5），这就是端侧 LLM 的物理上限。</div>
 
     <h3><span class="tag-lesson">讲解</span>6. 板书⑥：瓶颈定位速查</h3>
     <div class="board"><span class="k">现象 → 判定 → 对策</span>
@@ -150,7 +153,7 @@
 <span class="k">速算模板（背下来）：</span>
   1) KV / token = 2×L×kv_heads×d×bytes
   2) 总量 = ×seq_len
-  3) 瓶颈 = 比较 AI 和脊点 (3576 ≈ 171)</div>
+  3) 瓶颈 = 比较 AI 和脊点 (3576 ≈ 316~500)</div>
 
     <h3><span class="tag-lesson">讲解</span>7. 板书⑦：PagedAttention —— 把 KV Cache 分页分块</h3>
     <p>KV Cache 体积大、生命周期又长，怎么「摆」在显存里，本身就是一个系统问题。<b>PagedAttention</b> 借用了操作系统的<b>虚拟内存分页</b>思想。</p>
@@ -277,8 +280,8 @@
     <div class="head"><span class="num">1</span><h3>瓶颈判定推导</h3></div>
     <dl>
       <dt>目标</dt><dd>用算术强度手算，证明 RK3576 上 decode 是带宽瓶颈。</dd>
-      <dt>要掌握</dt><dd>算术强度定义；机器「脊点」算法（6 TOPS ÷ 35 GB/s）；decode 的 AI 计算。</dd>
-      <dt>实操步骤</dt><dd>写 <code>bottleneck.md</code>：①给出 RK3576 脊点推导（≈171）②算 decode AI（≈3）③算 prefill AI ④结论「decode 带宽瓶颈、prefill 偏算力」。</dd>
+      <dt>要掌握</dt><dd>算术强度定义；机器「脊点」算法（6 TOPS ÷ 12~16 GB/s ≈ 375~500）；decode 的 AI 计算。</dd>
+      <dt>实操步骤</dt><dd>写 <code>bottleneck.md</code>：①给出 RK3576 脊点推导（≈316~500）②算 decode AI（≈3）③算 prefill AI ④结论「decode 带宽瓶颈、prefill 偏算力」。</dd>
       <dt>检验标准</dt><dd>能解释「为什么换更强 NPU 但带宽不变，decode 速度几乎不变」。</dd>
     </dl>
   </div>
@@ -313,7 +316,7 @@
     <div class="head"><span class="num">5</span><h3>秒答训练</h3></div>
     <dl>
       <dt>目标</dt><dd>把本章结论练成条件反射（面试必问）。</dd>
-      <dt>实操步骤</dt><dd>自问自答：KV Cache 公式是什么？3B 8K 的 KV 多大？GQA 为什么省内存？算术强度怎么算？RK3576 为什么是带宽瓶颈？decode 理论天花板是多少？PagedAttention 解决什么问题？KV 量化为什么比权重量化更敏感？</dd>
+      <dt>实操步骤</dt><dd>自问自答：KV Cache 公式是什么？3B 8K 的 KV 多大？GQA 为什么省内存？算术强度怎么算？RK3576 为什么是带宽瓶颈？decode 的 tok/s 区间是多少（NPU 独占 / 产品）？PagedAttention 解决什么问题？KV 量化为什么比权重量化更敏感？</dd>
       <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
     </dl>
   </div>
@@ -334,7 +337,7 @@
     <li>秒算 KV Cache：Qwen2.5-3B 每 token 约 36 KB，8K 约 288 MB。</li>
     <li>能背出公式 <code>2 × layers × kv_heads × head_dim × seq_len × bytes</code> 并解释每项含义。</li>
     <li>能说出 GQA（K/V=2 头）是内存与精度的折中，比 MHA 省 8 倍。</li>
-    <li>能判断「RK3576 上 decode 是带宽瓶颈」，并用算术强度（3 ≪ 171）说明。</li>
+    <li>能判断「RK3576 上 decode 是带宽瓶颈」，并用算术强度（3 ≪ 316~500）说明。</li>
     <li>能讲清 PagedAttention 的分页思想，以及它解决的碎片 / 并发利用率问题。</li>
     <li>能说清 KV 量化（fp16→int8/int4）减半/四分之一带宽，以及它对 PPL 比权重量化更敏感的原因。</li>
   </ul>
@@ -342,14 +345,14 @@
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「KV Cache 是为了避免 decode 时重算历史 K/V，公式是 2 乘层数乘 KV 头数乘 head_dim 乘序列长度乘字节数。以 Qwen2.5-3B 为例，36 层、GQA、KV 头数 2、head_dim 128，每 token 约 36 KB，8K 上下文大概 288 MB。判断瓶颈我用算术强度：计算量除以访存量。RK3576 的脊点是 6 TOPS 除以 35 GB/s 约等于 171，而 decode 每 token 只做 2×3G 的浮点运算却要读 2 GB 权重，算术强度约等于 3，远低于 171，所以 decode 是带宽瓶颈。理论天花板是 35 GB/s 除以 2 GB 约 17 token/s，实测 5 到 10。所以优化方向是量化、GQA、KV Cache 量化去少读少存，而不是堆算力。KV Cache 的内存管理上，主流是 PagedAttention——把它切成固定大小的 block 分页分配、用块表映射，思路跟操作系统虚拟内存分页一样，能消除碎片、提高并发时的显存利用率，是 vLLM 的核心机制；端侧不一定直接跑 vLLM，但原理和取舍要讲得清。KV 本身也能量化，fp16 到 int8 直接减半带宽、到 int4 降到四分之一，但 KV 参与每一步注意力、误差会随上下文累积，所以比权重量化对 PPL 更敏感，端侧长上下文我一般先上 int8 KV。」</p>
+    <p>「KV Cache 是为了避免 decode 时重算历史 K/V，公式是 2 乘层数乘 KV 头数乘 head_dim 乘序列长度乘字节数。以 Qwen2.5-3B 为例，36 层、GQA、KV 头数 2、head_dim 128，每 token 约 36 KB，8K 上下文大概 288 MB。判断瓶颈我用算术强度：计算量除以访存量。RK3576 的脊点是 6 TOPS 除以 NPU 独占 12~16 GB/s 约等于 375~500（用理论峰值 19 GB/s 也才约 316），而 decode 每 token 只做 2×3G 的浮点运算却要读 2 GB 权重，算术强度约等于 3，远低于脊点，所以 decode 是带宽瓶颈。tok/s 上限是 NPU 独占 12~16 GB/s 除以 2 GB 约 6~8，产品场景带宽 7~11 GB/s 只有 3.5~5.5。所以优化方向是量化、GQA、KV Cache 量化去少读少存，而不是堆算力。KV Cache 的内存管理上，主流是 PagedAttention——把它切成固定大小的 block 分页分配、用块表映射，思路跟操作系统虚拟内存分页一样，能消除碎片、提高并发时的显存利用率，是 vLLM 的核心机制；端侧不一定直接跑 vLLM，但原理和取舍要讲得清。KV 本身也能量化，fp16 到 int8 直接减半带宽、到 int4 降到四分之一，但 KV 参与每一步注意力、误差会随上下文累积，所以比权重量化对 PPL 更敏感，端侧长上下文我一般先上 int8 KV。」</p>
     <p style="margin:0"><strong>能力标签：</strong>能秒算 KV Cache、能定位算力/带宽瓶颈、能讲清 KV 内存管理与量化——内存测算、瓶颈诊断与 KV 优化能力。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 内存带宽约 <strong>35 GB/s</strong>，是 LLM decode 的硬天花板；算力 6 TOPS 反而不是瓶颈。</li>
+      <li>3576 内存带宽三档：理论峰值约 <strong>19 GB/s</strong>、NPU 独占 <strong>12~16 GB/s</strong>、产品真实 <strong>7~11 GB/s</strong>——产品场景才是 LLM decode 的硬天花板；算力 6 TOPS 反而不是瓶颈。</li>
       <li>LPDDR5 双通道才能跑满带宽，工程上要注意内存颗粒与频率配置。</li>
       <li>KV Cache 与模型权重<strong>抢同一块带宽</strong>，长上下文会同时拖慢 decode。</li>
       <li>端侧长上下文优先考虑 <strong>KV Cache int8 量化</strong>（直接减半带宽压力）；int4 KV 收益更大但精度风险高，需实测 PPL。</li>

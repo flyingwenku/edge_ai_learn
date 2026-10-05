@@ -181,11 +181,11 @@
 
 <span class="k">手算示范：</span>
   prompt eval 512 tok / 12.0 s → 512 / 12.0 = <span class="g">42.7 tok/s</span>（prefill）
-  eval        128 tok / 16.0 s → 128 / 16.0 = <span class="g">8.0 tok/s</span>（decode）
+  eval        128 tok / 25.6 s → 128 / 25.6 = <span class="g">5.0 tok/s</span>（decode）
   load        2.1 s
 
 <span class="k">判读：</span>
-  decode 8 tok/s 就是用户看到的出字速度；<span class="r">这才是优化重点</span>。
+  decode 5 tok/s 就是用户看到的出字速度（3B int4 产品场景 3.5~5.5 量级）；<span class="r">这才是优化重点</span>。
   prefill 慢 → 首字延迟高（长 prompt 场景要专门优化）。</div>
 
     <h3><span class="tag-lesson">讲解</span>7. 板书⑦：选型决策（背下来）</h3>
@@ -328,7 +328,7 @@
       <li>模型落地链路是 <strong>PyTorch → ONNX → .rknn</strong>：ONNX 这层的算子/opset 兼容性直接决定转换成败。</li>
       <li>RKNN 转换必须给<strong>校准集</strong>，第 9 章会用真实数据做校准。</li>
       <li>端侧首字延迟主要卡在 <strong>prefill</strong>，长 prompt 场景要专门优化（如分块、批处理）。</li>
-      <li>decode 阶段是<strong>带宽瓶颈</strong>（第 5 章展开），3576 的 35 GB/s 是硬约束。</li>
+      <li>decode 阶段是<strong>带宽瓶颈</strong>（第 5 章展开），3576 带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）是硬约束。</li>
     </ul>
   </div>
 

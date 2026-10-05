@@ -154,21 +154,22 @@
   GQA:  36 KB × 8192 ≈ <span class="g">0.30 GB（302 MB）</span>
   MQA:  18 KB × 8192 ≈ 0.15 GB（151 MB）
 
-<span class="k">再算"每生成 1 个 token 要读多少 KV"（带宽 35 GB/s）</span>
-  MHA: 2.42 GB / 35 = <span class="r">69 ms</span>
-  GQA: 0.30 GB / 35 = <span class="g">8.6 ms</span>
-  MQA: 0.15 GB / 35 =  4.3 ms
+<span class="k">再算"每生成 1 个 token 要读多少 KV"（NPU 独占 12~16 GB/s）</span>
+  MHA: 2.42 GB / 12~16 = <span class="r">151~202 ms</span>
+  GQA: 0.30 GB / 12~16 = <span class="g">19~25 ms</span>
+  MQA: 0.15 GB / 12~16 =   9~13 ms
 
-<span class="k">加上权重（3B int4 ≈ 1.5 GB → 1.5/35 ≈ 43 ms）</span>
-  GQA 总耗时 ≈ 43 + 8.6 = 51.6 ms  →  ≈ <span class="g">19 tok/s</span>
-  MHA 总耗时 ≈ 43 + 69  = 112  ms  →  ≈  <span class="r">9 tok/s</span>
+<span class="k">加上权重（3B int4 ≈ 2.0 GB → 2.0/12~16 ≈ 125~167 ms）</span>
+  GQA 总耗时 ≈ 144~192 ms  →  ≈ <span class="g">5.2~6.9 tok/s</span>
+  MHA 总耗时 ≈ 276~369 ms  →  ≈  <span class="r">2.7~3.6 tok/s</span>
 
-<span class="k">结论：8K 上下文下，GQA 相对 MHA 把吞吐拉回约 2 倍。</span></div>
-    <div class="callout"><b>RK3576 偏爱 GQA 的真正原因：</b>decode 阶段是<b>带宽瓶颈</b>，每生成一个 token 都要把整段 KV Cache 从内存读一遍。3576 带宽只有 ~35 GB/s，MHA 的长上下文 KV 会直接把带宽吃光；GQA 把 KV 砍到 1/8，等于给带宽"续命"。<b>GQA 省的不是存储，是每 token 的读取带宽。</b></div>
+<span class="k">结论：8K 上下文下，GQA 相对 MHA 把吞吐拉回约 2 倍。</span>
+<span class="k">产品真实场景带宽只有 7~11 GB/s，这些数字还会再掉一档。</span></div>
+    <div class="callout"><b>RK3576 偏爱 GQA 的真正原因：</b>decode 阶段是<b>带宽瓶颈</b>，每生成一个 token 都要把整段 KV Cache 从内存读一遍。3576 的带宽三档里最大的理论峰值也只有 19 GB/s，产品场景实际只有 7~11 GB/s（NPU 独占 12~16），MHA 的长上下文 KV 会直接把带宽吃光；GQA 把 KV 砍到 1/8，等于给带宽"续命"。<b>GQA 省的不是存储，是每 token 的读取带宽。</b></div>
 
     <p><b>板书填空 · 请先自己填，再展开答案：</b>下面是一张 KV Cache 手算表（模型同上）。</p>
     <table class="tight">
-      <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV 耗时(@35GB/s)</th></tr></thead>
+      <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV 耗时(@12~16GB/s)</th></tr></thead>
       <tbody>
         <tr><td>MHA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
         <tr><td>GQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
@@ -178,11 +179,11 @@
     <details>
       <summary>点击展开答案</summary>
       <table class="tight">
-        <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV(@35GB/s)</th></tr></thead>
+        <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV(@12~16GB/s)</th></tr></thead>
         <tbody>
-          <tr><td>MHA</td><td>16</td><td>288 KB</td><td>≈ 2.42 GB</td><td>69 ms</td></tr>
-          <tr><td>GQA</td><td>2</td><td>36 KB</td><td>≈ 302 MB</td><td>8.6 ms</td></tr>
-          <tr><td>MQA</td><td>1</td><td>18 KB</td><td>≈ 151 MB</td><td>4.3 ms</td></tr>
+          <tr><td>MHA</td><td>16</td><td>288 KB</td><td>≈ 2.42 GB</td><td>151~202 ms</td></tr>
+          <tr><td>GQA</td><td>2</td><td>36 KB</td><td>≈ 302 MB</td><td>19~25 ms</td></tr>
+          <tr><td>MQA</td><td>1</td><td>18 KB</td><td>≈ 151 MB</td><td>9~13 ms</td></tr>
         </tbody>
       </table>
     </details>
@@ -272,8 +273,8 @@
     <dl>
       <dt>目标</dt><dd>用代码把板书④的账算出来，做到"输入 config，输出三种方案的 KV 大小与带宽耗时"。</dd>
       <dt>要掌握</dt><dd>KV Cache 公式；带宽耗时 = KV / 带宽；不同上下文长度的变化趋势。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：输入 <code>d=2048, heads=16, head_dim=128, layers=36, ctx=[1024,4096,8192]</code>，分别按 MHA/GQA(kv=2)/MQA 打印每 token KV、总 KV(MB)、@35GB/s 每 token 读取耗时(ms)；再打印"权重1.5GB + KV"的估算 tok/s。复用第 1 章内存估算思路。</dd>
-      <dt>检验标准</dt><dd>脚本跑通，输出能复现板书数字：GQA 8K ≈ 302 MB、每 token 读 8.6 ms。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：输入 <code>d=2048, heads=16, head_dim=128, layers=36, ctx=[1024,4096,8192]</code>，分别按 MHA/GQA(kv=2)/MQA 打印每 token KV、总 KV(MB)、@12~16GB/s 每 token 读取耗时(ms)；再打印"权重2.0GB + KV"的估算 tok/s。复用第 1 章内存估算思路。</dd>
+      <dt>检验标准</dt><dd>脚本跑通，输出能复现板书数字：GQA 8K ≈ 302 MB、每 token 读 KV 约 19~25 ms。</dd>
     </dl>
   </div>
   <div class="task pm">
@@ -315,14 +316,14 @@
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「注意力本质是加权取值：Q 是提问、K 是被检索的索引、V 是内容，用 QKᵀ 算相似度、softmax 归一化、再对 V 加权求和，除以 √d_k 是为了防止分数随维度变大后 softmax 饱和、梯度消失。端侧最关键的是 KV Cache：MHA 每个 Q 头一组 KV，GQA 是多个头共享一组、把 KV 份数从 16 降到 2，KV Cache 直接砍到约 1/8。我们拿 3B 模型算过，8K 上下文下 MHA 的 KV 约 2.4GB、GQA 只有 300MB，因为 decode 是带宽瓶颈、RK3576 带宽只有 35GB/s，GQA 每生成一个 token 读 KV 从 69ms 降到 8.6ms，端到端吞吐能拉回约两倍，所以端侧一律优先 GQA。位置编码上现在主流是 RoPE，用旋转角度差编码相对位置，没有额外参数、外推友好，长上下文则看模型有没有做 NTK 或 YaRN 外推。」</p>
+    <p>「注意力本质是加权取值：Q 是提问、K 是被检索的索引、V 是内容，用 QKᵀ 算相似度、softmax 归一化、再对 V 加权求和，除以 √d_k 是为了防止分数随维度变大后 softmax 饱和、梯度消失。端侧最关键的是 KV Cache：MHA 每个 Q 头一组 KV，GQA 是多个头共享一组、把 KV 份数从 16 降到 2，KV Cache 直接砍到约 1/8。我们拿 3B 模型算过，8K 上下文下 MHA 的 KV 约 2.4GB、GQA 只有 300MB，因为 decode 是带宽瓶颈、RK3576 带宽只有 7~11GB/s（产品场景，NPU 独占 12~16），GQA 每生成一个 token 读 KV 从约 200ms 降到约 25ms，端到端吞吐能拉回约两倍，所以端侧一律优先 GQA。位置编码上现在主流是 RoPE，用旋转角度差编码相对位置，没有额外参数、外推友好，长上下文则看模型有没有做 NTK 或 YaRN 外推。」</p>
     <p style="margin:0"><strong>能力标签：</strong>能讲清注意力机制与 KV Cache 的端侧取舍——注意力机制能力。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 的瓶颈是<strong>带宽（~35 GB/s）</strong>，不是算力。注意力层选型的第一标准永远是"KV Cache 省不省带宽"。</li>
+      <li>3576 的瓶颈是<strong>带宽（三档：峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）</strong>，不是算力。注意力层选型的第一标准永远是"KV Cache 省不省带宽"。</li>
       <li>优先选 <strong>GQA 模型</strong>（Qwen2.5、Gemma、MiniCPM 都是 GQA），MHA 长上下文会明显掉速。</li>
       <li>MLA 省得更多，但 RKNN/NPU <strong>不直接支持</strong>，端侧落地成本高；目前仍以 GQA 为甜点。</li>
       <li>做长上下文方案时，先确认模型的 <code>max_position_embeddings</code>，不要盲目拉长——超标会静默"变傻"。</li>

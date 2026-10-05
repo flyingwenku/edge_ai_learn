@@ -175,17 +175,18 @@ PPL' = exp(0.5400) = <span class="r">1.716</span>
      3576 上固定 1，调它没意义；迁 3588 时才有 1/2/3 可选
 
 <span class="k">带宽利用率（判断跑没跑满的关键指标）</span>
-  decode 实测 8 tok/s，模型 int4 3B ≈ 2.0 GB
-  有效带宽 = 8 × 2.0 = 16 GB/s
-  利用率   = 16 / 35 = <span class="g">45.7%</span>
-  <span class="k">→ &lt; 60% 说明没跑满，还有调优空间（batch/算子）</span></div>
-    <div class="callout"><strong>一句话记住：</strong><span class="key">带宽利用率 = tok/s × 模型真实GB ÷ 35</span>。它是判断「瓶颈在带宽还是在别处」的尺子，比单纯看 tok/s 有用得多。</div>
+  decode 实测 6 tok/s（NPU 独占场景），模型 int4 3B ≈ 2.0 GB
+  有效带宽 = 6 × 2.0 = 12 GB/s
+  利用率   = 12 / 16 = <span class="g">75%</span>（对 NPU 独占上沿 16 GB/s）
+  <span class="k">→ &lt; 60% 说明没跑满，还有调优空间（batch/算子）</span>
+  <span class="k">→ 产品真实场景可达带宽只有 7~11 GB/s，decode 会降到 3.5~5.5 tok/s</span></div>
+    <div class="callout"><strong>一句话记住：</strong><span class="key">带宽利用率 = tok/s × 模型真实GB ÷ 有效带宽上限</span>（NPU 独占 12~16 / 产品 7~11 GB/s）。它是判断「瓶颈在带宽还是在别处」的尺子，比单纯看 tok/s 有用得多。</div>
 
     <h3><span class="tag-lesson">讲解</span>6. 板书⑥：上线判断（本章结论）</h3>
     <div class="board"><span class="k">能不能上线？三关过完才敢点头</span>
 
 ① 精度关   PPL 涨幅 &lt;5% 且人肉对比无事实错误
-② 性能关   tok/s 达产品延迟目标（如 &gt; 8 tok/s）
+② 性能关   tok/s 达产品延迟目标（如 &gt; 5 tok/s）
            且带宽利用率 ≥ 60%（说明已榨干带宽）
 ③ 稳定关   连续对话 30 分钟不 OOM、不崩、显存/内存平稳
 
@@ -194,7 +195,7 @@ PPL' = exp(0.5400) = <span class="r">1.716</span>
 
 <span class="k">被问「这个量化方案能不能上线」→ 标准答：</span>
 「我按三关判：PPL 涨幅、人肉对比、带宽利用率与稳定性。
-3B w4a16 若 PPL 涨幅 &lt;5%、实测 &gt;8 tok/s、利用率 ≥60%、长跑不 OOM、
+3B w4a16 若 PPL 涨幅 &lt;5%、实测 &gt;5 tok/s、利用率 ≥60%、长跑不 OOM、
 人肉无事实错误——就上线；否则退 w8a16 或补校准集重转。」</div>
 
     <h3><span class="tag-lesson">讲解</span>7. 板书⑦：ONNX 算子排坑（PyTorch → ONNX → RKNN）</h3>
@@ -245,10 +246,10 @@ ONNX 阶段报错 → 改导出；RKNN 阶段报错 → 换/拆算子或固定 s
   每次 NPU ↔ CPU 切换，张量要：
     ① 从 NPU 内存搬回 CPU 内存
     ② CPU 算完再搬回 NPU
-  搬运量 = 该张量大小，走的是<b>有限的片外带宽</b>（3576 仅 ~35 GB/s）
+  搬运量 = 该张量大小，走的是<b>有限的片外带宽</b>（3576 产品场景仅 7~11 GB/s，NPU 独占 12~16）
 
   <span class="r">一次特征图搬运 = 几十 MB → 十几毫秒；
-  回退层多起来，decode 速度可以从 15 tok/s 掉到 3 tok/s。</span>
+  回退层多起来，decode 速度可以从 6~8 tok/s 掉到 2 tok/s 上下。</span>
 
 <span class="k">更糟的是</span>：回退常常落在「每个 block 都有」的算子上，
 导致 NPU/CPU 反复横跳，搬运开销 ×层数，直接吃掉全部收益。</div>
@@ -392,7 +393,7 @@ ONNX 阶段报错 → 改导出；RKNN 阶段报错 → 换/拆算子或固定 s
     <li>能说清「量化配置三件套」分别是什么、少哪个会怎样。</li>
     <li>能解释「为什么校准集不能用随机数据」。</li>
     <li>会用 <span class="key">PPL 涨幅 &lt;5% / 5-10% / &gt;10%</span> 判据给精度下结论。</li>
-    <li>会算带宽利用率（tok/s × 模型GB ÷ 35），并判断是否跑满。</li>
+    <li>会算带宽利用率（tok/s × 模型GB ÷ 有效带宽上限），并判断是否跑满。</li>
     <li>给「这个量化方案能不能上线」能按「精度关 / 性能关 / 稳定关」三关作答。</li>
     <li>能说出 ONNX 三类高频报错（不支持算子 / opset 不匹配 / 动态 shape）的定位与处理。</li>
     <li>能用 build 日志与 profiling 判断哪些算子回退到 CPU，并说清为什么搬运会拖垮性能。</li>
@@ -401,7 +402,7 @@ ONNX 阶段报错 → 改导出；RKNN 阶段报错 → 换/拆算子或固定 s
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「端侧量化部署我走 rknn-toolkit2 / rkllm：先导出权重，再给一份匹配线上分布的校准集做 PTQ，量化配置三件套是 dataset、quantized_dtype、quantized_algorithm——dtype 决定多省、algorithm 决定多准，3576 上我默认 w4a16 + normal，group_size 128。转完我会量化前后对比：算 PPL，涨幅控制在 5% 以内，再做一轮 20 题人肉对比确认没有事实错误；性能上看带宽利用率，tok/s 乘模型大小除以 35GB/s，到 60% 以上才算榨干带宽。三关都过我才判断可以上线，否则回退 w8a16 或换校准集重转。」</p>
+    <p>「端侧量化部署我走 rknn-toolkit2 / rkllm：先导出权重，再给一份匹配线上分布的校准集做 PTQ，量化配置三件套是 dataset、quantized_dtype、quantized_algorithm——dtype 决定多省、algorithm 决定多准，3576 上我默认 w4a16 + normal，group_size 128。转完我会量化前后对比：算 PPL，涨幅控制在 5% 以内，再做一轮 20 题人肉对比确认没有事实错误；性能上看带宽利用率，tok/s 乘模型大小除以有效带宽上限（NPU 独占 12~16 GB/s，产品 7~11），到 60% 以上才算榨干带宽。三关都过我才判断可以上线，否则回退 w8a16 或换校准集重转。」</p>
     <p style="margin:0"><strong>能力标签：</strong>能把模型真正转成端侧可用产物，并用数字判断量化方案是否可上线——端侧量化部署能力。</p>
   </div>
 

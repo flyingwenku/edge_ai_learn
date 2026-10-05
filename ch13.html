@@ -76,8 +76,8 @@
   舒适区模型规模 ：<span class="g">1.5B ~ 3B int4 / int8</span>
   能干的活       ：意图识别、简单多轮对话、RAG 问答、语音唤醒
   吃力的活       ：&gt;7B 模型、长上下文(&gt;8K)、复杂数学/代码
-  <span class="r">真正瓶颈</span>       ：内存带宽 ≈ 35 GB/s（不是 NPU 算力）
-  实测参考       ：3B int4 ≈ <span class="k">5~10 tok/s</span>（语音交互够用）
+  <span class="r">真正瓶颈</span>       ：内存带宽（产品 7~11 GB/s，NPU 独占 12~16，峰值 19）—不是 NPU 算力
+  实测参考       ：3B int4 ≈ <span class="k">3.5~5.5 tok/s</span>（产品；NPU 独占 6~8，语音交互够用）
 
 <span class="g">结论：3576 = 中端端侧 AI，定位「意图 + 轻对话」，不是「大模型推理机」。</span>
 往上要更强：RK3588（带宽更高）；往下要更省：3576 就够。</div>
@@ -136,7 +136,7 @@
     <p>拿三个真实场景各走一遍，你会发现「模板不变，数字变」：</p>
     <div class="board"><span class="k">场景演练①：本地语音助手</span>
   目标：离线可用、隐私、便宜
-  指标：TTFT&lt;1s, tok/s&gt;8, 续航 8h, BOM $50
+  指标：TTFT&lt;1s, tok/s&gt;4, 续航 8h, BOM $50
   端云：端侧全包（唤醒/ASR/意图/对话/RAG），复杂问题转云
   选型：RK3576 + 1.5B int4 + RKNN；内存 4GB
   BOM ：≈ $42 → 售价 $49~59
@@ -169,19 +169,19 @@
 模块                    常驻权重   运行时峰值     带宽需求(NPU 忙)   优先级
 ──────────────────────────────────────────────────────────────
 系统+驱动+中间件          —         1.00 GB         —               —
-唤醒 + ASR + 声学前端     20 MB     0.10 GB         ~2 GB/s         <span class="g">最高</span>
-LLM 3B int4              2.00 GB    0.50 GB(KV4K)   ~22 GB/s        <span class="g">高</span>
-LLM 1.5B int4（降级态）   1.00 GB    0.35 GB(KV4K)   ~14 GB/s        <span class="g">高</span>
-CV 检测 YOLOv8n int8      4 MB      0.25 GB         ~6 GB/s         <span class="k">中（可降帧）</span>
-CV 分割/pose int8         8 MB      0.20 GB         ~5 GB/s         <span class="r">低（可关）</span>
+唤醒 + ASR + 声学前端     20 MB     0.10 GB         ~1 GB/s         <span class="g">最高</span>
+LLM 3B int4              2.00 GB    0.50 GB(KV4K)   ~10 GB/s        <span class="g">高</span>
+LLM 1.5B int4（降级态）   1.00 GB    0.35 GB(KV4K)   ~6 GB/s         <span class="g">高</span>
+CV 检测 YOLOv8n int8      4 MB      0.25 GB         ~3 GB/s         <span class="k">中（可降帧）</span>
+CV 分割/pose int8         8 MB      0.20 GB         ~2 GB/s         <span class="r">低（可关）</span>
 应用 + RAG 索引            —         0.30 GB         ~1 GB/s         <span class="k">中</span>
 预留（碎片/峰值/OOM 缓冲） —         1.00 GB         —               —
 ──────────────────────────────────────────────────────────────
-合计(3B + 双 CV)          ≈2.03 GB   3.35 GB         ≈36 GB/s <span class="r">⚠ 超总线</span>
-合计(1.5B + 单 CV)        ≈1.02 GB   3.00 GB         ≈23 GB/s <span class="g">✅ 安全</span>
+合计(3B + 双 CV)          ≈2.03 GB   3.35 GB         ≈17 GB/s <span class="r">⚠ 超总线</span>
+合计(1.5B + 单 CV)        ≈1.02 GB   3.00 GB         ≈11 GB/s <span class="g">✅ 安全</span>
 
 <span class="k">内存红线：</span>永远留 ≥1GB 预留，见底就主动降级，别等 OOM Killer。
-<span class="k">带宽安全线：</span>总线 ≈35 GB/s，留 20% 余量 → 并发安全线 ≈ <span class="g">28 GB/s</span>。</div>
+<span class="k">带宽安全线：</span>总线（NPU 独占上沿）≈16 GB/s，留 20% 余量 → 并发安全线 ≈ <span class="g">12.8 GB/s</span>（产品场景 7~11 更低）。</div>
     <p><b>① 内存怎么分：</b>分三类——<b>常驻权重</b>（开机 mmap，基本不动）、<b>动态运行时</b>（激活 / KV Cache / 工作区，可回收）、<b>预留缓冲</b>（碎片 + 峰值，≥1GB）。给每个模型设内存上限（进程隔离或 cgroup），防止一个模型把另一个挤爆。</p>
     <p><b>② NPU 时间片与优先级：</b>3576 只有一个 NPU（6 TOPS），多模型只能<b>分时复用</b>，且<span class="key">切换只发生在一次推理的边界</span>（不能打断正在算的那一层）。所以给 LLM 的<span class="g">首 token（TTFT）</span>最高优先级、CV 用低优先级 + 降帧；别让长任务霸占 NPU——把大推理拆小、限制单次时长。</p>
     <p><b>③ 带宽争抢：</b>LLM 解码是<span class="r">带宽型</span>（每出一个 token 要把权重搬一遍：3B int4 ≈ 2GB/token），CV 每帧也要搬激活。两者同时跑，总需求叠加 → 谁抢到谁快，另一方 tok/s 或帧率就掉。这正是「CPU 空闲但推理变慢」的原因——瓶颈在带宽，不在算力。</p>
@@ -199,24 +199,24 @@ CV 分割/pose int8         8 MB      0.20 GB         ~5 GB/s         <span clas
     <div class="callout"><b>一句话结论：</b>并发预算 = <b>内存三类分账 + NPU 时间片优先级 + 带宽安全线 + 有序降级</b>；核心动作是「先算账、留缓冲、按阈值降」。</div>
 
     <h3><span class="tag-lesson">讲解</span>7. 板书填空：并发预算手算（填完展开答案）</h3>
-    <p>用上面预算表，填出「3B + 双 CV」并发的运行时峰值、带宽需求合计，并判断该不该降级（安全线 28 GB/s）。</p>
+    <p>用上面预算表，填出「3B + 双 CV」并发的运行时峰值、带宽需求合计，并判断该不该降级（安全线 12.8 GB/s）。</p>
     <table class="tight">
       <thead><tr><th>项目</th><th>算式</th><th>结果（填）</th></tr></thead>
       <tbody>
         <tr><td>运行时峰值合计</td><td>1.0 + 0.1 + 0.5 + 0.25 + 0.20 + 0.30 + 1.00</td><td class="fill">?</td></tr>
-        <tr><td>带宽需求合计</td><td>2 + 22 + 6 + 5 + 1</td><td class="fill">?</td></tr>
-        <tr><td>是否超安全线</td><td>合计 vs 28 GB/s</td><td class="fill">?</td></tr>
+        <tr><td>带宽需求合计</td><td>1 + 10 + 3 + 2 + 1</td><td class="fill">?</td></tr>
+        <tr><td>是否超安全线</td><td>合计 vs 12.8 GB/s</td><td class="fill">?</td></tr>
         <tr><td>第一步降级动作</td><td>按降级顺序表</td><td class="fill">?</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案（先自己填！）</summary>
       <div class="board">运行时峰值合计 = 1.0+0.1+0.5+0.25+0.20+0.30+1.00 = <span class="g">3.35 GB</span>
-带宽需求合计 = 2+22+6+5+1 = <span class="r">36 GB/s</span> &gt; 安全线 28 → <span class="r">必须降级</span>
+带宽需求合计 = 1+10+3+2+1 = <span class="r">17 GB/s</span> &gt; 安全线 12.8 → <span class="r">必须降级</span>
 第一步 = CV 降帧 30 → 15 fps（先压最不痛、可重算的负载）
-若仍 &gt;28：停「分割/pose」，带宽 ≈ <span class="g">31 GB/s</span>；再不行才缩 LLM 上下文。
+若仍 &gt;12.8：停「分割/pose」，带宽 ≈ <span class="g">15 GB/s</span>；再不行才缩 LLM 上下文。
 
-<span class="k">关键理解：</span>36 GB/s 是「需求之和」，真实总线 35 GB/s；
+<span class="k">关键理解：</span>17 GB/s 是「需求之和」，真实总线（NPU 独占）16 GB/s；
 叠加结果是 LLM tok/s 掉档 + CV 掉帧（不一定崩），但预留见底就 OOM。</div>
     </details>
   </div>
@@ -286,7 +286,7 @@ CV 分割/pose int8         8 MB      0.20 GB         ~5 GB/s         <span clas
     <dl>
       <dt>目标</dt><dd>给「CV + LLM 同时在线」的场景做一份资源预算表，并验证并发时的真实表现。</dd>
       <dt>要掌握</dt><dd>内存三类预算（常驻 / 动态 / 预留）；NPU 时间片与优先级；带宽争抢；有顺序、有阈值的降级。</dd>
-      <dt>实操步骤</dt><dd>写 <code>concurrency-budget.md</code>：填「多模型并发资源预算表」（内存 / 带宽 / 优先级三列），写清内存红线（预留 1GB）与带宽安全线（28 GB/s），并给五级降级顺序表。能上板再写 <code>concurrency-test.md</code>：同时跑 LLM + CV，记录各自 tok/s、FPS、RSS 峰值与触发降级的内存水位。</dd>
+      <dt>实操步骤</dt><dd>写 <code>concurrency-budget.md</code>：填「多模型并发资源预算表」（内存 / 带宽 / 优先级三列），写清内存红线（预留 1GB）与带宽安全线（12.8 GB/s），并给五级降级顺序表。能上板再写 <code>concurrency-test.md</code>：同时跑 LLM + CV，记录各自 tok/s、FPS、RSS 峰值与触发降级的内存水位。</dd>
       <dt>检验标准</dt><dd>能报出并发总内存与总带宽是否超红线；被问「CV 和 LLM 抢资源怎么办」能答出「时间片 + 优先级 + 降级顺序 + 留 1GB 缓冲」。</dd>
     </dl>
   </div>
@@ -316,7 +316,7 @@ CV 分割/pose int8         8 MB      0.20 GB         ~5 GB/s         <span clas
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「拿到一个端侧 AI 需求，我会先做端云分工：高频、低延迟、隐私、要离线可用的放端侧，复杂推理和需要最新知识的放云端，并且一定设计断网降级路径。芯片上，RK3576 我判断它的舒适区是 1.5B~3B int4，做意图识别和简单对话，瓶颈是内存带宽约 35GB/s，复杂推理走云端，断网就降级到本地 1.5B。然后我会算账：BOM 拆到主控、内存、存储、外设、结构，用内存和存储做成本杠杆；功耗按工作剖面算平均，续航等于电池容量除以平均功耗——比如平均 2.5 瓦、20 瓦时电池就是 8 小时。最后落成一页纸，七段：场景、指标、端云分工、关键选型、BOM、功耗续航、风险。比如本地语音助手我会按 $50 BOM、8 小时续航给方案；车机侧重低延迟和车规；工业盒子侧重多路、常驻和散热。每个取舍我都能讲出为什么不选另一个。」</p>
+    <p>「拿到一个端侧 AI 需求，我会先做端云分工：高频、低延迟、隐私、要离线可用的放端侧，复杂推理和需要最新知识的放云端，并且一定设计断网降级路径。芯片上，RK3576 我判断它的舒适区是 1.5B~3B int4，做意图识别和简单对话，瓶颈是内存带宽（产品 7~11GB/s，NPU 独占 12~16），复杂推理走云端，断网就降级到本地 1.5B。然后我会算账：BOM 拆到主控、内存、存储、外设、结构，用内存和存储做成本杠杆；功耗按工作剖面算平均，续航等于电池容量除以平均功耗——比如平均 2.5 瓦、20 瓦时电池就是 8 小时。最后落成一页纸，七段：场景、指标、端云分工、关键选型、BOM、功耗续航、风险。比如本地语音助手我会按 $50 BOM、8 小时续航给方案；车机侧重低延迟和车规；工业盒子侧重多路、常驻和散热。每个取舍我都能讲出为什么不选另一个。」</p>
     <p style="margin:0"><strong>能力标签：</strong>架构决策能力——端云分工、芯片选型、成本功耗权衡，一页纸说清（架构师核心能力）。</p>
   </div>
 

@@ -125,9 +125,9 @@
     <div class="board"><span class="k">用数据定位瓶颈（面试可直接讲）</span>
 3B int4 权重 ≈ <span class="g">2GB</span>
 每生成 1 token 需读一遍权重：2GB
-RK3576 内存带宽 ≈ <span class="k">35 GB/s</span>
-理论 tok/s = 35 / 2 ≈ <span class="g">17 tok/s</span>
-实测           = <span class="r">5~10 tok/s</span>
+RK3576 内存带宽：峰值 <span class="k">19</span> / NPU 独占 <span class="k">12~16</span> / 产品 <span class="k">7~11 GB/s</span>
+3B int4 tok/s = 带宽 / 2 ≈ NPU 独占 <span class="g">6~8</span>、产品 <span class="g">3.5~5.5</span>
+实测           = <span class="r">3.5~5.5 tok/s</span>（产品落地数字）
 
 结论：算力没吃满、NPU 利用率不高 → <span class="r">瓶颈是内存带宽，不是 NPU</span>。
 优化方向：降比特（更狠量化）、减上下文、增加前缀缓存，而不是堆算力。</div>
@@ -138,7 +138,7 @@ RK3576 内存带宽 ≈ <span class="k">35 GB/s</span>
     <div class="board"><span class="k">《架构设计文档》一页纸模板</span>
 
 1. 背景与目标   ：要解决什么问题、给谁用、约束（成本/功耗/尺寸/离线）
-2. 需求与指标   ：功能列表 + <span class="g">可量化指标</span>（TTFT&lt;1s, tok/s&gt;8, 内存&lt;2GB）
+2. 需求与指标   ：功能列表 + <span class="g">可量化指标</span>（TTFT&lt;1s, tok/s&gt;4, 内存&lt;2GB）
 3. 方案总览     ：一张分层图（应用 / 编排 / 推理 / 硬件）
 4. 关键决策 ADR ：每条 = 决策 + 理由 + 备选 + 代价（<span class="k">最重要</span>）
 5. 数据流       ：语音/文本 → 预处理 → 推理 → 工具/RAG → 输出
@@ -385,7 +385,7 @@ LLM 连续失败 N 次      → 退到纯规则 / 关键词模式       → 无�
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「我有一个完整落地的端侧 AI agent 项目：跑在 RK3576 上，模型是 1.5B~3B int4，负责意图识别和简单对话，另外用 RKNN 部署 YOLOv8n 做摄像头检测，构成感知 + 交互双任务。它支持本地 function calling——查天气、设闹钟这些工具都在本地执行，模型只吐结构化 JSON，执行权在本地代码手里；还接了本地 RAG，用轻量向量库做离线检索。性能上我实测了首 token 延迟、tok/s、内存峰值和 NPU 利用率，用权重体积除以内存带宽推算出理论 tok/s 是 17、实测 5~10，定位到瓶颈是内存带宽而不是算力。收尾上我做了稳定性压测，判据是每 100 请求内存增量小于 5MB，配了 NPU 超时复位和看门狗；还估了功耗（电池 Wh 除以整板功率算续航）并设计了三级降级——NPU 坏了切 CPU、内存紧就 3B 降 1.5B、LLM 挂了退到规则模式，每级都有触发、动作、代价和恢复条件。整个项目我写了架构文档和稳定性降级 checklist，每个决策都能讲清为什么不选另一个。」</p>
+    <p>「我有一个完整落地的端侧 AI agent 项目：跑在 RK3576 上，模型是 1.5B~3B int4，负责意图识别和简单对话，另外用 RKNN 部署 YOLOv8n 做摄像头检测，构成感知 + 交互双任务。它支持本地 function calling——查天气、设闹钟这些工具都在本地执行，模型只吐结构化 JSON，执行权在本地代码手里；还接了本地 RAG，用轻量向量库做离线检索。性能上我实测了首 token 延迟、tok/s、内存峰值和 NPU 利用率，用权重体积除以内存带宽推算，NPU 独占约 6~8 tok/s、产品场景只有 3.5~5.5，定位到瓶颈是内存带宽而不是算力。收尾上我做了稳定性压测，判据是每 100 请求内存增量小于 5MB，配了 NPU 超时复位和看门狗；还估了功耗（电池 Wh 除以整板功率算续航）并设计了三级降级——NPU 坏了切 CPU、内存紧就 3B 降 1.5B、LLM 挂了退到规则模式，每级都有触发、动作、代价和恢复条件。整个项目我写了架构文档和稳定性降级 checklist，每个决策都能讲清为什么不选另一个。」</p>
     <p style="margin:0"><strong>能力标签：</strong>端到端完整项目能力——能落地、能测、能演示、能讲清架构决策，还能保证长期稳定运行与异常降级。</p>
   </div>
 
