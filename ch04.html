@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 4 章 · KV Cache 与性能瓶颈（讲义 + 作业）</title>
+<title>第 4 章：注意力机制与位置编码（讲义 + 作业）</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -20,158 +20,218 @@
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 4 章：KV Cache 与性能瓶颈</h1>
-  <p class="lead"><strong>章节目标：</strong>把「<b>内存怎么涨、速度卡在哪</b>」算成数字——拿到任意模型 + 上下文长度，能<b>秒算 KV Cache、秒判算力瓶颈还是带宽瓶颈</b>。</p>
+  <h1>第 4 章：注意力机制与位置编码</h1>
+  <p class="lead"><strong>章节目标：</strong>搞懂「<b>注意力决定怎么搬运信息、GQA 决定端侧跑不跑得动</b>」——拿到任意一个模型 config，能一眼算出它的 KV Cache 大小，并说出该不该换成 GQA。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch04-kvcache</span>
+    <span class="chip">产出目录：ch04-attention</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把 KV Cache 公式和瓶颈判据看懂，不懂就问我。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的 KV Cache 空表自己算，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写计算器、出性能报告。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点吃透 Q/K/V 直觉和 GQA 省带宽那笔账。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的手算 / 空表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写笔记、跑脚本、出对比表。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 3 章你知道 decode 是「逐 token 生成」。但每生成一个 token，模型要去看前面所有 token 的信息——如果每次重算，代价爆炸。KV Cache 就是为此而生，代价是<b>内存随上下文线性增长</b>。算得清它，你才算摸到端侧 LLM 的门槛。这一章的 KV Cache 和瓶颈定位，是面试的<b>必问题</b>。</p>
-    <div class="callout"><strong>一句话记住：</strong>KV Cache 是「时间换空间」；端侧跑 LLM，空间（带宽）往往比时间（算力）更致命。</div>
+    <p>第 3 章你把 Transformer 拆成了层。这一章啃最硬的那块骨头——<b>注意力（Attention）</b>。架构师不需要会推导公式，但必须能做到两件事：<span class="key">① 用一句人话解释 Q/K/V 在干什么；② 拿到 config 秒算 KV Cache，说清为什么端侧偏爱 GQA。</span>这两条直接对应面试题。</p>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：KV Cache 为什么存在</h3>
-    <p>Attention 的本质：新的 Query 要和前面<b>所有</b> token 的 Key 做点积、再用结果去加权所有 Value。问题在于这些 K、V 每步都会用到。</p>
-    <div class="board"><span class="k">没有 Cache 会怎样：</span>
-  生成第 100 个 token 时，要把前 99 个 token 的 K、V <span class="r">全部重算</span>一遍；
-  生成第 101 个再重算前 100 个…… 计算量 ~ N² 爆炸。
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：Q、K、V 的物理含义</h3>
+    <p>别被字母吓到。把注意力想成一次「<b>查字典</b>」：</p>
+    <div class="board"><span class="k">Q / K / V = 提问 / 索引 / 内容</span>
 
-<span class="k">有 Cache 之后：</span>
-  每个 token 的 K、V 只算 <span class="g">一次</span>，算完就存起来；
-  第 N 个 token 直接用缓存里的 [K1…K_{N-1}]，只算自己这份。
+  Q (Query)  = 你要查的"问题"     → 当前 token 在问："谁跟我相关？"
+  K (Key)    = 字典的"索引/标签"   → 每个 token 举牌："我是关于什么的"
+  V (Value)  = 字典的"释义/内容"   → 每个 token 真正携带的信息
 
-<span class="k">代价：</span>省了算力，但要一块内存常驻 —— <span class="r">这就是 KV Cache</span>。
-它随上下文长度<span class="r">线性增长</span>，是端侧内存的头号变量。</div>
+<span class="k">计算三步（这就是注意力）：</span>
+  ① 拿 Q 去比每一个 K     → 算相似度分数  s = Q·K
+  ② softmax 把分数变成权重 → 权重和为 1，越大越"被关注"
+  ③ 按权重把 V 加权求和    → 输出 = 相关 token 内容的加权平均
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：KV Cache 公式 + 手算 Qwen2.5-3B</h3>
-    <p>公式不长，但每个符号都要理解物理含义。别背，按「2 份 × 层 × 头 × 维度 × 长度 × 字节」念出来。</p>
-    <div class="formula">KV_bytes = 2 × layers × kv_heads × head_dim × seq_len × bytes</div>
-    <div class="board"><span class="k">逐项物理含义：</span>
-  2         = K 和 V 两份（各存一份）
-  layers    = 层数（每层都有自己的 K/V）
-  kv_heads  = KV 的头数（GQA 时 &lt; Q 头数）
-  head_dim  = 每个头的维度
-  seq_len   = 缓存了多长上下文（token 数）
-  bytes     = 每个数的字节：fp16 = <span class="g">2</span>，int8 = <span class="g">1</span>
+<span class="k">一句话：Q 决定"看哪里"，K 决定"被谁看到"，V 是"被取走的内容"。</span></div>
+    <div class="callout">记住：注意力 = <b>按相关度，从所有 token 的 V 里"加权取货"</b>。它不是"筛选"，而是"加权平均"——所有 token 都会贡献一点，只是相关的高、不相关的低。</div>
 
-<span class="k">Qwen2.5-3B 假设：</span>layers = 36, kv_heads = 2, head_dim = 128, fp16
-  <span class="g">每 token = 2 × 36 × 2 × 128 × 2</span>
-           = 2×36 = 72
-           = 72×2 = 144
-           = 144×128 = 18432
-           = 18432×2 = <span class="g">36864 B ≈ 36 KB / token</span>
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：注意力公式的直觉 + 手算</h3>
+    <p>公式只有一个（不用推，看它每一步在干嘛）：</p>
+    <div class="formula">Attention(Q, K, V) = softmax( QKᵀ / √d<sub>k</sub> ) · V</div>
+    <div class="board"><span class="k">四步拆解（对着公式看物理含义）</span>
+  ① QKᵀ        → 每个 query 和每个 key 点积 = 相似度矩阵 (n×n)
+  ② /√d_k      → 缩放，防止点积随维度变大而"爆炸"（下面单独讲）
+  ③ softmax    → 每行归一化成权重（该 query 看各 token 的比例）
+  ④ ×V         → 按权重对 V 做加权求和
 
-<span class="k">长度换算（× token 数）：</span>
-  1K  = 36 KB × 1024 ≈ <span class="g">36 MB</span>
-  4K  = 36 KB × 4096 ≈ <span class="g">144 MB</span>
-  8K  = 36 KB × 8192 ≈ <span class="g">288 MB</span></div>
-    <div class="callout"><strong>秒算口诀：</strong>「每 token 36 KB」——记住这个数，4K/8K 随口就来。</div>
+<span class="k">手算示范：1 个 head，d_k=4，序列长度 n=3</span>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：MHA → MQA → GQA → MLA 演进</h3>
-    <p>为什么 KV 头数可以比 Q 头数少？因为<b>KV 才是内存大头</b>，业界想尽办法砍它。</p>
-    <div class="board"><span class="k">四种注意力，砍的就是 KV 头数：</span>
+  q = [1, 0, 1, 0]
 
-【MHA 多头注意力】Q/K/V 头数全部相等 = 16
-  每 token = 2×36×<span class="r">16</span>×128×2 = <span class="r">288 KB</span>　← 最贵
-  表达力最强，但 KV Cache 最大
+  K = [ k1=[1,0,1,0]
+        k2=[0,1,0,1]
+        k3=[1,1,0,0] ]
 
-【MQA 多查询注意力】K/V 只有 <span class="g">1</span> 个头，所有 Q 共享它
-  每 token = 2×36×<span class="g">1</span>×128×2 = <span class="g">18 KB</span>　← 最省
-  省 16 倍，但精度掉得明显，大模型少用
+① 相似度 s = q·k
+   s1 = 1·1 + 0·0 + 1·1 + 0·0 = 2
+   s2 = 1·0 + 0·1 + 1·0 + 0·1 = 0
+   s3 = 1·1 + 0·1 + 1·0 + 0·0 = 1
+   s = [2, 0, 1]
 
-【GQA 分组查询注意力】K/V 头数 = <span class="g">2</span>（16 个 Q 分成 8 组共享）
-  每 token = 2×36×<span class="g">2</span>×128×2 = <span class="g">36 KB</span>　← 工业主流
-  Qwen2.5 / Llama3 都用它：省内存又保精度
+② 缩放：/ √d_k = / √4 = / 2
+   s' = [1.0, 0.0, 0.5]
 
-【MLA 多头潜在注意力】DeepSeek：把 K/V 压成低维隐向量再存
-  比 GQA 更省，但结构复杂、NPU 不友好</div>
-    <div class="callout"><strong>面试点：</strong>「GQA 是 MHA 省内存、MQA 保精度的折中，Qwen2.5 用 GQA（K/V=2 头）。」</div>
+③ softmax（e^1=2.718, e^0=1, e^0.5=1.649；和 = 5.367）
+   w = [0.507, 0.186, 0.307]      ← 权重和 = 1 ✅
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：算力瓶颈 vs 带宽瓶颈（算术强度）</h3>
-    <p>判断瓶颈不用跑测试，一个比值就够——<b>算术强度</b>。</p>
-    <div class="formula">算术强度 AI = 计算量(FLOPs) ÷ 访存量(Bytes)</div>
-    <div class="board"><span class="k">判据：</span>
-  AI 大 → 每次搬数都能算很多次 → <span class="g">算力瓶颈</span>（compute-bound）
-  AI 小 → 数据搬进来还没算几下就没了 → <span class="r">带宽瓶颈</span>（memory-bound）
+④ 加权 V（设 v1=[1,0], v2=[0,1], v3=[1,1]）
+   out = 0.507·[1,0] + 0.186·[0,1] + 0.307·[1,1]
+       = [0.507+0.307, 0.186+0.307]
+       = <span class="g">[0.814, 0.493]</span>
 
-<span class="k">机器的「脊点」= 峰值算力 ÷ 内存带宽：</span>
-  RK3576：6 TOPS int8 ÷ 35 GB/s = 6000 / 35 ≈ <span class="g">171 FLOP / Byte</span>
-  只要任务 AI &lt; 171 → 判为带宽瓶颈
+<span class="k">物理直觉：输出 = "按相关度加权平均后的 V"。相关度高的 token 占比大。</span></div>
+    <p>再单独把「为什么除以 √d<sub>k</sub>」讲透——这是面试常问的细节：</p>
+    <div class="board"><span class="k">为什么要 /√d_k ？看两种情形</span>
 
-<span class="k">decode 的 AI 有多小？</span>
-  3B int4 权重 ≈ 2 GB，生成 1 token ≈ 2×3G = 6 GFLOP
-  AI ≈ 6 GFLOP ÷ 2 GB = <span class="r">3 FLOP / Byte</span>
-  3 ≪ 171 → <span class="r">严重带宽瓶颈</span>
+不缩放：s = [2, 0, 1]   → softmax → [0.665, 0.090, 0.245]  （更尖锐）
+  缩放：s'= [1, 0, 0.5] → softmax → [0.507, 0.186, 0.307]  （更平滑）
 
-<span class="k">prefill 的 AI 呢？</span>
-  512 token 一次并行，权重读一次算一大片 → AI 高，<span class="g">偏算力瓶颈</span></div>
+原因：维度 d 越大，点积 q·k 的方差越大 → 分数差距被拉大
+     → softmax 趋于 one-hot（[1,0,0,...]）
+     → 梯度趋近 0，模型"学不动"。
+<span class="g">除以 √d_k 把方差压回 1 量级，softmax 保持"温和"。</span>
 
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：为什么 RK3576 上是带宽瓶颈</h3>
-    <p>三个数字摆一起，结论自动浮现。</p>
-    <div class="board"><span class="k">三个数字：</span>
-  NPU 算力 6 TOPS int8      （很快，够用）
-  内存带宽 ≈ <span class="r">35 GB/s</span>        （真正瓶颈）
-  模型 int4 3B ≈ 2 GB       （每步都要整个读一遍）
+<span class="k">一句结论：√d_k 是为了防止 softmax 饱和（防止梯度消失）。</span></div>
+    <div class="callout"><b>架构师记这句就够：</b>Q 查、K 被查、V 取货；softmax 是"加权平均"，√d<sub>k</sub> 是"防止权重两极化"。</div>
 
-<span class="k">理论天花板：</span>
-  decode 理论最高 = 35 GB/s ÷ 2 GB = <span class="g">17.5 token/s</span>
-  再扣掉读 KV Cache、算子开销、非理想访存 → <span class="g">实测 5~10 tok/s</span>
-
-<span class="k">推论（重要）：</span>
-  把 NPU 换成算力翻倍的芯片、但带宽不变 → decode <span class="r">几乎不变</span>
-  把模型从 int4 压更狠、或上 GQA/KV 量化 → decode <span class="g">明显变快</span>
-
-<span class="k">结论：3576 上 LLM decode 的天花板由带宽决定，不是算力。</span>
-  优化方向 = 「少读、少存」，不是「堆算力」。</div>
-    <div class="callout"><strong>一句话结论：</strong>带宽 35 GB/s ÷ 模型 2 GB ≈ 17 tok/s，这就是端侧 LLM 的物理上限。</div>
-
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：瓶颈定位速查</h3>
-    <div class="board"><span class="k">现象 → 判定 → 对策</span>
-
-  首字慢 / 长 prompt 卡    → <span class="g">prefill 偏算力</span>   → 批处理、分块 prefill
-  出字慢 / 逐 token 卡     → <span class="r">decode 带宽瓶颈</span> → 量化、GQA、KV 量化
-  上下文越长越卡           → KV Cache 膨胀        → 缩短上下文、KV Cache 量化
-  换更强 NPU 却没用        → 说明卡在带宽        → 先查带宽，别急着换芯片
-
-<span class="k">速算模板（背下来）：</span>
-  1) KV / token = 2×L×kv_heads×d×bytes
-  2) 总量 = ×seq_len
-  3) 瓶颈 = 比较 AI 和脊点 (3576 ≈ 171)</div>
-
-    <h3><span class="tag-lesson">讲解</span>7. 板书填空：KV Cache 空表</h3>
-    <p>用 Qwen2.5-3B（L=36, kv_heads=2, d=128, fp16）自己填，再展开答案。</p>
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：MHA → MQA → GQA → MLA</h3>
+    <p>这四个是注意力的四种「共享 K/V 的方式」，演进目标只有一个：<b>压缩 KV Cache</b>。</p>
     <table class="tight">
-      <thead><tr><th>上下文</th><th>每 token</th><th>KV Cache 总量</th><th>说明</th></tr></thead>
+      <thead><tr><th>方案</th><th>KV 份数</th><th>KV Cache</th><th>质量</th><th>NPU/端侧友好</th></tr></thead>
       <tbody>
-        <tr><td>1K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
-        <tr><td>4K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
-        <tr><td>8K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
+        <tr><td><b>MHA</b> 多头注意力</td><td>= Q 头数（每头独立）</td><td>最大</td><td>最好</td><td>一般（太占带宽）</td></tr>
+        <tr><td><b>MQA</b> 多查询</td><td>1（所有 Q 头共享 1 组）</td><td>最小</td><td>略降</td><td>好</td></tr>
+        <tr><td><b>GQA</b> 分组查询</td><td>G 组（如 2、4、8）</td><td>小</td><td>≈ MHA</td><td><b>最好（端侧甜点）</b></td></tr>
+        <tr><td><b>MLA</b> 潜在注意力</td><td>压成低维 latent 向量</td><td>极小</td><td>≈/优于 MHA</td><td>复杂，NPU 不直接支持</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">用人话记住四个演进台阶</span>
+  MHA：32 个 Q 头 → 32 组 K/V（最贵，最准）
+  MQA：32 个 Q 头 → <span class="r">1 组</span> K/V（最省，但质量掉）
+  GQA：32 个 Q 头 → <span class="g">8 组</span> K/V（每组被 4 个 Q 头共享）← 折中
+  MLA：把 K/V 压缩成一个低维向量再还原（DeepSeek 用它，省到极致）
+
+<span class="k">GQA 的核心：多个 Q 头"共用"一组 K/V，KV 份数直接从 heads 降到 G。</span>
+质量损失很小（因为相邻头本来就有冗余），但 KV Cache 直接砍几倍。</div>
+    <div class="callout">记忆锚点：<b>MHA→MQA 是"一刀切共享"，GQA 是"分组共享"</b>。GQA 用很小的质量代价，换回接近 MQA 的内存/带宽收益——这就是它能成为行业默认（Qwen、Llama、Gemma 全用）的原因。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：为什么 RK3576 偏爱 GQA（带宽手算）</h3>
+    <p>这是本章的<b>核心算账</b>。用 Qwen2.5-3B 的真实 config 来算，你可以跟着手写：</p>
+    <div class="board"><span class="k">模型 config（Qwen2.5-3B 近似）</span>
+  hidden d = 2048
+  heads     = 16     （Q 头数）
+  head_dim  = 128
+  layers L  = 36
+  KV 精度   = fp16（2 字节）
+
+<span class="k">每 token 的 KV Cache 公式</span>
+  KV/token = 2（K和V）× kv_heads × head_dim × 2字节 × L
+
+<span class="k">三种方案的 kv_heads</span>
+  MHA：kv_heads = 16
+  GQA：kv_heads = 2
+  MQA：kv_heads = 1</div>
+    <div class="board"><span class="k">手算：每 token KV Cache</span>
+  MHA: 2×16×128×2×36 = 294,912 B ≈ <span class="r">288 KB</span>
+  GQA: 2× 2×128×2×36 =  36,864 B ≈ <span class="g"> 36 KB</span>   → 是 MHA 的 1/8
+  MQA: 2× 1×128×2×36 =  18,432 B ≈  18 KB
+
+<span class="k">换算成 8K 上下文（8192 token）</span>
+  MHA: 288 KB × 8192 ≈ <span class="r">2.42 GB</span>
+  GQA:  36 KB × 8192 ≈ <span class="g">0.30 GB（302 MB）</span>
+  MQA:  18 KB × 8192 ≈ 0.15 GB（151 MB）
+
+<span class="k">再算"每生成 1 个 token 要读多少 KV"（带宽 35 GB/s）</span>
+  MHA: 2.42 GB / 35 = <span class="r">69 ms</span>
+  GQA: 0.30 GB / 35 = <span class="g">8.6 ms</span>
+  MQA: 0.15 GB / 35 =  4.3 ms
+
+<span class="k">加上权重（3B int4 ≈ 1.5 GB → 1.5/35 ≈ 43 ms）</span>
+  GQA 总耗时 ≈ 43 + 8.6 = 51.6 ms  →  ≈ <span class="g">19 tok/s</span>
+  MHA 总耗时 ≈ 43 + 69  = 112  ms  →  ≈  <span class="r">9 tok/s</span>
+
+<span class="k">结论：8K 上下文下，GQA 相对 MHA 把吞吐拉回约 2 倍。</span></div>
+    <div class="callout"><b>RK3576 偏爱 GQA 的真正原因：</b>decode 阶段是<b>带宽瓶颈</b>，每生成一个 token 都要把整段 KV Cache 从内存读一遍。3576 带宽只有 ~35 GB/s，MHA 的长上下文 KV 会直接把带宽吃光；GQA 把 KV 砍到 1/8，等于给带宽"续命"。<b>GQA 省的不是存储，是每 token 的读取带宽。</b></div>
+
+    <p><b>板书填空 · 请先自己填，再展开答案：</b>下面是一张 KV Cache 手算表（模型同上）。</p>
+    <table class="tight">
+      <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV 耗时(@35GB/s)</th></tr></thead>
+      <tbody>
+        <tr><td>MHA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+        <tr><td>GQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+        <tr><td>MQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
-      <div class="board">每 token = 2 × 36 × 2 × 128 × 2 = <span class="g">36864 B ≈ 36 KB</span>
-
-  1K → 36 KB × 1024 = <span class="g">≈ 36 MB</span>
-  4K → 36 KB × 4096 = <span class="g">≈ 144 MB</span>
-  8K → 36 KB × 8192 = <span class="g">≈ 288 MB</span>
-
-<span class="k">对照：</span>若为 MHA（kv_heads=16），8K 会涨到 <span class="r">≈ 2.3 GB</span>，
-内存直接爆——所以 GQA 是端侧刚需。</div>
+      <table class="tight">
+        <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV(@35GB/s)</th></tr></thead>
+        <tbody>
+          <tr><td>MHA</td><td>16</td><td>288 KB</td><td>≈ 2.42 GB</td><td>69 ms</td></tr>
+          <tr><td>GQA</td><td>2</td><td>36 KB</td><td>≈ 302 MB</td><td>8.6 ms</td></tr>
+          <tr><td>MQA</td><td>1</td><td>18 KB</td><td>≈ 151 MB</td><td>4.3 ms</td></tr>
+        </tbody>
+      </table>
     </details>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：位置编码速览（含 RoPE 直觉）</h3>
+    <p>注意力本身是「无序」的——它只算点积，不知道谁在前谁在后。所以必须额外把<b>位置</b>喂进去。</p>
+    <div class="board"><span class="k">三种位置编码速览</span>
+
+① 绝对位置编码（Learned / 正弦）
+   做法：把"位置向量"直接加到 token embedding 上   x = tok_emb + pos_emb
+   优点：直观、简单
+   缺点：长度写死（超过训练长度就"瞎"），外推差
+
+② 相对位置编码（T5 bias / ALiBi）
+   做法：只编码"两个 token 之间的距离"，不管绝对位置
+   优点：天生外推好
+   缺点：实现各异、生态不统一，逐步被 RoPE 取代
+
+③ RoPE 旋转位置编码  ← <span class="g">现在主流（Qwen / Gemma / MiniCPM 全用）</span>
+   做法：不"加"位置，而是把 Q、K 向量按位置<span class="k">旋转一个角度</span></div>
+    <div class="board"><span class="k">RoPE 怎么编码位置（看直觉，不推公式）</span>
+
+把 q、k 的每一对维度看成一个 2D 向量 [x, y]。
+位置 m 的 token，其向量旋转 m·θ；位置 n 旋转 n·θ。
+
+关键性质：
+  旋转后 q_m · 旋转后 k_n = cos( (m-n)·θ ) · |q||k|
+  → 点积只和<span class="g">相对位置 (m-n)</span> 有关！
+
+<span class="k">举例：q = [1,0]</span>
+  位置 0 旋转 0°   → [1, 0]
+  位置 1 旋转 45°  → [0.707, 0.707]
+
+点积随距离变化：
+  m-n = 0 → cos0 = 1.0    （同位置，最相关）
+  m-n 变大 → 点积变小      （离得越远越不相关）
+
+<span class="g">就这么简单：RoPE 用"旋转角度差"来感知"位置差"。没有额外参数，天然带相对位置信息。</span></div>
+    <div class="board"><span class="k">长度外推：为什么 RoPE 能外推、又为什么还要微调</span>
+- RoPE 天然能外推：θ 频率固定，训练 4K 也能"算出" 8K 的角度
+- 但高频维度在长位置"转太快"，模型没见过 → 效果退化
+- 常见外推技巧（只需知道名字和作用）：
+  · 位置插值 (PI)：把 8K 位置压缩回 4K 范围再用
+  · NTK-aware / YaRN：调大 θ 基准（如 10000 → 500000），拉长可用范围
+  · 长上下文微调：继续训练，最稳
+
+<span class="k">架构师结论：选模型先看它的 max_position_embeddings 和是否做过 YaRN/NTK 外推。</span>
+别自己"硬拉"上下文长度——超标会静默变傻。</div>
+    <div class="callout">记住三点：<b>RoPE 用旋转编码相对位置；无额外参数、外推友好；要做长上下文，看模型有没有做 NTK/YaRN 外推。</b></div>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -179,92 +239,93 @@
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>KV Cache 手算表</h3></div>
+    <div class="head"><span class="num">1</span><h3>Q/K/V 与注意力手算笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>用板书公式，手算 Qwen2.5-3B 在 1K/4K/8K/32K 的 KV Cache 占用。</dd>
-      <dt>要掌握</dt><dd>公式每一项的物理含义；「每 token 36 KB」的速算。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_cache.md</code>：完整公式推导 + 一张「长度 × KV Cache」表（含手算过程），并加一行对照 MHA（kv_heads=16）的数值。</dd>
-      <dt>检验标准</dt><dd>给你任意 layers/kv_heads/head_dim，能在 30 秒内算出 8K 的 KV Cache。</dd>
+      <dt>目标</dt><dd>把板书①和②整理成自己的话：能用"查字典"讲清 Q/K/V，并复现那笔手算。</dd>
+      <dt>要掌握</dt><dd>Q 查、K 被查、V 取货；softmax 是加权平均；√d_k 防饱和。</dd>
+      <dt>实操步骤</dt><dd>写 <code>attention_handcalc.md</code>：① 用查字典类比解释 Q/K/V；② 手写 q·k → 缩放 → softmax → 加权 V 的全过程（用板书数字）；③ 用一小段文字解释"为什么 /√d_k"。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能给 15 年嵌入式背景的人一句话讲懂注意力。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>KV Cache 计算器（核心实操）</h3></div>
+    <div class="head"><span class="num">2</span><h3>注意力方案对比表</h3></div>
     <dl>
-      <dt>目标</dt><dd>写一个可复用的 Python 脚本：输入模型配置和上下文长度，输出 KV Cache 大小。</dd>
-      <dt>要掌握</dt><dd>把公式代码化；支持 fp16/int8 切换；打印「MB/GB」并高亮超限。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：函数 <code>kv_cache_bytes(layers, kv_heads, head_dim, seq_len, bytes_per=2)</code>；加 <code>main</code> 打印 Qwen2.5-3B 在 1K/4K/8K/32K 的结果，并与手算表对照。</dd>
-      <dt>检验标准</dt><dd>脚本输出与手算表完全一致；改参数即改结果。</dd>
+      <dt>目标</dt><dd>把板书③扩成一张完整对比表：MHA / MQA / GQA / MLA。</dd>
+      <dt>要掌握</dt><dd>四者 KV 份数、KV Cache、质量、端侧友好度的差别与演进动机。</dd>
+      <dt>实操步骤</dt><dd>写 <code>attention_compare.md</code>：5 列对比表 + 一句话"为什么端侧默认 GQA"。</dd>
+      <dt>检验标准</dt><dd>能说清 MQA 和 GQA 的区别（一刀切 vs 分组），以及 GQA 为什么是折中点。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>上下文长度 → 内存曲线</h3></div>
+    <div class="head"><span class="num">3</span><h3>位置编码笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>画出「上下文长度 vs 内存占用」的线性关系，找出 3576 的内存临界点。</dd>
-      <dt>要掌握</dt><dd>KV Cache 是线性的（不是平方）；和模型权重（int4 约 1.6 GB）叠加后的总占用。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_curve.md</code>：以模型 1.6 GB + KV Cache 叠加，算出 16 GB 内存下能撑多长上下文；给出结论。</dd>
-      <dt>检验标准</dt><dd>能说出「KV Cache 线性增长，16 GB 下 3B int4 理论可撑很长上下文，但带宽仍是瓶颈」。</dd>
+      <dt>目标</dt><dd>梳理绝对 / 相对 / RoPE 三种位置编码，重点写清 RoPE 的直觉。</dd>
+      <dt>要掌握</dt><dd>RoPE 用旋转编码相对位置；无参数、外推友好；外推技巧 PI/NTK/YaRN。</dd>
+      <dt>实操步骤</dt><dd>写 <code>position_encoding.md</code>：三种方案对比 + RoPE 的"[1,0] 旋转"手算例子 + 外推注意事项。</dd>
+      <dt>检验标准</dt><dd>能不写公式讲清"RoPE 为什么能感知相对位置"。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>瓶颈判定推导</h3></div>
+    <div class="head"><span class="num">1</span><h3>KV Cache 手算脚本（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>用算术强度手算，证明 RK3576 上 decode 是带宽瓶颈。</dd>
-      <dt>要掌握</dt><dd>算术强度定义；机器「脊点」算法（6 TOPS ÷ 35 GB/s）；decode 的 AI 计算。</dd>
-      <dt>实操步骤</dt><dd>写 <code>bottleneck.md</code>：①给出 RK3576 脊点推导（≈171）②算 decode AI（≈3）③算 prefill AI ④结论「decode 带宽瓶颈、prefill 偏算力」。</dd>
-      <dt>检验标准</dt><dd>能解释「为什么换更强 NPU 但带宽不变，decode 速度几乎不变」。</dd>
+      <dt>目标</dt><dd>用代码把板书④的账算出来，做到"输入 config，输出三种方案的 KV 大小与带宽耗时"。</dd>
+      <dt>要掌握</dt><dd>KV Cache 公式；带宽耗时 = KV / 带宽；不同上下文长度的变化趋势。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：输入 <code>d=2048, heads=16, head_dim=128, layers=36, ctx=[1024,4096,8192]</code>，分别按 MHA/GQA(kv=2)/MQA 打印每 token KV、总 KV(MB)、@35GB/s 每 token 读取耗时(ms)；再打印"权重1.5GB + KV"的估算 tok/s。复用第 1 章内存估算思路。</dd>
+      <dt>检验标准</dt><dd>脚本跑通，输出能复现板书数字：GQA 8K ≈ 302 MB、每 token 读 8.6 ms。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>《端侧 LLM 性能分析报告》（一页）</h3></div>
+    <div class="head"><span class="num">2</span><h3>用真实 config 验证</h3></div>
     <dl>
-      <dt>目标</dt><dd>综合本章产出，写一份能直接交付的性能分析——本章核心产出。</dd>
-      <dt>要掌握</dt><dd>把「KV Cache 大小 + 瓶颈判定 + 优化方向」串成决策。</dd>
-      <dt>实操步骤</dt><dd>写 <code>perf_report.md</code>（一页）：①目标模型/场景 ②KV Cache 实测与手算 ③瓶颈结论（带宽）④优化清单（int4、GQA、KV 量化、上下文裁剪）⑤预期收益。</dd>
-      <dt>检验标准</dt><dd>别人拿这页能直接判断「这产品能不能跑、卡在哪、怎么优化」。</dd>
+      <dt>目标</dt><dd>拿一个真实模型的 <code>config.json</code>，验证你的脚本和判断。</dd>
+      <dt>要掌握</dt><dd>从 config 里找 <code>num_attention_heads / num_key_value_heads / hidden_size / num_hidden_layers / max_position_embeddings</code>。</dd>
+      <dt>实操步骤</dt><dd>（能上网就下载 Qwen2.5-3B 的 <code>config.json</code>；不能就按讲义给定 config）写 <code>attention_verify.md</code>：贴出关键字段 → 用脚本算 KV Cache → 对比 MHA/GQA 收益 → 一句话"这个模型适不适合 3576"。</dd>
+      <dt>检验标准</dt><dd>能从 config 读出 kv_heads 并算出 KV 大小，而不是背数字。</dd>
     </dl>
   </div>
   <div class="task pm">
     <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
     <dl>
-      <dt>目标</dt><dd>把本章结论练成条件反射（面试必问）。</dd>
-      <dt>实操步骤</dt><dd>自问自答：KV Cache 公式是什么？3B 8K 的 KV 多大？GQA 为什么省内存？算术强度怎么算？RK3576 为什么是带宽瓶颈？decode 理论天花板是多少？</dd>
+      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
+      <dt>实操步骤</dt><dd>自问自答：Q/K/V 各是什么？为什么要 /√d_k？GQA 和 MQA 区别？GQA 为什么省内存？3576 8K 上下文 GQA 的 KV 多大？RoPE 怎么编码位置？</dd>
       <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>kv_cache.md</code> —— KV Cache 手算表（含公式推导 + 长度对照）。</li>
-    <li><code>kv_cache_calc.py</code> —— KV Cache 计算器（参数化、可切换位宽）。</li>
-    <li><code>kv_curve.md</code> —— 上下文长度 → 内存曲线 + 临界点。</li>
-    <li><code>bottleneck.md</code> —— 算术强度推导 + 瓶颈判定。</li>
-    <li><code>perf_report.md</code> —— 端侧 LLM 性能分析报告（一页，核心产出）。</li>
+    <li><code>attention_handcalc.md</code> —— Q/K/V 直觉 + 注意力手算全过程。</li>
+    <li><code>attention_compare.md</code> —— MHA / MQA / GQA / MLA 对比表（核心产出）。</li>
+    <li><code>position_encoding.md</code> —— 位置编码笔记（绝对 / 相对 / RoPE）。</li>
+    <li><code>kv_cache_calc.py</code> —— KV Cache 与带宽手算脚本。</li>
+    <li><code>attention_verify.md</code> —— 用真实 config 验证的结论。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>秒算 KV Cache：Qwen2.5-3B 每 token 约 36 KB，8K 约 288 MB。</li>
-    <li>能背出公式 <code>2 × layers × kv_heads × head_dim × seq_len × bytes</code> 并解释每项含义。</li>
-    <li>能说出 GQA（K/V=2 头）是内存与精度的折中，比 MHA 省 8 倍。</li>
-    <li>能判断「RK3576 上 decode 是带宽瓶颈」，并用算术强度（3 ≪ 171）说明。</li>
+    <li>用"查字典"讲清 Q/K/V：Q 查、K 被查、V 取货。</li>
+    <li>说出 /√d<sub>k</sub> 的作用：防止 softmax 饱和（梯度消失）。</li>
+    <li>说清 MQA 与 GQA 的区别：一刀切共享 vs 分组共享。</li>
+    <li>给出 GQA 为什么省内存的答案（KV 份数从 heads 降到 G，直接砍 KV Cache 到 1/8 量级）。</li>
+    <li>能从 config 算出 KV Cache，并判断模型适不适合 RK3576。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「KV Cache 是为了避免 decode 时重算历史 K/V，公式是 2 乘层数乘 KV 头数乘 head_dim 乘序列长度乘字节数。以 Qwen2.5-3B 为例，36 层、GQA、KV 头数 2、head_dim 128，每 token 约 36 KB，8K 上下文大概 288 MB。判断瓶颈我用算术强度：计算量除以访存量。RK3576 的脊点是 6 TOPS 除以 35 GB/s 约等于 171，而 decode 每 token 只做 2×3G 的浮点运算却要读 2 GB 权重，算术强度约等于 3，远低于 171，所以 decode 是带宽瓶颈。理论天花板是 35 GB/s 除以 2 GB 约 17 token/s，实测 5 到 10。所以优化方向是量化、GQA、KV Cache 量化去少读少存，而不是堆算力。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能秒算 KV Cache、能定位算力/带宽瓶颈——内存测算与瓶颈诊断能力。</p>
+    <p>「注意力本质是加权取值：Q 是提问、K 是被检索的索引、V 是内容，用 QKᵀ 算相似度、softmax 归一化、再对 V 加权求和，除以 √d_k 是为了防止分数随维度变大后 softmax 饱和、梯度消失。端侧最关键的是 KV Cache：MHA 每个 Q 头一组 KV，GQA 是多个头共享一组、把 KV 份数从 16 降到 2，KV Cache 直接砍到约 1/8。我们拿 3B 模型算过，8K 上下文下 MHA 的 KV 约 2.4GB、GQA 只有 300MB，因为 decode 是带宽瓶颈、RK3576 带宽只有 35GB/s，GQA 每生成一个 token 读 KV 从 69ms 降到 8.6ms，端到端吞吐能拉回约两倍，所以端侧一律优先 GQA。位置编码上现在主流是 RoPE，用旋转角度差编码相对位置，没有额外参数、外推友好，长上下文则看模型有没有做 NTK 或 YaRN 外推。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能讲清注意力机制与 KV Cache 的端侧取舍——注意力机制能力。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 内存带宽约 <strong>35 GB/s</strong>，是 LLM decode 的硬天花板；算力 6 TOPS 反而不是瓶颈。</li>
-      <li>LPDDR5 双通道才能跑满带宽，工程上要注意内存颗粒与频率配置。</li>
-      <li>KV Cache 与模型权重<strong>抢同一块带宽</strong>，长上下文会同时拖慢 decode。</li>
-      <li>端侧长上下文可考虑 <strong>KV Cache int8 量化</strong>（第 10 章展开），直接减半带宽压力。</li>
+      <li>3576 的瓶颈是<strong>带宽（~35 GB/s）</strong>，不是算力。注意力层选型的第一标准永远是"KV Cache 省不省带宽"。</li>
+      <li>优先选 <strong>GQA 模型</strong>（Qwen2.5、Gemma、MiniCPM 都是 GQA），MHA 长上下文会明显掉速。</li>
+      <li>MLA 省得更多，但 RKNN/NPU <strong>不直接支持</strong>，端侧落地成本高；目前仍以 GQA 为甜点。</li>
+      <li>做长上下文方案时，先确认模型的 <code>max_position_embeddings</code>，不要盲目拉长——超标会静默"变傻"。</li>
     </ul>
   </div>
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 10 章 · 性能调优与优化手段（讲义 + 作业）</title>
+<title>第 10 章 · 性能调优与精度评估（讲义 + 作业）</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -26,12 +26,12 @@
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 10 章：性能调优与优化手段</h1>
+  <h1>第 10 章：性能调优与精度评估</h1>
   <p class="lead"><strong>章节目标：</strong>从「能跑」到「跑得快」——掌握 NPU 核心数 / batch / 量化配置 / CPU+NPU 混合 / 投机解码几大手段，能在给定延迟目标下<b>调出达标配置</b>，并说清每一步为什么有效。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch10-perf-tuning</span>
   </div>
 
@@ -193,6 +193,86 @@ w8a8   最稳，LLM 上未必最快
 「先算理论天花板确认目标可达 → 再算需要的带宽利用率 →
 若单路不够，就上 batch（提吞吐）或投机解码（摊薄权重读取）→
 在满足目标的方案里挑内存最小、最稳的那个。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：精度评估闭环（量化后第一件事）</h3>
+    <p>完成转换 / 量化后，<b>第一件事不是压性能，而是评精度</b>。速度再快，答案错了就是废品。评估要先定指标、再定流程、最后定上线门槛——一步都不能省。</p>
+    <div class="board"><span class="k">按任务选指标（选错指标 = 白评）</span>
+
+<span class="g">LLM / 语言模型</span>   → PPL（困惑度，越低越好）
+                       + 抽样人肉问答（有没有事实错误）
+<span class="g">检测 / 分割</span>       → mAP（IoU 阈值下的平均精度）
+                       + mIoU（分割）
+<span class="g">分类</span>            → Top-1 / Top-5 准确率
+<span class="g">回归 / 关键点 / 深度</span> → RMSE / MAE（越小越好）
+
+<span class="k">一句话：语言看 PPL，检测看 mAP，回归看 RMSE/MAE。</span>
+别用「感觉变笨了」判断——那是感觉，不是指标。</div>
+
+    <div class="board"><span class="k">评估流程（固定验证集是关键）</span>
+① 固定验证集：量化前就切好一份<b>不参与校准</b>的测试集，
+   之后每次量化都用同一份——可比才有意义。
+② 跑原始模型：先测 FP / 原始精度 baseline。
+③ 跑量化模型：同验证集、同指标、同脚本。
+④ 前后对比：算 Δ（绝对差 + 相对涨幅）。
+⑤ 判定：对照门槛决定「上线 / 调优 / 回退」。
+
+<span class="k">门槛参考</span>
+  PPL 涨幅 &lt;5% / mAP 掉点 &lt;1pt / RMSE 涨幅 &lt;5% → 可上线
+  超门槛 → 先补校准集（板书⑩），不行再上 QAT（板书⑩）</div>
+    <div class="callout"><strong>纪律：</strong><span class="key">校准集和验证集必须分开。</span>拿校准集去评精度 = 自己给自己出题还提前看答案，涨幅必然好看，线上必崩。</div>
+
+    <h3><span class="tag-lesson">讲解</span>9. 板书⑨：量化误差分析（找出塌掉的那一层）</h3>
+    <p>精度不达标时，别急着换方案——先<b>定位误差出自哪一层</b>。量化误差是逐层累积的，找到「罪魁层」，往往只改一个配置就能救。</p>
+    <div class="board"><span class="k">两种定位粒度</span>
+
+<span class="g">逐层（per-layer）</span>
+  逐层把量化张量与原始张量比对：
+    · 相对误差 = ‖W_q − W‖ / ‖W‖
+    · 余弦相似度 = cos(W_q, W)
+  找误差突然变大的那一层 / 那一段（常是 attention 输出、
+  FFN 第二个矩阵、LayerNorm 附近）。
+
+<span class="g">逐通道（per-channel）</span>
+  对每层再按输出通道拆，找「离群通道」：
+    · 某通道 scale 被 outlier 撑大 → 同层其他通道全被压平
+    · 这正是第 2 章 outlier 陷阱的「逐层放大版」
+
+<span class="k">判读</span>
+  · 单层相对误差 &gt; 10% → 该层敏感，优先保精度；
+  · 误差集中在个别通道 → 该层需要 group-wise 或提高位宽。</div>
+    <div class="board"><span class="k">误差定位后的三板斧</span>
+① 该层单独保精度：敏感层抬到 w8a16 / 保持 fp16；
+② 缩小 group_size：让 outlier 关进更小的组（回顾第 2 章）；
+③ 换 quantized_algorithm：normal → mmse / kl_divergence，
+   让标定更贴合分布。</div>
+
+    <h3><span class="tag-lesson">讲解</span>10. 板书⑩：校准集工程 + PTQ/QAT 验证</h3>
+    <p>精度问题的根治手段只有两个：<b>校准集做对</b>，或 <b>PTQ 不够就上 QAT</b>。先榨干校准集，再决定要不要动 QAT——QAT 成本高得多。</p>
+    <div class="board"><span class="k">校准集工程（覆盖真实分布）</span>
+
+  · 分布对齐：用线上真实输入，不用随机数（第 9 章的校准集三条军规）。
+  · 分层覆盖：长度（短/中/长）、任务（问答/翻译/代码）、
+    边界样本（超长、含数字、含专有名词）都要有。
+  · 规模：LLM 100~500 条；太少统计不稳，太多收益递减。
+  · 一致性：校准集与上线输入同源、同预处理管线，
+    否则「校准的世界」和「运行的世界」是两回事。
+  · 可复现：固定随机种子与采样脚本，存 calib/prompts.txt。</div>
+
+    <div class="board"><span class="k">PTQ vs QAT</span>
+<span class="g">PTQ（训练后量化）</span>——首选
+  不训练，只校准；快、成本低。
+  覆盖 80% 场景；w4a16 / w8a8 通常够用。
+<span class="g">QAT（量化感知训练）</span>——PTQ 不行才上
+  训练时模拟量化误差，让模型「学会」在量化下工作；
+  精度最接近原始，但要重训 + 数据 + 算力。
+  适合：PTQ 后仍超门槛、且该模型值得投入。</div>
+
+    <div class="board"><span class="k">验证闭环（PTQ / QAT 都要走）</span>
+  校准集 → 量化 → <b>固定验证集评测</b> → 对比 baseline →
+    达标 → 上线
+    不达标 → 换校准集重来 → 仍不达标 → 上 QAT → 再评测
+  <span class="k">每一版量化都留一份评测记录，可追溯到「哪一版达标」。</span></div>
+    <div class="callout"><strong>顺序别乱：</strong>先 PTQ + 好校准集（性价比最高），实在过不了门槛再上 QAT。<span class="key">一上来就 QAT = 用最贵的办法解决最便宜的问题。</span></div>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -255,6 +335,15 @@ w8a8   最稳，LLM 上未必最快
       <dt>检验标准</dt><dd>给定一个延迟目标，拿报告能立刻选出配置——架构决策标准。</dd>
     </dl>
   </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>精度评估脚本模板（新增）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>写一个可复用的评估脚本模板：LLM 算 PPL，或检测算 mAP。</dd>
+      <dt>要掌握</dt><dd>固定验证集的做法；PPL / mAP / RMSE 的取法；量化前后对比与门槛判定。</dd>
+      <dt>实操步骤</dt><dd>① 切一份不参与校准的验证集 <code>eval/</code>；② 写 <code>eval_ppl.py</code>（读验证集逐 token 累加 logp，<code>PPL=exp(-mean(logp))</code>）或 <code>eval_map.py</code>（跑检测框、按 IoU 计算 AP 后求均值）；③ 同一脚本跑原始模型与量化模型，输出 <code>eval_report.md</code>：baseline / 量化 / Δ / 是否达标。</dd>
+      <dt>检验标准</dt><dd>改配置不用改脚本就能重测；报告里能指着数字说清「涨/跌多少、为什么、是否上线」。</dd>
+    </dl>
+  </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
@@ -264,6 +353,7 @@ w8a8   最稳，LLM 上未必最快
     <li><code>perf_matrix.md</code> —— 配置矩阵实测表（量化 × batch）。</li>
     <li><code>spec_decode.md</code> —— 投机解码验证（手算 vs 实测加速比）。</li>
     <li><code>perf_tuning_report.md</code> —— 性能调优报告（含最优配置，核心产出）。</li>
+    <li><code>eval_ppl.py</code> / <code>eval_map.py</code> + <code>eval_report.md</code> —— 精度评估脚本模板与前后对比。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
@@ -273,6 +363,8 @@ w8a8   最稳，LLM 上未必最快
     <li>会算 batch 提升后的带宽利用率，判断收益是否划算。</li>
     <li>能用公式手算投机解码加速比（α=0.8, γ=4, r=0.1 → ≈2.4×）。</li>
     <li>给一个延迟目标，能反推出该动 batch 还是投机解码。</li>
+    <li>能按任务选对精度指标（LLM 用 PPL、检测用 mAP、回归用 RMSE/MAE），并用固定验证集做前后对比。</li>
+    <li>能定位量化误差最大的层，并说出「PTQ 不够就上 QAT」的判定顺序。</li>
   </ul>
 
   <h2>面试话术</h2>

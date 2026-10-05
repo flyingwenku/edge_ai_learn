@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 2 章 · 量化粒度与方案对比（讲义 + 作业）</title>
+<title>第 2 章：量化粒度与方案对比（讲义 + 作业）</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -22,8 +22,8 @@
   <p class="lead"><strong>章节目标：</strong>搞懂「<b>粒度决定精度、方案决定落地</b>」——拿到「RK3576 + 3B」，能 3 秒报出该用哪个量化方案。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
-    <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">上午 4h · 4 个任务</span>
+    <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch02-granularity</span>
   </div>
 
@@ -131,6 +131,105 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
 「优先 RKNN int8 per-channel，直接吃 NPU；如果要 int4 且想跨平台验证，
 用 llama.cpp GGUF Q4_K_M。GPTQ/AWQ 精度好，但 NPU 不直接支持，
 不如用 RKNN。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：CV 量化 vs LLM 量化</h3>
+    <p>前面讲的是「通用量化」。但真正的端侧业务里，<b>CV 模型（检测 / 分割）和 LLM 的量化痛点完全不同</b>——一个是坐标回归，一个是词表预测。搞混了就会「LLM 那套调法用在检测上，mAP 掉一半」。</p>
+    <div class="board"><span class="k">CV 量化 vs LLM 量化：目标不同，敏感点不同</span>
+
+              CV 量化（检测/分割）           LLM 量化
+输入          图像（连续、空间相关）          文本 token（离散）
+输出          bbox 坐标 + 掩码/类别          词表概率分布
+关键头        回归头（做连续值回归）         最后 logits 层
+量化最怕      <span class="r">回归头：连续值，误差直接进坐标</span>   <span class="k">权重/激活里的 outlier</span>
+主流评估      <span class="g">mAP（检测）/ mIoU（分割）</span>    <span class="g">PPL（困惑度）</span>
+对齐手法      回归头/敏感层保高精度          权重分组 + 保护重要通道
+
+<span class="k">一句话：CV 盯"坐标回归准不准"，LLM 盯"权重离群值"。</span></div>
+    <p>为什么<b>回归头对量化更敏感、分类头相对鲁棒</b>？用手算把差别算出来：</p>
+    <div class="board"><span class="k">回归头 vs 分类头：量化噪声谁更能忍？</span>
+
+设回归头输出归一化 bbox 坐标（0~1），int8 对称量化。
+
+情形 A：动态范围正常，scale = 0.004
+  单坐标最大误差 = scale/2 = <span class="g">±0.002</span>
+  640px 图 → 0.002 × 640 = <span class="g">±1.3 px</span>   → IoU 基本无损
+
+情形 B：范围被别的输入撑大，scale = 0.02
+  误差 = ±0.01 → 0.01 × 640 = <span class="r">±6.4 px</span>
+  20px 的小目标直接偏 1/3 个框 → <span class="r">mAP 掉一大截、小目标漏检</span>
+
+<span class="k">对比分类头：</span>输出是"第几类"，只要 argmax 的最大项没被翻转，
+   <span class="g">结论就不变</span>——量化噪声被"离散化"吃掉了 → 相对鲁棒。
+
+<span class="k">结论：量化检测/分割模型，重点盯回归头与坐标/掩码精度；</span>
+<span class="k">      量化 LLM，重点处理权重与激活的离群值。</span></div>
+    <div class="board"><span class="k">评估指标别搞混（量化前后跑同一套，看"相对掉点"）</span>
+  CV  ：mAP@IoU（检测）、mIoU（分割）——"框得准不准、分得对不对"
+  LLM ：PPL（困惑度）——"预测下一个词有多犹豫"，越大越差
+<span class="k">CV 看绝对值（mAP 0.42→0.38 就是掉点），LLM 看 PPL 变化率。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：校准集工程要点</h3>
+    <p>PTQ（后面板书⑧）不训练，全靠<b>校准集</b>去"看一眼"每层的真实激活分布。校准集选得好不好，直接决定量化的成败。</p>
+    <div class="board"><span class="k">校准集（calibration set）是 PTQ 的命门</span>
+
+作用：PTQ 不训练，靠校准集"看一眼"真实激活分布，
+      据此估出每层激活的 <span class="g">scale / zero_point</span>（量化范围）。
+
+工程要点：
+  1) <span class="k">必须覆盖真实输入分布</span>：训练分布 ≠ 线上分布
+  2) 数量够用即可：常见 100~1000 张/条（RKNN 一般几百张就够）
+  3) <span class="g">多样性 &gt; 数量</span>：光照/角度/尺度/类别/难例都要有
+  4) 别拿"喂熟样本"糊弄：分布偏 → 激活范围估偏 → 白量化</div>
+    <div class="board"><span class="k">校准集选错的代价（会直接拖垮检测/回归精度）</span>
+  例 1：校准集全是白天图，线上有夜景
+        → 激活范围估小 → 夜景激活"溢出"被裁 → <span class="r">框飞 / 漏检</span>
+  例 2：校准集漏掉小目标场景
+        → 回归头动态范围估偏 → <span class="r">小目标坐标误差被放大</span>
+  例 3：校准集只覆盖正常对比度，忽略强光/逆光
+        → 分割边界锯齿、mIoU 掉点
+
+<span class="g">校准不对 = 量化白做。评估掉点，第一件事先怀疑校准集。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：PTQ vs QAT 对比</h3>
+    <p>前面三个方案（GPTQ/AWQ/RKNN）本质都是<b>训练后量化</b>。再往上还有一层决策：要不要动训练？这就是 PTQ 与 QAT 的分野。</p>
+    <div class="board"><span class="k">PTQ（Post-Training Quantization，训练后量化）</span>
+  做法：模型已训练好，只用校准集估量化参数，<span class="k">不碰训练</span>
+  优点：<span class="g">快</span>（分钟级）、不需训练流程/算力/标注数据
+  缺点：<span class="r">精度损失相对大</span>，对 outlier / 敏感层没辙
+  端侧地位：<span class="k">主力方案</span>（RKNN 的量化就是 PTQ）
+
+<span class="k">QAT（Quantization-Aware Training，量化感知训练）</span>
+  做法：训练时插入"伪量化"节点，让模型在训练中
+        <span class="g">主动学会适应量化误差</span>
+  优点：<span class="g">精度更好</span>，可逼近浮点结果
+  缺点：<span class="r">要完整训练流程 + 算力 + 数据</span>，周期长
+  端侧地位：精度不达标时的"补救牌"
+
+<span class="k">决策口诀：</span>
+  端侧落地 → 先 PTQ；PTQ 掉点超预算 → 才上 QAT。
+  （RKNN 原生支持 PTQ；QAT 需自建训练 pipeline 再导入）</div>
+
+    <h3><span class="tag-lesson">讲解</span>9. 板书填空：PTQ / QAT 决策空表</h3>
+    <p>先自己填，再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>维度</th><th>PTQ</th><th>QAT</th></tr></thead>
+      <tbody>
+        <tr><td>要不要训练</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>速度 / 成本</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>精度</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>端侧地位</td><td class="fill">?</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案</summary>
+      <div class="board"><span class="k">PTQ / QAT 对照</span>
+  要不要训练：PTQ <span class="g">不需要</span>（只用校准集） / QAT <span class="r">需要</span>（改训练流程）
+  速度 / 成本：PTQ <span class="g">快、便宜</span>（分钟级） / QAT <span class="r">慢、贵</span>（要算力+数据）
+  精度      ：PTQ <span class="r">损失相对大</span> / QAT <span class="g">更好、可逼近浮点</span>
+  端侧地位  ：PTQ <span class="k">主力（RKNN 用 PTQ）</span> / QAT <span class="k">不达标时的补救牌</span>
+
+<span class="k">口诀：端侧先 PTQ，掉点超预算再上 QAT。</span></div>
+    </details>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -164,6 +263,15 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
       <dt>检验标准</dt><dd>能说出「GPTQ/AWQ 是通用算法、RKNN 是平台落地工具，端侧最终走 RKNN」。</dd>
     </dl>
   </div>
+  <div class="task">
+    <div class="head"><span class="num">4</span><h3>CV 量化 vs LLM 量化（含 bbox 敏感度手算）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书⑥整理成对比笔记，并手算证明「回归头比分类头对量化更敏感」。</dd>
+      <dt>要掌握</dt><dd>CV（mAP/mIoU）与 LLM（PPL）评估口径的差异；回归头的连续值误差如何放大成坐标/像素误差；分类头为什么相对鲁棒。</dd>
+      <dt>实操步骤</dt><dd>写 <code>cv_vs_llm.md</code>：① CV/LLM 量化对比表（输入/输出/关键头/敏感点/评估指标）② 用板书数字复算 scale=0.004 与 scale=0.02 两种情形下的坐标误差，并换算到 640px 像素 ③ 一句话解释「为什么分类头更鲁棒」。</dd>
+      <dt>检验标准</dt><dd>能说清「量化 CV 模型要盯回归头与坐标精度，量化 LLM 要盯权重离群值」，并分别报出 mAP / PPL 的口径。</dd>
+    </dl>
+  </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
@@ -192,13 +300,24 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
       <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
     </dl>
   </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>校准集工程 + PTQ/QAT 决策笔记</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书⑦⑧整理成一份可执行的「校准集清单 + 量化路线决策」，直接能用于检测/分割模型。</dd>
+      <dt>要掌握</dt><dd>校准集为什么必须覆盖真实输入分布；校准集选错的后果；PTQ 与 QAT 在成本/精度/适用条件下的取舍。</dd>
+      <dt>实操步骤</dt><dd>写 <code>calib_ptq_qat.md</code>：① 校准集工程要点清单（覆盖真实分布 / 数量 / 多样性 / 剔除偏样本）② 「校准集选错 → 掉点」的 2 个具体场景 ③ PTQ vs QAT 对比表 + 一段「端侧先 PTQ、掉点再 QAT」的决策说明。</dd>
+      <dt>检验标准</dt><dd>能按真实分布挑出合规校准集；能用一句话定当场该走 PTQ 还是 QAT。</dd>
+    </dl>
+  </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
     <li><code>granularity.md</code> —— 粒度三级对比 + group-wise 开销手算。</li>
     <li><code>granularity_demo.py</code> —— outlier 陷阱的代码复现（per-tensor vs group-wise）。</li>
     <li><code>scheme_compare.md</code> —— GPTQ / AWQ / RKNN 三方案对比。</li>
+    <li><code>cv_vs_llm.md</code> —— CV 量化 vs LLM 量化对比 + bbox 回归敏感度手算。</li>
     <li><code>gguf_compare.md</code> —— Q8_0 vs Q4_K_M 对比。</li>
+    <li><code>calib_ptq_qat.md</code> —— 校准集工程要点 + PTQ/QAT 决策笔记。</li>
     <li><code>selection_report.md</code> —— RK3576 + 3B 量化方案选型报告（一页，核心产出）。</li>
   </ul>
 
@@ -208,12 +327,16 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
     <li>说出 group_size=128 的 scale 开销约 3.1%。</li>
     <li>给「RK3576 + 3B」秒答「RKNN int8 per-channel；int4 跨平台用 GGUF Q4_K_M」。</li>
     <li>能讲清 GPTQ/AWQ 是算法、RKNN 是平台落地工具。</li>
+    <li>能说清 CV 量化（mAP/mIoU）与 LLM 量化（PPL）的评估差异，以及回归头为什么比分类头更敏感。</li>
+    <li>能解释校准集为什么必须覆盖真实输入分布，以及选错校准集会怎样拖垮检测/回归精度。</li>
+    <li>能对比 PTQ 与 QAT：端侧先 PTQ，精度不达标才上 QAT。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
     <p>「量化粒度决定精度：int8 用 per-channel 就够，int4 必须 group-wise，group_size 取 128，因为 4 位只有 15 个刻度、权重的 outlier 会把 scale 撑爆，不分组小权重直接归零。方案上，GPTQ 和 AWQ 是通用量化算法、精度好，但 NPU 不直接支持；端侧落地我用 RKNN 做 int8 per-channel，直接吃 NPU；如果需要 int4 且要跨平台验证，就用 llama.cpp 的 GGUF Q4_K_M，3B 大概 1.9GB。」</p>
+    <p>「CV 和 LLM 的量化痛点不一样：CV 检测/分割是坐标回归，回归头对量化最敏感，quantization noise 会直接放大成 bbox 坐标误差，评估看 mAP 或 mIoU；LLM 是词表预测，怕的是权重和激活的离群值，评估看 PPL。落地主要走 PTQ：用覆盖真实输入分布的校准集估激活范围，快、成本低；但校准集选不好——比如只有白天没有夜景——激活范围估偏，检测精度直接崩。如果 PTQ 掉点超出预算，才上 QAT，用伪量化把量化误差训进去，精度更好但要完整训练流程和算力。」</p>
     <p style="margin:0"><strong>能力标签：</strong>能说清「怎么量化、为什么这么量化、在哪落地」——量化选型能力。</p>
   </div>
 
@@ -223,6 +346,9 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
       <li>3576 的 NPU 是 <strong>int8 定点加速器为主</strong>，int4 支持有限且多为 int8 模拟，所以生产上优先 <strong>int8 per-channel</strong>。</li>
       <li>RKNN 量化必须给<strong>校准集</strong>，且要覆盖真实输入分布（后面第 9 章会用真实数据校准）。</li>
       <li>GPTQ/AWQ 的产物不能直接塞给 NPU，需要转 RKNN——所以端侧落地环节认 RKNN。</li>
+      <li>RKNN 走的就是 <strong>PTQ</strong>：校准集质量直接决定线上 mAP。做检测/分割时，校准集务必覆盖<strong>夜景、小目标、强光/逆光、难例</strong>等真实场景，否则激活范围估偏直接拖垮精度。</li>
+      <li><strong>回归头更敏感</strong>：必要时对回归头/敏感层保留更高精度（混合量化），别一刀切 int8。</li>
+      <li>若 <strong>PTQ 掉点超出预算</strong>，再考虑 QAT（需自建训练流程）；端侧日常优先 PTQ。</li>
     </ul>
   </div>
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 7 章 · FFN、MoE 与架构趋势速览（讲义 + 作业）</title>
+<title>第 7 章：推理框架与流程拆解（讲义 + 作业）</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -23,170 +23,206 @@
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 7 章：FFN、MoE 与架构趋势速览</h1>
-  <p class="lead"><strong>章节目标：</strong>搞懂「<b>FFN 存知识、MoE 是云端的省算力游戏、端侧另有答案</b>」——拿到一个端侧场景，能当场说出该选什么架构方向、为什么 MoE 不合适。</p>
+  <h1>第 7 章：推理框架与流程拆解</h1>
+  <p class="lead"><strong>章节目标：</strong>把「模型文件」到「出一句话」中间的每一段路拆开——<b>拿到「RK3576 + 3B」，能立刻报出用哪个框架、为什么，并画出推理全流程图</b>。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch07-arch-trends</span>
+    <span class="chip">下午 4h · 4 个任务</span>
+    <span class="chip">产出目录：ch07-inference</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点是 MoE 为什么在端侧"省算力但不省时间"。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量手算 / 空表自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写 MoE 笔记、架构趋势笔记、选型表。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把六个框架的定位、ONNX 中间层和推理流程看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的空表 / 流程空位自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真机跑 llama.cpp、用 netron 看 ONNX、出选型报告。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 6 章你搞懂了注意力。但注意力量只占参数的一小部分——<b>真正"装参数、装知识"的是 FFN</b>。这一章你搞清 FFN 和 MoE，再看清整个架构大方向（Transformer / SSM / 混合），最后拿到一张端侧主流模型清单。<span class="key">面试高频题：给一个端侧场景，你选什么架构、用什么模型？</span></p>
+    <p>第 1~2 章你搞定了「模型多大、怎么量化」。但一个 <code>.gguf</code> 或 <code>.rknn</code> 文件，怎么变成屏幕上滚动的字？中间是<b>推理框架</b>在干活。这一章就把「框架是谁」「模型怎么转过去（ONNX 中间层）」「流程怎么走」「时间花在哪」讲透——这是面试官问「你怎么落地」时的第一道题。</p>
+    <div class="callout"><strong>一句话记住：</strong>框架选错，模型再好也跑不动；流程看不懂，就定位不了卡顿。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：FFN——Transformer 的"知识仓库"</h3>
-    <p>每个 Transformer 层有两个子块：注意力 + FFN。注意力负责"搬运"，FFN 负责"记忆"。</p>
-    <div class="board"><span class="k">FFN = Feed-Forward Network（前馈网络）</span>
-结构：d → 4d → d   （两层线性 + 一个激活函数）
-  中间隐藏层宽度通常是输入的 4 倍
-  （现代模型用 SwiGLU，实际约 8/3 倍，这里按 4d 讲，便于手算）
-
-<span class="k">参数量公式（两层矩阵）</span>
-  W1: d × 4d
-  W2: 4d × d
-  合计 = 2 × 4d² = <span class="g">8d²</span>
-
-<span class="k">手算：d = 2048 的单层 FFN</span>
-  8 × 2048² = 8 × 4,194,304 = <span class="g">33.6M</span> 参数/层
-  36 层 → 33.6M × 36 = <span class="g">约 1.21B</span>
-
-<span class="k">对比同模型的注意力层（GQA）</span>
-  Q: d×d = 4.19M
-  K,V: d×(2×128) = 0.52M 各
-  O: d×d = 4.19M
-  合计 ≈ 9.4M/层 → 36 层 ≈ 0.34B</div>
-    <div class="board"><span class="k">结论：FFN 参数 ≈ 注意力的 3~7 倍</span>
-  3B 这类小模型里，<span class="r">约 2/3 的参数在 FFN</span>。
-
-<span class="k">FFN 到底在干什么：知识存储</span>
-  研究共识（ROME、知识编辑等工作）：
-  · 注意力 = "token 之间搬运/聚合信息"（路由）
-  · FFN     = "把知识写进权重里"（记忆 / 查表）
-  所以：
-  模型"知道多少"  ← 主要由 <span class="g">FFN</span> 决定
-  模型"会不会用上下文" ← 主要由 <span class="g">注意力</span> 决定
-
-<span class="k">直觉：FFN 像一个巨大的 key-value 记忆库，</span>
-每个神经元近似"匹配某种特征 → 输出某条知识"。
-模型越大越"博学"，主要就是 FFN 堆得多。</div>
-    <div class="callout">一句话：<b>注意力管"看关系"，FFN 管"记知识"</b>。所以量化时 FFN 权重占大头，也是 KV Cache 之外最大的内存来源。</div>
-
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：MoE——稀疏激活原理 + 手算</h3>
-    <div class="board"><span class="k">MoE = Mixture of Experts（混合专家）</span>
-核心想法：把 1 个 FFN 换成 N 个"专家 FFN"，
-每个 token 只走其中 top-k 个（其余专家不参与计算）。
-
-  · 总参数量   = N × 8d²        （所有专家都要<span class="r">存进内存</span>！）
-  · 激活参数量 = k × 8d²        （每个 token 实际算的）
-
-<span class="k">关键区别（面试点）</span>
-  计算量由"激活参数"决定 → 稀疏 → 省算力
-  内存占用由"总参数量"决定 → 很大 → <span class="r">不省内存</span>
-
-<span class="k">举例：Mixtral 8×7B</span>
-  8 个专家，top-2 路由
-  总参数 ≈ 47B，激活 ≈ 13B
-  → 算力只花 13B（便宜），但要<span class="r">存 47B</span>（贵）
-
-<span class="k">另一端：DeepSeek-V3</span>
-  总 671B / 激活 37B
-  → 推理算力极省，但内存得按 671B 级别准备
-
-<span class="k">一句话：MoE 用"更大的总内存"换"更小的单次算力"。</span></div>
-    <div class="callout"><b>MoE 的本质取舍：</b>它把"算力"和"内存"解耦了——用稀疏激活省算力，代价是总参数量（内存）反而更大。<b>谁的内存便宜、算力贵，谁就用 MoE → 那是云端，不是端侧。</b></div>
-
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：为什么端侧少用 MoE</h3>
-    <p>这是本章最重要的判断，四个硬伤，逐个讲：</p>
-    <div class="board"><span class="k">为什么端侧基本不用 MoE？四个硬伤</span>
-
-① 内存装不下（最直接）
-   Mixtral 47B，即便压到 int4 也 ≈ 24 GB
-   RK3576 内存上限 16 GB → <span class="r">装不下</span>。
-   端侧要的是"总参数小"，MoE 天生总参数大。
-
-② batch=1 时 MoE 不省时间（最关键！）
-   decode 阶段是<span class="g">带宽瓶颈</span>：每生成 1 个 token，要把权重读一遍。
-   MoE 只激活 k 个专家 → 少算，但权重<r>还是得从内存读</r>（而且读得更碎）。
-   省算力 ≠ 省带宽 → 单用户场景几乎没收益。
-   只有大 batch（云端、多用户）才把 MoE 的稀疏优势吃满。
-
-③ 调度开销
-   路由 + 动态 shape + 专家分散 → NPU/框架对小算子、动态分支不友好。
-
-④ 随机访存
-   路由后读的是"分散在不同地址"的专家权重 → 带宽利用率更低，
-   对 3576 这种带宽本就紧张的板子雪上加霜。
-
-<span class="k">一句话：MoE 是"云端多用户"的省算力方案；</span>
-端侧单用户、带宽受限 → 用密集小模型 + GQA 更实在。</div>
-    <div class="callout"><b>最容易背错的一点：</b>"MoE 省算力"没错，但在端侧单用户推理里，<b>瓶颈是带宽不是算力</b>，而 MoE 一点都不省带宽（总权重还是那么多，读的还是分散的）。<b>所以 MoE 对端侧 decode 几乎没有加速收益。</b></div>
-
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：Transformer vs SSM(Mamba) vs 混合</h3>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：六个框架，先按「谁写的、给谁用」归位</h3>
+    <p>别背参数，先分阵营。所有推理框架只分两类：<b>通用跨平台</b> 和 <b>芯片官方</b>。</p>
     <table class="tight">
-      <thead><tr><th>范式</th><th>计算复杂度</th><th>推理内存</th><th>长文本</th><th>召回/复制</th><th>NPU 成熟度</th></tr></thead>
+      <thead><tr><th>框架</th><th>阵营 / 出身</th><th>吃谁的算力</th><th>量化</th><th>端侧适配</th><th>典型产物</th></tr></thead>
       <tbody>
-        <tr><td><b>Transformer</b></td><td>O(n²)</td><td>随 n 增长（KV Cache）</td><td>一般</td><td><b>强</b></td><td>高</td></tr>
-        <tr><td><b>SSM / Mamba</b></td><td>O(n)</td><td>常数（无 KV）</td><td>好</td><td>弱</td><td>低</td></tr>
-        <tr><td><b>混合架构</b></td><td>O(n)~O(n²)</td><td>小</td><td>好</td><td>强（有注意力层）</td><td>中</td></tr>
+        <tr><td><b>llama.cpp</b></td><td>社区，C++ 轻量引擎</td><td>CPU（+部分 GPU）</td><td>GGUF（Q4_K_M 等）</td><td>跨平台验证之王</td><td><code>.gguf</code></td></tr>
+        <tr><td><b>MNN</b></td><td>阿里，轻量引擎</td><td>手机 CPU/GPU</td><td>自有 int8/int4</td><td>移动端部署强</td><td><code>.mnn</code></td></tr>
+        <tr><td><b>TFLite</b></td><td>Google，Android 生态</td><td>Android CPU/NPU delegate</td><td>int8 为主</td><td>安卓离线模型</td><td><code>.tflite</code></td></tr>
+        <tr><td><b>ONNX Runtime</b></td><td>微软，通用运行时</td><td>多后端 EP（CPU/GPU/NPU）</td><td>依赖 EP</td><td>通用中间格式最强</td><td><code>.onnx</code></td></tr>
+        <tr><td><b>RKNN</b></td><td><b>瑞芯微官方</b></td><td><b>RK NPU 原生</b></td><td>int8 / per-channel PTQ</td><td><b>3576 官方支持</b></td><td><code>.rknn</code></td></tr>
+        <tr><td><b>QNN</b></td><td>高通官方</td><td>骁龙 Hexagon NPU</td><td>int8/int16</td><td>只吃高通芯片</td><td><code>.cpp/.bin</code></td></tr>
       </tbody>
     </table>
-    <div class="board"><span class="k">SSM / Mamba 是什么（一句话）</span>
-  用"状态空间模型"逐 token 递推：h_t = A·h_{t-1} + B·x_t
-  像 RNN 一样，只维护一个<span class="g">固定大小的状态</span> → 内存不随上下文增长。
-  代价：状态"挤"不下太多历史 → 精确回忆/复制能力弱于注意力。
+    <div class="board"><span class="k">判断口诀（背下来）：</span>
 
-<span class="k">混合架构：两头都要</span>
-  大部分层用 SSM（省内存、长文本好），少量层插注意力（保住召回）。
-  代表：Jamba、Zamba、NVIDIA Hymba、Qwen3-Next、MiniCPM 的部分版本。
+  芯片官方工具（RKNN / QNN） = <span class="g">能吃满自家 NPU，性能最好</span>
+                              但 <span class="r">只认自家芯片</span>
+  通用框架（llama.cpp / ONNX / MNN / TFLite）
+                             = <span class="g">换平台方便</span>
+                              但 <span class="r">对专用 NPU 只吃个皮毛</span>
 
-<span class="k">端侧意义</span>
-  SSM 的"常数内存"对内存吃紧的板子很有吸引力（终于不怕长上下文爆内存）。
-  但 NPU 对 SSM 的递推 scan 支持还不成熟 →
-  <span class="r">目前落地仍以 Transformer + GQA 为主</span>，SSM 作为观察方向。</div>
-    <div class="callout"><b>架构师结论：</b>端侧现在选 <b>Transformer + GQA</b>（生态成熟、NPU 支持好）；<b>Mixed/SSM</b> 作为 2026 之后的长上下文储备，关注别踩坑（算子支持）。</div>
+<span class="k">一句话：落地认官方，验证认通用。</span></div>
 
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：端侧主流模型盘点</h3>
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：为什么 RK3576 一定用 RKNN</h3>
+    <p>RKNN 不是「一个软件」，而是瑞芯微的一整套工具链。搞清三件套，你就知道数据是怎么流的。</p>
+    <div class="board"><span class="k">RKNN 三件套：</span>
+  1) rknn-toolkit2  → 在 PC 上把 onnx 转成 <span class="g">.rknn</span>（内含量化）
+  2) librknnrt      → 板端 <span class="g">运行时库</span>，真正调 NPU
+  3) rknn_server    → 板端服务（PC 联调时用）
+
+<span class="k">支持芯片：</span>RK3576 / RK3588 / RK3566 / RK3562 …（3576 在列 ✅）
+<span class="k">量化口径：</span>int8 为主，per-channel PTQ，<span class="r">必须给校准集</span>
+
+<span class="k">选型边界：</span>
+  芯片是 RK 系 → <span class="g">RKNN</span>（唯一正解）
+  芯片不是 RK  → <span class="r">RKNN 用不了</span>，回头找通用框架或厂商工具
+</div>
+    <div class="callout"><strong>结论句：</strong>「只要目标板是 RK3576，模型最终一定编成 <code>.rknn</code> 走 NPU，别无他路。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：ONNX 基础（转换链路的中间层）</h3>
+    <p>上一节那句「在 PC 上把 onnx 转成 .rknn」，这个 onnx 到底是什么？它是端侧落地链路上<b>绕不开的中间层</b>。</p>
+    <div class="board"><span class="k">为什么需要 ONNX？</span>
+  训练框架各家不同：PyTorch / TensorFlow / Paddle……
+  部署引擎也各家不同：RKNN / QNN / TensorRT / OpenVINO……
+  如果两两直连，要写 N×M 个转换器 → 组合爆炸。
+  ONNX 站出来当「<span class="g">通用中间格式</span>」：
+    PyTorch ──导出──▶ <span class="g">ONNX</span> ──转换──▶ RKNN(.rknn) / QNN / …
+  一次导出、多方消费 → 把 N×M 收敛成 N+M。
+
+<span class="k">端侧链路（本课主线）：</span>
+  PyTorch 权重 ──export──▶ <span class="g">ONNX(.onnx)</span> ──rknn-toolkit2──▶ .rknn ──▶ RK NPU</div>
+    <div class="board"><span class="k">ONNX 的两个核心概念：</span>
+
+  ① 图（Graph）
+     ONNX 把模型存成一张「<span class="g">计算图</span>」：
+     node（算子）+ tensor（张量）+ initializer（权重常量）。
+     · 算子 = Add / MatMul / Softmax / Conv / Reshape …
+     · 张量 = 数据流，带名字和 shape（常有动态维，如 batch/seq 用 '?'）
+
+  ② opset（算子集版本）
+     opset 是「<span class="g">该用哪个版本的算子定义</span>」的版本号。
+     · opset 太低 → 老算子表达不了新模型（如 RoPE、SwiGLU）
+     · opset 太高 → 目标工具链还不认识 → <span class="r">转换报错</span>
+     · 经验：导出时选目标工具链<span class="g">支持范围内的 opset</span>（RKNN 常停在中等版本）
+
+<span class="k">一句话：opset 是 ONNX 与下游工具链之间的"接口版本"。</span></div>
+    <div class="board"><span class="k">为什么转换报错，多半是 ONNX 算子不兼容？</span>
+  PyTorch 里一个简单操作，导出后可能是自定义 / 融合 / 高版本算子：
+    · 用了 RKNN/TFLite 不支持的算子 → <span class="r">Unsupported operator</span>
+    · 动态 shape 推断不出来 → shape 报错
+    · opset 与目标工具链不匹配 → 版本报错
+  排查顺序（背下来）：
+    ① 看报错里点名的<span class="g">算子名</span> → 是不是在目标工具链支持列表里
+    ② 用 <span class="g">netron</span> 打开 onnx，肉眼找可疑算子（自定义/高版本）
+    ③ 回 PyTorch 侧改写：换等价算子、去掉不支持的 op、固定 shape、调 opset
+  结论：<span class="k">端侧模型转换的坑，八成都出在 ONNX 这一层。</span></div>
+    <div class="board"><span class="k">用 netron 看模型（实操工具）</span>
+  netron = 开源的模型可视化工具，双击 .onnx / .rknn 就能看图。
+  能看：算子名字、连接关系、每层 shape、权重张量大小。
+  用途：确认导出对不对、找不兼容算子、核对输入输出名字/shape。
+  （它是 PC 上的工具，不用装到板子上。）</div>
+    <div class="callout"><strong>面试点：</strong>「PyTorch 到 RKNN 中间要过 ONNX 这一层——它是跨框架的通用交换格式；转换报错大多不是模型写错，而是 ONNX 算子/opset 与目标工具链不兼容，我会用 netron 定位到具体算子再回 PyTorch 改写。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：推理全流程拆解</h3>
+    <p>从文本到文本，一共六步。每一章后面都会拆其中一段，这里先建全局地图。</p>
+    <div class="board"><span class="k">推理流程（从文本到文本）：</span>
+
+  tokenize     文本 → token id      （BPE / SentencePiece 分词器）
+     ↓
+  embedding    id  → 向量 [hidden]  （查表，一次搞定）
+     ↓
+  N × Transformer 层:
+        LayerNorm → <span class="g">Attention</span> → 残差
+        LayerNorm → <span class="g">FFN</span>       → 残差
+     ↓
+  logits       最后位置的向量 → [vocab] 维分数
+     ↓
+  sampling     greedy/top-k/top-p/temperature → 选出 <span class="g">1 个 id</span>
+     ↓
+  detokenize   id → 文本          （拼回可读字符串）
+
+<span class="k">架构师关注点：</span>tokenize/detokenize 是 CPU 小开销，
+真正吃时间的是 <span class="g">N × Transformer 层</span> 和 <span class="g">sampling</span>。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：prefill 与 decode —— 两阶段性质完全不同</h3>
+    <p>很多人以为「生成」是一件事，其实是<b>两个物理过程</b>。这是本章最重要的一张板书。</p>
+    <div class="board"><span class="k">【Prefill 预填充】</span>
+  输入：整段 prompt（比如 512 个 token），<span class="g">一次性并行</span>处理
+  算子：矩阵 × 矩阵（matmul）→ <span class="g">算力密集</span>（compute-bound）
+  目的：把这 512 个 token 的 K/V 全部算好，存进 KV Cache
+  指标：tokens/s，衡量「吃 prompt 快不快」
+
+<span class="k">【Decode 解码】</span>
+  输入：每次只喂 <span class="g">1 个</span> 新 token
+  算子：矩阵 × 向量（matvec）→ <span class="r">带宽密集</span>（memory-bound）
+  目的：算下一个 token，把新 K/V 追加进 Cache
+  指标：tokens/s，衡量「吐字快不快」
+
+<span class="r">同一个模型，prefill 吞吐常是 decode 的 5~10 倍。</span>
+原因：matmul 每读一次权重能算一大片；matvec 每步都要把 2GB 权重全读一遍。</div>
+    <div class="callout"><strong>面试点：</strong>「首字延迟看 prefill，出字速度看 decode」——这句能立刻区分内行和外行。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：用 llama.cpp verbose 看每步耗时</h3>
+    <p>光讲理论不行，得会<b>看数据</b>。llama.cpp 加 <code>-v</code>（verbose）就会打印分段耗时。</p>
+    <div class="board"><span class="k">命令：</span>
+  llama-cli -m qwen2.5-3b-Q4_K_M.gguf -p "你好" -n 128 -v
+
+<span class="k">看这几行：</span>
+  load time          = 加载模型耗时（磁盘 IO + 解量化）
+  prompt eval time   = <span class="g">prefill</span> 耗时 / token 数
+  eval time          = <span class="g">decode</span> 耗时 / token 数
+  total time         = 端到端总耗时
+
+<span class="k">手算示范：</span>
+  prompt eval 512 tok / 12.0 s → 512 / 12.0 = <span class="g">42.7 tok/s</span>（prefill）
+  eval        128 tok / 16.0 s → 128 / 16.0 = <span class="g">8.0 tok/s</span>（decode）
+  load        2.1 s
+
+<span class="k">判读：</span>
+  decode 8 tok/s 就是用户看到的出字速度；<span class="r">这才是优化重点</span>。
+  prefill 慢 → 首字延迟高（长 prompt 场景要专门优化）。</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：选型决策（背下来）</h3>
+    <div class="board"><span class="k">场景 → 框架</span>
+
+  RK3576 生产落地      → <span class="g">RKNN</span>（.rknn，吃 NPU，性能最好）
+  跨平台 / 快速验证    → <span class="g">llama.cpp + GGUF Q4_K_M</span>（CPU 就能跑）
+  Android 原生 App     → MNN / TFLite
+  高通平台（如手机）   → <span class="g">QNN</span>
+
+<span class="k">被问「RK3576 + 3B 用什么框架」→ 标准答：</span>
+「生产用 RKNN，官方 NPU 支持最好、能吃到 6 TOPS；
+ 开发和验证阶段用 llama.cpp 跑 GGUF Q4_K_M，方便跨平台对比。
+ 两者产物不通用，最终要转 .rknn。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书填空：框架速查表</h3>
+    <p>先自己填，再展开答案。空格处填「阵营」和「吃谁的算力」。</p>
     <table class="tight">
-      <thead><tr><th>模型</th><th>常见规模</th><th>特点</th><th>端侧适配</th><th>许可</th></tr></thead>
+      <thead><tr><th>框架</th><th>阵营</th><th>吃谁的算力</th><th>端侧地位</th></tr></thead>
       <tbody>
-        <tr><td><b>Qwen2.5</b></td><td>0.5 / 1.5 / 3 / 7B</td><td>中文强、生态全、GQA + RoPE</td><td><b>好</b>（RKNN 有官方示例）</td><td>Apache-2.0</td></tr>
-        <tr><td><b>MiniCPM</b></td><td>2.4B / 4B</td><td>小尺寸强、端侧导向、多模态版</td><td><b>好</b></td><td>开源（部分需授权）</td></tr>
-        <tr><td><b>Phi-3.5-mini</b></td><td>3.8B</td><td>微软、小模型推理能力突出</td><td>中</td><td>MIT</td></tr>
-        <tr><td><b>Gemma-2</b></td><td>2B / 9B</td><td>Google、质量高、GQA</td><td>中</td><td>Gemma 许可</td></tr>
-      </tbody>
-    </table>
-    <div class="board"><span class="k">端侧选型口诀（按任务挑规模）</span>
-
-  意图识别 / 分类 / 短语槽位   → <span class="g">0.5B ~ 1.5B</span>（int8 即可）
-  简单对话 / 摘要 / RAG 生成    → <span class="g">1.5B ~ 3B</span>（int8 或 int4）
-  复杂推理 / 代码              → 大概率走云端，端侧只兜底
-
-<span class="k">首选 Qwen2.5-1.5B/3B</span>：中文好、GQA、RKNN 官方示例齐全，
-落地风险最低（这是"能用现成的就别自己造"的工程选择）。</div>
-    <div class="callout">记忆锚点：<b>端侧选型 = 任务复杂度 → 规模 → 量化 → 生态支持</b>。前两步看需求，后两步看板子，最后一步看"有没有现成的 RKNN 示例"。</div>
-
-    <p><b>板书填空 · FFN 参数量，先自己填再展开：</b>设 d = 3072，层数 L = 28。</p>
-    <table class="tight">
-      <thead><tr><th>项目</th><th>公式</th><th>单层参数量</th><th>全模型</th></tr></thead>
-      <tbody>
-        <tr><td>单层 FFN</td><td class="fill">8d² = ?</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+        <tr><td>llama.cpp</td><td>?</td><td>?</td><td>跨平台验证</td></tr>
+        <tr><td>RKNN</td><td>?</td><td>?</td><td>3576 落地</td></tr>
+        <tr><td>QNN</td><td>?</td><td>?</td><td>高通平台</td></tr>
+        <tr><td>ONNX Runtime</td><td>?</td><td>?</td><td>通用中间格式</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
-      <p>8d² = 8 × 3072² = 8 × 9,437,184 = <b>75.5M</b> 参数/层；× 28 层 ≈ <b>2.11B</b>。</p>
-      <p>也就是说：一个"3B 级"模型，光 FFN 就可能占 2B 以上——这正是"FFN 是知识仓库"的数字证据。</p>
+      <table class="tight">
+        <thead><tr><th>框架</th><th>阵营</th><th>吃谁的算力</th><th>端侧地位</th></tr></thead>
+        <tbody>
+          <tr><td>llama.cpp</td><td>通用跨平台</td><td>CPU 为主</td><td>跨平台验证</td></tr>
+          <tr><td>RKNN</td><td>芯片官方（瑞芯微）</td><td>RK NPU 原生</td><td>3576 落地</td></tr>
+          <tr><td>QNN</td><td>芯片官方（高通）</td><td>骁龙 Hexagon NPU</td><td>高通平台</td></tr>
+          <tr><td>ONNX Runtime</td><td>通用跨平台</td><td>多后端 EP</td><td>通用中间格式</td></tr>
+        </tbody>
+      </table>
     </details>
   </div>
 
@@ -195,95 +231,104 @@
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>FFN 参数量手算笔记</h3></div>
+    <div class="head"><span class="num">1</span><h3>六框架对比表</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书①整理成笔记：FFN 结构、参数量公式、在总参数中的占比。</dd>
-      <dt>要掌握</dt><dd>8d² 公式；FFN 为什么是"知识存储"；FFN vs 注意力的参数对比。</dd>
-      <dt>实操步骤</dt><dd>写 <code>ffn_params.md</code>：① d→4d→d 结构与 8d² 推导（一句）；② 用 d=2048/L=36 手算单层与全模型；③ 一句话解释"为什么模型越大越博学"。</dd>
-      <dt>检验标准</dt><dd>能当场算出任意 d、任意层数的 FFN 参数量，并说出它占总参数约 2/3。</dd>
+      <dt>目标</dt><dd>把板书①扩成你的框架矩阵：llama.cpp / MNN / TFLite / ONNX Runtime / RKNN / QNN 六列对比。</dd>
+      <dt>要掌握</dt><dd>「阵营 / 吃谁算力 / 量化方式 / 端侧适配 / 产物格式」五个维度的差别。</dd>
+      <dt>实操步骤</dt><dd>写 <code>framework_matrix.md</code>：6 行 × 5 列表格 + 一句话「哪两个是芯片官方工具、为什么它们性能最好」。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能说出「落地认官方（RKNN/QNN），验证认通用（llama.cpp/ONNX）」。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>MoE 笔记</h3></div>
+    <div class="head"><span class="num">2</span><h3>真机跑 llama.cpp，抓 prefill/decode 数据（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>写清 MoE 的原理、参数量拆解、以及端侧不适用的四个理由。</dd>
-      <dt>要掌握</dt><dd>总参数 vs 激活参数；稀疏激活；batch=1 时为什么不省时间。</dd>
-      <dt>实操步骤</dt><dd>写 <code>moe_notes.md</code>：① 用 Mixtral 8×7B 和 DeepSeek-V3 举例算总/激活参数；② 列四个端侧硬伤；③ 一句话结论"MoE 是云端方案"。</dd>
-      <dt>检验标准</dt><dd>能讲清"MoE 省算力但不省带宽"，并说明端侧单用户为什么没收益。</dd>
+      <dt>目标</dt><dd>亲手跑一个 GGUF 模型，用 verbose 看到 prefill 与 decode 的真实速度差。</dd>
+      <dt>要掌握</dt><dd>llama.cpp 的编译/安装、<code>-v</code> 输出含义、tok/s 的手算换算。</dd>
+      <dt>实操步骤</dt><dd>① 装好 llama.cpp；② 下一个 3B 级 GGUF（Q4_K_M）；③ 用 <code>-p</code> 给一段长 prompt、<code>-n 128 -v</code> 跑；④ 抓 prompt eval / eval / load 三段耗时，手算 tok/s，记进 <code>llama_perf.md</code>（附原始日志）。</dd>
+      <dt>检验标准</dt><dd>能指出「decode tok/s 明显低于 prefill tok/s」，并解释原因是 matvec 带宽密集。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>架构趋势笔记</h3></div>
+    <div class="head"><span class="num">3</span><h3>画推理流程图</h3></div>
     <dl>
-      <dt>目标</dt><dd>梳理 Transformer / SSM(Mamba) / 混合三条路线。</dd>
-      <dt>要掌握</dt><dd>三者复杂度、内存、长文本、召回、NPU 成熟度差异。</dd>
-      <dt>实操步骤</dt><dd>写 <code>arch_trends.md</code>：① 三范式对比表；② SSM 的一句话原理（h_t = A·h_{t-1} + B·x_t）；③ 混合架构举例；④ 端侧该怎么选。</dd>
-      <dt>检验标准</dt><dd>能说出"SSM 常数内存很香，但 NPU 支持不成熟，端侧暂时还是 Transformer+GQA"。</dd>
+      <dt>目标</dt><dd>把 tokenize → embedding → attention+FFN → logits → sampling → detokenize 画成一张图。</dd>
+      <dt>要掌握</dt><dd>六步的顺序、每步的输入/输出张量形状、哪些步骤在 CPU、哪些吃 NPU。</dd>
+      <dt>实操步骤</dt><dd>写 <code>inference_flow.md</code>：用文字框图/箭头把流程画全，标注每步耗时占比与执行单元。</dd>
+      <dt>检验标准</dt><dd>能对着图讲 3 分钟，说清「prefill 在哪、decode 在哪、KV Cache 何时写入」。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>架构对比表 + 端侧判断</h3></div>
+    <div class="head"><span class="num">1</span><h3>RKNN 工具链调研报告</h3></div>
     <dl>
-      <dt>目标</dt><dd>把上午的趋势笔记变成一张能直接用于决策的对比表。</dd>
-      <dt>要掌握</dt><dd>用"场景 → 架构"的映射做判断，而不是罗列名词。</dd>
-      <dt>实操步骤</dt><dd>写 <code>arch_compare.md</code>：6 列对比表（Transformer / SSM / 混合）+ 每个给一句"端侧适用性"结论。</dd>
-      <dt>检验标准</dt><dd>别人拿这张表，能直接决定"这个项目用 Transformer+GQA"。</dd>
+      <dt>目标</dt><dd>搞清 RKNN 三件套（rknn-toolkit2 / librknnrt / rknn_server）各自职责。</dd>
+      <dt>要掌握</dt><dd>PC 端转换 → 板端运行的完整链路；支持芯片列表；量化为何要给校准集。</dd>
+      <dt>实操步骤</dt><dd>写 <code>rknn_notes.md</code>：三件套职能表 + 「onnx → .rknn → NPU 推理」链路图；查瑞芯微文档补充支持芯片与实际命令。</dd>
+      <dt>检验标准</dt><dd>能解释「为什么 RKNN 产物只能跑在 RK 芯片上」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>端侧主流模型盘点表</h3></div>
+    <div class="head"><span class="num">2</span><h3>用 netron 打开一个 ONNX 看算子（实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书⑤扩成你自己的模型清单。</dd>
-      <dt>要掌握</dt><dd>各模型规模、特点、端侧适配、许可；不同任务该挑多大。</dd>
-      <dt>实操步骤</dt><dd>写 <code>model_inventory.md</code>：模型清单表（可加 Roboflow 之外你关注的模型）+ "任务复杂度 → 规模"的推荐口诀。</dd>
-      <dt>检验标准</dt><dd>给你一个端侧任务，你能 30 秒报出"用哪个模型、多大、什么量化"。</dd>
+      <dt>目标</dt><dd>亲手导出一个 ONNX 并用 netron 打开，看清它的计算图与算子——把板书③落到手上。</dd>
+      <dt>要掌握</dt><dd>ONNX 图结构（node / tensor / initializer）、opset 概念、如何用 netron 定位算子。</dd>
+      <dt>实操步骤</dt><dd>写 <code>onnx_notes.md</code>：① 任选一个小模型（如一个小 MLP，或 Qwen 的一个 Transformer block）用 PyTorch <code>torch.onnx.export</code> 导出 <code>.onnx</code>；② 用 netron 打开，列出 top 5 高频算子（如 MatMul / Softmax / Add / Reshape），记录输入输出的名字与 shape；③ 记下导出用的 opset 版本，说明 opset 选低 / 选高分别会出什么问题。</dd>
+      <dt>检验标准</dt><dd>能对着 netron 的图讲清「这个模型由哪些算子组成、哪个算子在 RKNN 上可能不兼容、该怎么改」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>场景架构推荐（一页）+ 秒答</h3></div>
+    <div class="head"><span class="num">3</span><h3>《RK3576 + 3B 框架选型报告》（一页）</h3></div>
     <dl>
-      <dt>目标</dt><dd>综合本章，给一个真实端侧场景写推荐架构——本章核心产出。</dd>
-      <dt>要掌握</dt><dd>把架构方向、模型、量化、理由串成一段决策。</dd>
-      <dt>实操步骤</dt><dd>写 <code>arch_recommend.md</code>（一页）：场景设定（如"离线智能音箱，1.5B 意图识别 + 简单对话"）→ 架构（Transformer+GQA）→ 模型（Qwen2.5-1.5B/3B）→ 量化（RKNN int8/int4）→ 为什么不用 MoE / SSM → 风险。</dd>
-      <dt>检验标准</dt><dd>30 秒内把理由讲完，且每条都有数据或机制支撑。</dd>
+      <dt>目标</dt><dd>综合上面产出，给一个明确结论——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把「框架对比 + ONNX 链路 + RKNN 链路 + 流程耗时」串成一个决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>framework_selection.md</code>（一页）：①场景 ②候选框架 ③取舍理由 ④最终结论（生产 RKNN；验证 llama.cpp+GGUF Q4_K_M）⑤风险（RKNN 需校准集、ONNX 算子兼容性、跨平台产物不通用）。</dd>
+      <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做——架构文档的标准。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>秒答训练</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
+      <dt>实操步骤</dt><dd>自问自答：RK3576 用哪个框架？RKNN 三件套是什么？为什么需要 ONNX、opset 是什么？转换报错怎么排查？prefill 和 decode 区别？为什么 decode 慢？llama.cpp 怎么看分段耗时？</dd>
+      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>ffn_params.md</code> —— FFN 结构与参数量手算笔记。</li>
-    <li><code>moe_notes.md</code> —— MoE 原理 + 端侧四硬伤笔记（核心产出）。</li>
-    <li><code>arch_trends.md</code> —— Transformer / SSM / 混合趋势笔记（核心产出）。</li>
-    <li><code>arch_compare.md</code> —— 架构对比表与端侧判断。</li>
-    <li><code>model_inventory.md</code> —— 端侧主流模型盘点表。</li>
-    <li><code>arch_recommend.md</code> —— 场景架构推荐（一页，核心产出）。</li>
+    <li><code>framework_matrix.md</code> —— 六框架对比表（阵营/算力/量化/适配/产物）。</li>
+    <li><code>inference_flow.md</code> —— 推理全流程图（六步 + 张量形状 + 执行单元）。</li>
+    <li><code>llama_perf.md</code> —— llama.cpp verbose 实测数据 + tok/s 手算（附原始日志）。</li>
+    <li><code>rknn_notes.md</code> —— RKNN 三件套调研 + 转换链路。</li>
+    <li><code>onnx_notes.md</code> —— 导出 ONNX + netron 算子分析笔记（链路中间层）。</li>
+    <li><code>framework_selection.md</code> —— RK3576 + 3B 框架选型报告（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>说出 FFN 参数量公式 8d²，并知道它约占总参数 2/3（知识存储）。</li>
-    <li>说清 MoE 的总参数 vs 激活参数，以及"省算力不省内存/带宽"。</li>
-    <li>说清端侧不用 MoE 的四个理由（内存、batch=1 不省时间、调度、随机访存）。</li>
-    <li>对比 Transformer / SSM / 混合，并给出端侧选择。</li>
-    <li>给一个端侧场景，能推荐架构方向 + 模型 + 量化。</li>
+    <li>给「RK3576 + 3B」秒答「生产用 RKNN（吃 NPU），验证用 llama.cpp + GGUF Q4_K_M」。</li>
+    <li>能背出推理六步：tokenize → embedding → attention+FFN → logits → sampling → detokenize。</li>
+    <li>能讲清 prefill（matmul、算力密集）与 decode（matvec、带宽密集）的区别。</li>
+    <li>会用 llama.cpp <code>-v</code> 读出 prompt eval / eval 耗时并手算 tok/s。</li>
+    <li>能说清 ONNX 的作用（跨框架通用中间格式）与 opset 概念，会用 netron 看算子、定位转换报错。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「Transformer 层里参数大头是 FFN，结构是 d→4d→d，参数量 8d²，占整个模型约三分之二，它的作用是知识存储——注意力负责搬运信息、FFN 负责把知识写进权重。MoE 是把单个 FFN 换成多个专家、每个 token 只激活 top-k，比如 Mixtral 总参数 47B、激活 13B。但 MoE 在端侧基本不用：一是总参数量大、内存装不下；二是 decode 阶段瓶颈是带宽不是算力，MoE 只省算力、不省带宽，单用户 batch=1 几乎没收益，只有云端大 batch 才划算；三是路由和动态 shape 对 NPU 不友好，还会带来随机访存。架构趋势上，现在有 Transformer、SSM/Mamba 和混合三条路线，SSM 是常数内存、长文本好但精确召回弱、NPU 支持也不成熟；所以端侧我目前选 Transformer + GQA，模型优先用 Qwen2.5-1.5B/3B，生态和 RKNN 支持最稳。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能判断架构方向与模型选型、讲清 MoE 的端侧取舍——架构趋势能力。</p>
+    <p>「推理框架分两类：芯片官方工具和通用框架。RK3576 的 NPU 是瑞芯微自己的，所以生产落地我一定用 RKNN——它是官方工具链，onnx 经 rknn-toolkit2 转成 .rknn，板端 librknnrt 直接吃 NPU，能拿到 6 TOPS 的算力。开发和跨平台验证阶段我会用 llama.cpp 跑 GGUF Q4_K_M，因为它 CPU 就能跑、方便对比，但它吃不满 NPU，最终产物还要转回 RKNN。中间这一层是 ONNX：PyTorch 到 RKNN 必须过 ONNX，因为它是跨框架的通用交换格式，链路是 PyTorch→ONNX→.rknn；转换报错十有八九不是模型写错，而是 ONNX 算子或 opset 跟目标工具链不兼容，我会用 netron 打开计算图定位到具体算子，再回 PyTorch 侧改写。推理流程上，prefill 是把整段 prompt 并行算、矩阵乘矩阵、偏算力；decode 是逐 token 生成、矩阵乘向量、受内存带宽限制，所以首字延迟看 prefill、出字速度看 decode。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能说清「用什么框架、为什么用、模型怎么转过去、流程卡在哪」——框架选型、模型转换与性能拆解能力。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 内存上限 16GB，<strong>MoE 模型（如 Mixtral 47B）根本装不下</strong>，架构评审时直接排除。</li>
-      <li>端侧 decode 是<strong>带宽瓶颈</strong>，MoE 的稀疏优势在 batch=1 场景吃不到，别被"省算力"忽悠。</li>
-      <li>选模型优先看<strong>是否 GQA + 是否有 RKNN 官方示例</strong>（Qwen2.5 / MiniCPM 最省心）。</li>
-      <li>SSM/混合架构作为长上下文储备观察，但落地前先确认 NPU 算子支持，别踩"跑不起来"的坑。</li>
+      <li>3576 的 NPU 算力约 <strong>6 TOPS（int8）</strong>，只有走 <strong>RKNN</strong> 才吃得到；用 llama.cpp 只跑 CPU，吃不到 NPU。</li>
+      <li>模型落地链路是 <strong>PyTorch → ONNX → .rknn</strong>：ONNX 这层的算子/opset 兼容性直接决定转换成败。</li>
+      <li>RKNN 转换必须给<strong>校准集</strong>，第 9 章会用真实数据做校准。</li>
+      <li>端侧首字延迟主要卡在 <strong>prefill</strong>，长 prompt 场景要专门优化（如分块、批处理）。</li>
+      <li>decode 阶段是<strong>带宽瓶颈</strong>（第 5 章展开），3576 的 35 GB/s 是硬约束。</li>
     </ul>
   </div>
 

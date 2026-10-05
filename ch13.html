@@ -34,13 +34,13 @@
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch13-architecture-drill</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把端云协同、能力边界、BOM、功耗四块看懂。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把端云协同、能力边界、BOM、功耗、多模型并发五块看懂。</li>
     <li><strong>第 2 步 填模板：</strong>讲义给的「一页纸方案模板」先拿一个场景手填一遍。</li>
     <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」为三个场景各出一页纸方案。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」随机抽一个需求，10 分钟内讲出方案。</li>
@@ -161,6 +161,64 @@
   功耗：常驻供电，关注散热与 MTBF
   风险：散热→降频；建议无风扇或主动散热</div>
     <div class="callout"><b>一句话结论：</b>一页纸方案 = <b>七段模板 × 场景数字</b>；练到「给需求 10 分钟出方案」，你就具备架构师的核心能力。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：多模型并发与内存争抢（CV + LLM 同时跑）</h3>
+    <p>真实产品很少「只跑一个 LLM」：摄像头要跑 CV（检测/人脸），耳朵要跑 ASR（唤醒），嘴要跑 LLM 对话——<b>它们共用同一块内存和同一条总线</b>。不做预算就会互相踩脚：轻则掉帧、掉 tok/s，重则 OOM 崩掉。</p>
+    <div class="board"><span class="k">多模型并发资源预算表（RK3576 / 8GB / 视觉 + 语音助手同时在线）</span>
+
+模块                    常驻权重   运行时峰值     带宽需求(NPU 忙)   优先级
+──────────────────────────────────────────────────────────────
+系统+驱动+中间件          —         1.00 GB         —               —
+唤醒 + ASR + 声学前端     20 MB     0.10 GB         ~2 GB/s         <span class="g">最高</span>
+LLM 3B int4              2.00 GB    0.50 GB(KV4K)   ~22 GB/s        <span class="g">高</span>
+LLM 1.5B int4（降级态）   1.00 GB    0.35 GB(KV4K)   ~14 GB/s        <span class="g">高</span>
+CV 检测 YOLOv8n int8      4 MB      0.25 GB         ~6 GB/s         <span class="k">中（可降帧）</span>
+CV 分割/pose int8         8 MB      0.20 GB         ~5 GB/s         <span class="r">低（可关）</span>
+应用 + RAG 索引            —         0.30 GB         ~1 GB/s         <span class="k">中</span>
+预留（碎片/峰值/OOM 缓冲） —         1.00 GB         —               —
+──────────────────────────────────────────────────────────────
+合计(3B + 双 CV)          ≈2.03 GB   3.35 GB         ≈36 GB/s <span class="r">⚠ 超总线</span>
+合计(1.5B + 单 CV)        ≈1.02 GB   3.00 GB         ≈23 GB/s <span class="g">✅ 安全</span>
+
+<span class="k">内存红线：</span>永远留 ≥1GB 预留，见底就主动降级，别等 OOM Killer。
+<span class="k">带宽安全线：</span>总线 ≈35 GB/s，留 20% 余量 → 并发安全线 ≈ <span class="g">28 GB/s</span>。</div>
+    <p><b>① 内存怎么分：</b>分三类——<b>常驻权重</b>（开机 mmap，基本不动）、<b>动态运行时</b>（激活 / KV Cache / 工作区，可回收）、<b>预留缓冲</b>（碎片 + 峰值，≥1GB）。给每个模型设内存上限（进程隔离或 cgroup），防止一个模型把另一个挤爆。</p>
+    <p><b>② NPU 时间片与优先级：</b>3576 只有一个 NPU（6 TOPS），多模型只能<b>分时复用</b>，且<span class="key">切换只发生在一次推理的边界</span>（不能打断正在算的那一层）。所以给 LLM 的<span class="g">首 token（TTFT）</span>最高优先级、CV 用低优先级 + 降帧；别让长任务霸占 NPU——把大推理拆小、限制单次时长。</p>
+    <p><b>③ 带宽争抢：</b>LLM 解码是<span class="r">带宽型</span>（每出一个 token 要把权重搬一遍：3B int4 ≈ 2GB/token），CV 每帧也要搬激活。两者同时跑，总需求叠加 → 谁抢到谁快，另一方 tok/s 或帧率就掉。这正是「CPU 空闲但推理变慢」的原因——瓶颈在带宽，不在算力。</p>
+    <p><b>④ OOM 风险与降级顺序：</b>降级要<span class="key">有顺序、有阈值</span>——先牺牲「可重算、体验类」负载，最后才动核心功能；先砍内存大头（KV、模型规模），再砍小头。</p>
+    <div class="board"><span class="k">降级顺序（从上到下依次触发）</span>
+
+① 可用内存 &lt; <span class="k">1.5 GB</span> → CV 降帧 30 → 15 fps
+② 可用内存 &lt; <span class="k">1.2 GB</span> → CV 输入 640 → 320，或停「分割/pose」
+③ 可用内存 &lt; <span class="k">1.0 GB</span> → LLM 上下文 8K → 4K → 2K（缩 KV Cache）
+④ 可用内存 &lt; <span class="k">0.8 GB</span> → LLM 3B → <span class="g">1.5B</span>（保对话，牺牲理解力）
+⑤ 仍不足            → 只保 唤醒 + ASR + 本地工具，聊天转云或排队
+
+<span class="k">原则：</span>先体验后核心；先大对象后小对象；先可降级后不可降级。
+<span class="r">红线：</span>宁可主动降级，也不要被动 OOM。</div>
+    <div class="callout"><b>一句话结论：</b>并发预算 = <b>内存三类分账 + NPU 时间片优先级 + 带宽安全线 + 有序降级</b>；核心动作是「先算账、留缓冲、按阈值降」。</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书填空：并发预算手算（填完展开答案）</h3>
+    <p>用上面预算表，填出「3B + 双 CV」并发的运行时峰值、带宽需求合计，并判断该不该降级（安全线 28 GB/s）。</p>
+    <table class="tight">
+      <thead><tr><th>项目</th><th>算式</th><th>结果（填）</th></tr></thead>
+      <tbody>
+        <tr><td>运行时峰值合计</td><td>1.0 + 0.1 + 0.5 + 0.25 + 0.20 + 0.30 + 1.00</td><td class="fill">?</td></tr>
+        <tr><td>带宽需求合计</td><td>2 + 22 + 6 + 5 + 1</td><td class="fill">?</td></tr>
+        <tr><td>是否超安全线</td><td>合计 vs 28 GB/s</td><td class="fill">?</td></tr>
+        <tr><td>第一步降级动作</td><td>按降级顺序表</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案（先自己填！）</summary>
+      <div class="board">运行时峰值合计 = 1.0+0.1+0.5+0.25+0.20+0.30+1.00 = <span class="g">3.35 GB</span>
+带宽需求合计 = 2+22+6+5+1 = <span class="r">36 GB/s</span> &gt; 安全线 28 → <span class="r">必须降级</span>
+第一步 = CV 降帧 30 → 15 fps（先压最不痛、可重算的负载）
+若仍 &gt;28：停「分割/pose」，带宽 ≈ <span class="g">31 GB/s</span>；再不行才缩 LLM 上下文。
+
+<span class="k">关键理解：</span>36 GB/s 是「需求之和」，真实总线 35 GB/s；
+叠加结果是 LLM tok/s 掉档 + CV 掉帧（不一定崩），但预留见底就 OOM。</div>
+    </details>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -223,6 +281,15 @@
       <dt>检验标准</dt><dd>三份方案七段齐全、数字有来源；对照表能一眼看出三者的取舍差异。</dd>
     </dl>
   </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>多模型并发资源预算与降级演练</h3></div>
+    <dl>
+      <dt>目标</dt><dd>给「CV + LLM 同时在线」的场景做一份资源预算表，并验证并发时的真实表现。</dd>
+      <dt>要掌握</dt><dd>内存三类预算（常驻 / 动态 / 预留）；NPU 时间片与优先级；带宽争抢；有顺序、有阈值的降级。</dd>
+      <dt>实操步骤</dt><dd>写 <code>concurrency-budget.md</code>：填「多模型并发资源预算表」（内存 / 带宽 / 优先级三列），写清内存红线（预留 1GB）与带宽安全线（28 GB/s），并给五级降级顺序表。能上板再写 <code>concurrency-test.md</code>：同时跑 LLM + CV，记录各自 tok/s、FPS、RSS 峰值与触发降级的内存水位。</dd>
+      <dt>检验标准</dt><dd>能报出并发总内存与总带宽是否超红线；被问「CV 和 LLM 抢资源怎么办」能答出「时间片 + 优先级 + 降级顺序 + 留 1GB 缓冲」。</dd>
+    </dl>
+  </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
@@ -233,6 +300,7 @@
     <li><code>plan-carmachine.md</code> —— 一页纸方案②：车机语音。</li>
     <li><code>plan-industrial.md</code> —— 一页纸方案③：工业边缘盒子。</li>
     <li><code>plan-compare.md</code> —— 三方案对照表（核心产出）。</li>
+    <li><code>concurrency-budget.md</code> —— 多模型并发资源预算表 + 降级顺序。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
@@ -242,6 +310,7 @@
     <li>能报 RK3576 的能力边界（1.5B~3B int4 / 意图+简单对话 / 瓶颈带宽）。</li>
     <li>能给一个产品的 BOM 拆解与续航推算，数字有来源。</li>
     <li>能对比三个场景，说清「同样的模板、不同的取舍」。</li>
+    <li>能给「CV + LLM 并发」做内存 / 带宽预算，并说出降级顺序与安全线。</li>
   </ul>
 
   <h2>面试话术</h2>

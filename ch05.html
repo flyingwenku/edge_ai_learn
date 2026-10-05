@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 5 章 · Transformer 结构与参数量（讲义 + 作业）</title>
+<title>第 5 章：KV Cache、PagedAttention 与性能瓶颈（讲义 + 作业）</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -21,173 +21,222 @@
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 5 章：Transformer 结构与参数量</h1>
-  <p class="lead"><strong>章节目标：</strong>打开 <code>config.json</code> 就能把参数量算出来——<b>拿到 Qwen2.5-3B 的配置文件，5 分钟内手算出 3.09B，并说清每一份权重从哪来</b>。</p>
+  <h1>第 5 章：KV Cache、PagedAttention 与性能瓶颈</h1>
+  <p class="lead"><strong>章节目标：</strong>把「<b>内存怎么涨、速度卡在哪</b>」算成数字，并搞懂 KV Cache 的<b>分页管理与量化</b>——拿到任意模型 + 上下文长度，能<b>秒算 KV Cache、秒判算力瓶颈还是带宽瓶颈</b>。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch05-params</span>
+    <span class="chip">下午 4h · 4 个任务</span>
+    <span class="chip">产出目录：ch05-kvcache</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把每个矩阵的参数量算法看懂，不懂就问我。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量空表自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写计算器、出验证报告。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把 KV Cache 公式和瓶颈判据看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的 KV Cache 空表自己算，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写计算器、出性能报告。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>前两章都在「用」模型，这一章要「看穿」模型。面试官常丢给你一个 <code>config.json</code> 问「这模型多少参数、内存多少」——你要是能当场手算，身价立刻不一样。定位是<b>架构师不是研究员</b>：公式只讲物理含义，不推导，全部落到可手算的数字。</p>
-    <div class="callout"><strong>一句话记住：</strong>参数量 = 所有「有数值可训练」的矩阵元素总数；看懂 config 就能算，不需要读论文。</div>
+    <p>第 7 章你知道 decode 是「逐 token 生成」。但每生成一个 token，模型要去看前面所有 token 的信息——如果每次重算，代价爆炸。KV Cache 就是为此而生，代价是<b>内存随上下文线性增长</b>。算得清它，你才算摸到端侧 LLM 的门槛。这一章的 KV Cache、瓶颈定位，以及它的<b>分页管理（PagedAttention）与量化</b>，都是面试的<b>必问题</b>。</p>
+    <div class="callout"><strong>一句话记住：</strong>KV Cache 是「时间换空间」；端侧跑 LLM，空间（带宽）往往比时间（算力）更致命。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：Transformer 一层长什么样</h3>
-    <p>不管多花哨的模型，一个解码层就是<b>两个子块 + 两条残差</b>。先把结构记牢。</p>
-    <div class="board"><span class="k">一个 Transformer 解码层：</span>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：KV Cache 为什么存在</h3>
+    <p>Attention 的本质：新的 Query 要和前面<b>所有</b> token 的 Key 做点积、再用结果去加权所有 Value。问题在于这些 K、V 每步都会用到。</p>
+    <div class="board"><span class="k">没有 Cache 会怎样：</span>
+  生成第 100 个 token 时，要把前 99 个 token 的 K、V <span class="r">全部重算</span>一遍；
+  生成第 101 个再重算前 100 个…… 计算量 ~ N² 爆炸。
 
-  ┌─ ① 注意力块 ─────────────────────────
-  │   LayerNorm → Q/K/V/O 四个投影 → 残差相加
-  └────────────────────────────────────
+<span class="k">有 Cache 之后：</span>
+  每个 token 的 K、V 只算 <span class="g">一次</span>，算完就存起来；
+  第 N 个 token 直接用缓存里的 [K1…K_{N-1}]，只算自己这份。
 
-  ┌─ ② FFN 前馈块 ───────────────────────
-  │   LayerNorm → 上投影 → 激活 → 下投影 → 残差相加
-  └────────────────────────────────────
+<span class="k">代价：</span>省了算力，但要一块内存常驻 —— <span class="r">这就是 KV Cache</span>。
+它随上下文长度<span class="r">线性增长</span>，是端侧内存的头号变量。</div>
 
-<span class="k">两个配角（参数极少，先记住作用）：</span>
-  残差 residual：把输入原样加回来，防止深层网络梯度消失
-  LayerNorm  ：逐 token 归一化，每层 2 个，参数量 ≈ 2×hidden
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：KV Cache 公式 + 手算 Qwen2.5-3B</h3>
+    <p>公式不长，但每个符号都要理解物理含义。别背，按「2 份 × 层 × 头 × 维度 × 长度 × 字节」念出来。</p>
+    <div class="formula">KV_bytes = 2 × layers × kv_heads × head_dim × seq_len × bytes</div>
+    <div class="board"><span class="k">逐项物理含义：</span>
+  2         = K 和 V 两份（各存一份）
+  layers    = 层数（每层都有自己的 K/V）
+  kv_heads  = KV 的头数（GQA 时 &lt; Q 头数）
+  head_dim  = 每个头的维度
+  seq_len   = 缓存了多长上下文（token 数）
+  bytes     = 每个数的字节：fp16 = <span class="g">2</span>，int8 = <span class="g">1</span>
 
-<span class="k">参数大户只有两处：</span>
-  注意力里的 <span class="g">Q/K/V/O 投影</span>　＋　FFN 里的 <span class="g">上/下投影矩阵</span></div>
+<span class="k">Qwen2.5-3B 假设：</span>layers = 36, kv_heads = 2, head_dim = 128, fp16
+  <span class="g">每 token = 2 × 36 × 2 × 128 × 2</span>
+           = 2×36 = 72
+           = 72×2 = 144
+           = 144×128 = 18432
+           = 18432×2 = <span class="g">36864 B ≈ 36 KB / token</span>
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：每个权重矩阵的参数量算法</h3>
-    <p>一个权重矩阵的参数量 = <b>输入维 × 输出维</b>。就这么简单，剩下的是套结构。</p>
-    <div class="formula">矩阵参数量 = 输入维度 × 输出维度</div>
-    <div class="board"><span class="k">先定义符号（背下来）：</span>
-  h = hidden_size          隐藏维（模型主宽度）
-  L = num_hidden_layers    层数
-  I = intermediate_size    FFN 中间维
-  V = vocab_size           词表大小
-  a = num_attention_heads  Q 头数
-  k = num_key_value_heads  KV 头数
-  d = head_dim = h / a     每个头的维度
+<span class="k">长度换算（× token 数）：</span>
+  1K  = 36 KB × 1024 ≈ <span class="g">36 MB</span>
+  4K  = 36 KB × 4096 ≈ <span class="g">144 MB</span>
+  8K  = 36 KB × 8192 ≈ <span class="g">288 MB</span></div>
+    <div class="callout"><strong>秒算口诀：</strong>「每 token 36 KB」——记住这个数，4K/8K 随口就来。</div>
 
-<span class="k">每层注意力（四个投影）：</span>
-  Q 投影: h × (a·d) = h×h     → <span class="g">h²</span>
-  K 投影: h × (k·d)            → <span class="g">h·k·d</span>
-  V 投影: h × (k·d)            → <span class="g">h·k·d</span>
-  O 投影: (a·d) × h = h×h     → <span class="g">h²</span>
-  合计 ≈ <span class="k">2h² + 2h·k·d</span>　（GQA 时 k 小，K/V 项就小）
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：MHA → MQA → GQA → MLA 演进</h3>
+    <p>为什么 KV 头数可以比 Q 头数少？因为<b>KV 才是内存大头</b>，业界想尽办法砍它。</p>
+    <div class="board"><span class="k">四种注意力，砍的就是 KV 头数：</span>
 
-<span class="k">每层 FFN（SwiGLU，共 3 个矩阵）：</span>
-  gate: h × I   up: h × I   down: I × h
-  合计 = <span class="k">3·h·I</span>
+【MHA 多头注意力】Q/K/V 头数全部相等 = 16
+  每 token = 2×36×<span class="r">16</span>×128×2 = <span class="r">288 KB</span>　← 最贵
+  表达力最强，但 KV Cache 最大
 
-<span class="k">每层小计 ≈ 2h² + 2h·k·d + 3h·I</span>（忽略 LayerNorm，占比 &lt;0.01%）</div>
-    <div class="callout"><strong>注意点：</strong>GQA 让 K/V 的输入维变成 <code>k·d</code> 而不是 <code>h</code>，所以 K/V 矩阵比 Q/O 小很多——这是省参数的关键。</div>
+【MQA 多查询注意力】K/V 只有 <span class="g">1</span> 个头，所有 Q 共享它
+  每 token = 2×36×<span class="g">1</span>×128×2 = <span class="g">18 KB</span>　← 最省
+  省 16 倍，但精度掉得明显，大模型少用
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：打开 Qwen2.5-3B config.json 手算</h3>
-    <p>现在把真实数字代进去。先把关键字段抄出来，再一层层算。</p>
-    <div class="board"><span class="k">Qwen2.5-3B config.json 关键字段：</span>
-  hidden_size            = <span class="g">2048</span>
-  num_hidden_layers      = <span class="g">36</span>
-  intermediate_size      = <span class="g">11008</span>
-  vocab_size             = <span class="g">151936</span>
-  num_attention_heads    = <span class="g">16</span>
-  num_key_value_heads    = <span class="g">2</span>
-  tie_word_embeddings    = <span class="g">true</span>
+【GQA 分组查询注意力】K/V 头数 = <span class="g">2</span>（16 个 Q 分成 8 组共享）
+  每 token = 2×36×<span class="g">2</span>×128×2 = <span class="g">36 KB</span>　← 工业主流
+  Qwen2.5 / Llama3 都用它：省内存又保精度
 
-  推导：head_dim d = h / a = 2048 / 16 = <span class="g">128</span>
+【MLA 多头潜在注意力】DeepSeek：把 K/V 压成低维隐向量再存
+  比 GQA 更省，但结构复杂、NPU 不友好</div>
+    <div class="callout"><strong>面试点：</strong>「GQA 是 MHA 省内存、MQA 保精度的折中，Qwen2.5 用 GQA（K/V=2 头）。」</div>
 
-<span class="k">代入每层公式 2h² + 2h·k·d + 3h·I：</span>
-  2h²    = 2 × 2048²        = 2 × 4,194,304  = <span class="g">8,388,608</span>
-  2h·k·d = 2 × 2048 × 2 × 128 = 2 × 524,288  = <span class="g">1,048,576</span>
-  3h·I   = 3 × 2048 × 11008 = 3 × 22,544,384 = <span class="g">67,633,152</span>
-  每层 ≈ 8,388,608 + 1,048,576 + 67,633,152
-       = <span class="g">77,070,336 ≈ 77.07 M</span>
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：算力瓶颈 vs 带宽瓶颈（算术强度）</h3>
+    <p>判断瓶颈不用跑测试，一个比值就够——<b>算术强度</b>。</p>
+    <div class="formula">算术强度 AI = 计算量(FLOPs) ÷ 访存量(Bytes)</div>
+    <div class="board"><span class="k">判据：</span>
+  AI 大 → 每次搬数都能算很多次 → <span class="g">算力瓶颈</span>（compute-bound）
+  AI 小 → 数据搬进来还没算几下就没了 → <span class="r">带宽瓶颈</span>（memory-bound）
 
-<span class="k">36 层合计：</span>
-  77.07 M × 36 = <span class="g">2,774.5 M ≈ 2.77 B</span>
+<span class="k">机器的「脊点」= 峰值算力 ÷ 内存带宽：</span>
+  RK3576：6 TOPS int8 ÷ 35 GB/s = 6000 / 35 ≈ <span class="g">171 FLOP / Byte</span>
+  只要任务 AI &lt; 171 → 判为带宽瓶颈
 
-<span class="k">加 Embedding（V × h）：</span>
-  151936 × 2048 = <span class="g">311.2 M</span>
-  （tie=true → 只算一次，输出层复用）
+<span class="k">decode 的 AI 有多小？</span>
+  3B int4 权重 ≈ 2 GB，生成 1 token ≈ 2×3G = 6 GFLOP
+  AI ≈ 6 GFLOP ÷ 2 GB = <span class="r">3 FLOP / Byte</span>
+  3 ≪ 171 → <span class="r">严重带宽瓶颈</span>
 
-<span class="k">总计 ≈ 2.77 B + 0.31 B = 3.086 B ≈ 3.09 B</span> ✅
-  官方 3.09B — 对上了！</div>
-    <div class="callout"><strong>看穿模型：</strong>FFN 占了大头（每层约 67.6M，占总参数约 79%）——所以优化模型体积，FFN 才是主战场。</div>
+<span class="k">prefill 的 AI 呢？</span>
+  512 token 一次并行，权重读一次算一大片 → AI 高，<span class="g">偏算力瓶颈</span></div>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：Embedding 到底算不算？权重共享是什么</h3>
-    <p>这是最容易被问倒的细节，讲清楚就能显专业。</p>
-    <div class="board"><span class="k">Embedding 计不计入参数量？</span>
-  它是真实存在的权重 V × h（151936 × 2048 = 311 M），
-  <span class="g">当然算进「总参数量」</span>。
-  但有些端侧报告只关心「推理时反复读的 transformer 权重」，
-  会把 embedding 单列 —— <span class="k">说清口径就行，别被绕晕</span>。
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：为什么 RK3576 上是带宽瓶颈</h3>
+    <p>三个数字摆一起，结论自动浮现。</p>
+    <div class="board"><span class="k">三个数字：</span>
+  NPU 算力 6 TOPS int8      （很快，够用）
+  内存带宽 ≈ <span class="r">35 GB/s</span>        （真正瓶颈）
+  模型 int4 3B ≈ 2 GB       （每步都要整个读一遍）
 
-<span class="k">输出层 lm_head 与权重共享（tie embeddings）：</span>
-  模型最后要一个 V × h 的矩阵把隐藏态映射到词表分数。
-  小模型常让 lm_head <span class="g">直接复用 embedding 矩阵</span>（tie）。
-  Qwen2.5 config 里 <span class="g">tie_word_embeddings = true</span> → 只算一次。
-  若为 false，则要 <span class="r">额外 + 一份 V×h</span>（多 311 M）。
+<span class="k">理论天花板：</span>
+  decode 理论最高 = 35 GB/s ÷ 2 GB = <span class="g">17.5 token/s</span>
+  再扣掉读 KV Cache、算子开销、非理想访存 → <span class="g">实测 5~10 tok/s</span>
 
-<span class="k">LayerNorm 参数：</span>
-  每层 2 个 × 各 2×h（weight+bias）→ 本模型每层 8192，
-  36 层 ≈ 0.29 M，占总量 &lt;0.01%，<span class="k">手算可直接忽略</span>。</div>
+<span class="k">推论（重要）：</span>
+  把 NPU 换成算力翻倍的芯片、但带宽不变 → decode <span class="r">几乎不变</span>
+  把模型从 int4 压更狠、或上 GQA/KV 量化 → decode <span class="g">明显变快</span>
 
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：参数量 → 内存（接回第 1、2 章）</h3>
-    <p>算出参数量只是开始，架构师要立刻换算成内存。乘位宽、除 8。</p>
-    <div class="board"><span class="k">参数量 → 权重内存 = 参数量 × 每参数字节数</span>
-  全 fp16：3.086 B × 2 B = <span class="g">6.17 GB</span>
-  int8   ：3.086 B × 1 B = <span class="g">3.09 GB</span>
-  int4   ：3.086 B × 0.5 B = <span class="g">1.54 GB</span>
-            + scale 开销（约 3%） → 实际 <span class="g">≈ 1.6 GB</span>
+<span class="k">结论：3576 上 LLM decode 的天花板由带宽决定，不是算力。</span>
+  优化方向 = 「少读、少存」，不是「堆算力」。</div>
+    <div class="callout"><strong>一句话结论：</strong>带宽 35 GB/s ÷ 模型 2 GB ≈ 17 tok/s，这就是端侧 LLM 的物理上限。</div>
 
-<span class="k">这就是第 1 章「3B int4 ≈ 2GB」的来源：</span>
-  参数 1.54 GB + 量化开销 + 运行时缓冲 → 约 2 GB（保守口径）。
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：瓶颈定位速查</h3>
+    <div class="board"><span class="k">现象 → 判定 → 对策</span>
 
-<span class="k">再接第 4 章：</span>
-  权重 1.6 GB + KV Cache（8K ≈ 288 MB） → 端侧常驻内存模型。</div>
+  首字慢 / 长 prompt 卡    → <span class="g">prefill 偏算力</span>   → 批处理、分块 prefill
+  出字慢 / 逐 token 卡     → <span class="r">decode 带宽瓶颈</span> → 量化、GQA、KV 量化
+  上下文越长越卡           → KV Cache 膨胀        → 缩短上下文、KV Cache 量化
+  换更强 NPU 却没用        → 说明卡在带宽        → 先查带宽，别急着换芯片
 
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：5 分钟手算口诀</h3>
-    <div class="board"><span class="k">五步走（背下来，面试现场就能算）：</span>
+<span class="k">速算模板（背下来）：</span>
+  1) KV / token = 2×L×kv_heads×d×bytes
+  2) 总量 = ×seq_len
+  3) 瓶颈 = 比较 AI 和脊点 (3576 ≈ 171)</div>
 
-  1) 抄 6 个数：h, L, I, V, a, k
-  2) 算 head_dim  d = h / a
-  3) 每层 = 2h² + 2h·k·d + 3h·I
-  4) 总权重 = 每层 × L
-  5) 加 embedding：tie 则 +V·h 一次，否则 +2×(V·h)
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：PagedAttention —— 把 KV Cache 分页分块</h3>
+    <p>KV Cache 体积大、生命周期又长，怎么「摆」在显存里，本身就是一个系统问题。<b>PagedAttention</b> 借用了操作系统的<b>虚拟内存分页</b>思想。</p>
+    <div class="board"><span class="k">问题：KV Cache 怎么分配内存才不浪费？</span>
+  朴素做法：给每条请求预留一段<span class="r">连续</span>显存，按最大长度开。
+  → 长度未知 ⇒ 要么开太大（<span class="r">预留浪费</span>），
+     要么开太小（要重新拷贝、<span class="r">碎片化</span>）。
+  → 连续分配下，显存利用率常常只有 <span class="r">20~40%</span>。
 
-<span class="k">Qwen2.5-3B 复算：</span>
-  d = 2048/16 = 128
-  每层 ≈ 77.07 M → ×36 = 2.77 B → +0.31 B = <span class="g">≈ 3.09 B</span>
+<span class="k">PagedAttention 的做法：分页 / 分块</span>
+  把 KV Cache 切成固定大小的 <span class="g">block</span>（块，如 16 个 token 一块），
+  按需分配、块之间<span class="g">不必连续</span>，
+  用一张 <span class="g">block table（块表）</span>记录「逻辑块 → 物理块」的映射。
+  和 OS 里「物理页 + 页表」几乎一样：
+    · 逻辑上的 token 序列  ↔ 虚拟地址空间
+    · 物理 block           ↔ 物理页框
+    · block table          ↔ 页表
 
-<span class="k">不同口径要报清楚：</span>「transformer 权重 2.77B，含 embedding 3.09B」。</div>
+<span class="k">好处：</span>
+  ① 消除连续分配浪费 → 块内最多浪费不到 1 块（如 16 token）
+  ② 消除外部碎片 → 显存利用率可提到 <span class="g">90%+</span>
+  ③ 公共前缀的 KV 可被<span class="g">多条请求共享</span>，进一步省内存
+  → 同样显存能塞下<span class="g">更多并发请求</span>，吞吐大涨。
 
-    <h3><span class="tag-lesson">讲解</span>7. 板书填空：参数量拆解空表</h3>
-    <p>填出 Qwen2.5-3B 每层的三项（用 h=2048, k=2, d=128, I=11008），再展开答案。</p>
+<span class="k">它是谁的核心机制：</span>vLLM 靠 PagedAttention 起家，
+如今已是主流推理框架的标配思想。</div>
+    <div class="callout"><strong>面试点：</strong>「PagedAttention 把 KV Cache 按固定 block 分页分配、用块表映射，类比 OS 虚拟内存——解决内存碎片、提高并发时的显存利用率，是 vLLM 的核心机制。」</div>
+    <p><b>端侧要能讲取舍：</b>RK3576/NPU 上不一定直接跑 vLLM（NPU 的 KV Cache 通常由运行时静态管理、形状更固定），但面试问「KV Cache 怎么管理、怎么提高并发」时，你要能把分页这套原理和它的代价（块表开销、块碎片、实现复杂度）说清楚。</p>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：KV Cache 量化（fp16 → int8 / int4）</h3>
+    <p>权重能量化，KV Cache 也一样。它直接决定 decode 阶段要读多少字节——而 decode 正是带宽瓶颈。</p>
+    <div class="board"><span class="k">KV Cache 量化 = 把每个 K/V 数从 fp16 压成 int8 / int4</span>
+  fp16 → int8：每个数 <span class="g">2 → 1</span> 字节 → 内存/带宽 <span class="g">减半</span>
+  fp16 → int4：每个数 <span class="g">2 → 0.5</span> 字节 → 内存/带宽 <span class="g">降到 1/4</span>
+
+<span class="k">对本章结论的意义：</span>
+  decode 是带宽瓶颈，KV Cache 与权重<span class="r">抢同一块带宽</span>；
+  上下文越长，KV 占比越大（甚至超过权重）→
+  <span class="g">KV 量化直接给带宽「减负」</span>，是端侧长上下文的关键手段。
+
+<span class="k">但代价：精度更敏感！</span>
+  权重只在前向里「被读一次」，KV 却要在<span class="r">每一步注意力</span>里被反复用到。
+  量化的误差会<span class="r">沿着上下文长度累积</span>、被 attention 放大 →
+  同样位宽下，<span class="k">KV 量化对 PPL 的影响通常比权重量化更明显</span>。
+  工程折中：常用 <span class="g">int8 KV</span>（几乎无损、直接减半）；
+  int4 KV 收益大，但要用分组 / per-head scale 等技巧并更小心验证。</div>
+    <div class="board"><span class="k">权重量化 vs KV 量化（对比，背下来）</span>
+
+  维度            权重量化              KV Cache 量化
+  ─────────────────────────────────────────────
+  压什么          模型参数（静态）      运行时产生的 K/V（动态）
+  省什么          内存占用、读取带宽    内存占用、KV 读取带宽
+  何时生效        加载即定              随上下文增长
+  误差特性        一次性、可控          逐步累积、被 attention 放大
+  精度敏感度      相对温和              <span class="r">更敏感</span>（同 bit 掉 PPL 更多）
+  常用位宽        int8 / int4           int8（稳）/ int4（激进）
+  端侧价值        模型装得下            长上下文不爆、带宽减负
+
+<span class="k">一句话：权重量化让「模型变小」，KV 量化让「上下文变便宜」。</span>
+两者叠加，才是端侧长上下文的完整解法。</div>
+    <div class="callout"><strong>面试点：</strong>「KV 也能量化，fp16→int8 直接减半带宽；但 KV 参与每一步注意力，误差会随上下文累积，所以对 PPL 比权重量化更敏感，端侧一般先上 int8 KV。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>9. 板书填空：KV Cache 空表</h3>
+    <p>用 Qwen2.5-3B（L=36, kv_heads=2, d=128, fp16）自己填，再展开答案。</p>
     <table class="tight">
-      <thead><tr><th>项目</th><th>公式</th><th>参数量</th></tr></thead>
+      <thead><tr><th>上下文</th><th>每 token</th><th>KV Cache 总量</th><th>说明</th></tr></thead>
       <tbody>
-        <tr><td>注意力 Q/O（2h²）</td><td>2 × h²</td><td class="fill">?</td></tr>
-        <tr><td>注意力 K/V（2h·k·d）</td><td>2 × h × k × d</td><td class="fill">?</td></tr>
-        <tr><td>FFN（3h·I）</td><td>3 × h × I</td><td class="fill">?</td></tr>
-        <tr><td>每层合计</td><td>三项相加</td><td class="fill">?</td></tr>
+        <tr><td>1K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
+        <tr><td>4K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
+        <tr><td>8K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
-      <div class="board">Q/O：2 × 2048² = <span class="g">8,388,608</span>
-K/V：2 × 2048 × 2 × 128 = <span class="g">1,048,576</span>
-FFN：3 × 2048 × 11008 = <span class="g">67,633,152</span>
-每层合计 = 8,388,608 + 1,048,576 + 67,633,152
-        = <span class="g">77,070,336 ≈ 77.07 M</span>
+      <div class="board">每 token = 2 × 36 × 2 × 128 × 2 = <span class="g">36864 B ≈ 36 KB</span>
 
-<span class="k">× 36 层 = 2.77 B；+ embedding 0.31 B = 3.09 B</span>
-FFN 占比 ≈ 67.63 / 77.07 ≈ <span class="g">88%</span>（每层内）。</div>
+  1K → 36 KB × 1024 = <span class="g">≈ 36 MB</span>
+  4K → 36 KB × 4096 = <span class="g">≈ 144 MB</span>
+  8K → 36 KB × 8192 = <span class="g">≈ 288 MB</span>
+
+<span class="k">对照：</span>若为 MHA（kv_heads=16），8K 会涨到 <span class="r">≈ 2.3 GB</span>，
+内存直接爆——所以 GQA 是端侧刚需。
+
+<span class="k">再做一步：</span>若把 KV 量化成 int8（每数 2 → 1 字节），
+上面每个数<span class="g">全部减半</span>：每 token ≈ 18 KB，8K ≈ <span class="g">144 MB</span>，
+带宽压力也同步减半。</div>
     </details>
   </div>
 
@@ -196,92 +245,115 @@ FFN 占比 ≈ 67.63 / 77.07 ≈ <span class="g">88%</span>（每层内）。</d
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>逐矩阵参数量手算表</h3></div>
+    <div class="head"><span class="num">1</span><h3>KV Cache 手算表</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书②的公式整理成一张「每个权重矩阵 → 参数量」的对照表。</dd>
-      <dt>要掌握</dt><dd>Q/K/V/O 四个投影、FFN 三个矩阵、Embedding 的算法与符号定义。</dd>
-      <dt>实操步骤</dt><dd>写 <code>param_math.md</code>：矩阵清单表（名称 / 形状 / 参数量公式 / 说明），并把 Qwen2.5-3B 的数字代入填满。</dd>
-      <dt>检验标准</dt><dd>合上讲义，能默写「每层 = 2h² + 2h·k·d + 3h·I」并解释每一项。</dd>
+      <dt>目标</dt><dd>用板书公式，手算 Qwen2.5-3B 在 1K/4K/8K/32K 的 KV Cache 占用。</dd>
+      <dt>要掌握</dt><dd>公式每一项的物理含义；「每 token 36 KB」的速算。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_cache.md</code>：完整公式推导 + 一张「长度 × KV Cache」表（含手算过程），并加一行对照 MHA（kv_heads=16）的数值。</dd>
+      <dt>检验标准</dt><dd>给你任意 layers/kv_heads/head_dim，能在 30 秒内算出 8K 的 KV Cache。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>参数量计算器（核心实操）</h3></div>
+    <div class="head"><span class="num">2</span><h3>KV Cache 计算器（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>写一个读 <code>config.json</code> 就算总参数量的脚本。</dd>
-      <dt>要掌握</dt><dd>从 config 字段推导 head_dim；区分「transformer 权重」与「含 embedding」两个口径；处理 tie_word_embeddings。</dd>
-      <dt>实操步骤</dt><dd>写 <code>param_calc.py</code>：函数 <code>count_params(cfg)</code>，读入 Qwen2.5-3B config，分层打印（每层注意力 / FFN / 总计 / embedding），并与手算表对照。</dd>
-      <dt>检验标准</dt><dd>脚本输出总参数量 ≈ 3.09 B，与官方一致。</dd>
+      <dt>目标</dt><dd>写一个可复用的 Python 脚本：输入模型配置和上下文长度，输出 KV Cache 大小。</dd>
+      <dt>要掌握</dt><dd>把公式代码化；支持 fp16/int8/int4 切换；打印「MB/GB」并高亮超限。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：函数 <code>kv_cache_bytes(layers, kv_heads, head_dim, seq_len, bytes_per=2)</code>；加 <code>main</code> 打印 Qwen2.5-3B 在 1K/4K/8K/32K 的结果（并列出 fp16 / int8 / int4 三档），并与手算表对照。</dd>
+      <dt>检验标准</dt><dd>脚本输出与手算表完全一致；改参数即改结果；能看出 int8/int4 的减半/四分之一效果。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>Qwen2.5-3B 手算验证</h3></div>
+    <div class="head"><span class="num">3</span><h3>上下文长度 → 内存曲线</h3></div>
     <dl>
-      <dt>目标</dt><dd>用纸笔完整复算一遍 3.09 B，作为对照基准。</dd>
-      <dt>要掌握</dt><dd>手算与脚本结果的一致性；为什么忽略 LayerNorm。</dd>
-      <dt>实操步骤</dt><dd>写 <code>qwen3b_calc.md</code>：逐步手算过程（抄字段 → 算 d → 每层 → ×36 → +embedding），最后与脚本输出并排对照。</dd>
-      <dt>检验标准</dt><dd>手算与脚本结果误差 &lt; 1%，能解释剩下的 0.3 M 是 LayerNorm。</dd>
+      <dt>目标</dt><dd>画出「上下文长度 vs 内存占用」的线性关系，找出 3576 的内存临界点。</dd>
+      <dt>要掌握</dt><dd>KV Cache 是线性的（不是平方）；和模型权重（int4 约 1.6 GB）叠加后的总占用。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_curve.md</code>：以模型 1.6 GB + KV Cache 叠加，算出 16 GB 内存下能撑多长上下文；给出结论。</dd>
+      <dt>检验标准</dt><dd>能说出「KV Cache 线性增长，16 GB 下 3B int4 理论可撑很长上下文，但带宽仍是瓶颈」。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>拆一层看结构图</h3></div>
+    <div class="head"><span class="num">1</span><h3>瓶颈判定推导</h3></div>
     <dl>
-      <dt>目标</dt><dd>把一个解码层的张量流画清楚：输入 → LayerNorm → Q/K/V/O → 残差 → LayerNorm → FFN → 残差。</dd>
-      <dt>要掌握</dt><dd>每步张量形状的变化；参数量集中在哪几处。</dd>
-      <dt>实操步骤</dt><dd>写 <code>layer_breakdown.md</code>：文字框图/箭头图，标注每步形状（如 [hidden] → [a·d]）与对应矩阵参数量。</dd>
-      <dt>检验标准</dt><dd>能对着图讲 3 分钟，说清「参数量为什么 88% 在 FFN」。</dd>
+      <dt>目标</dt><dd>用算术强度手算，证明 RK3576 上 decode 是带宽瓶颈。</dd>
+      <dt>要掌握</dt><dd>算术强度定义；机器「脊点」算法（6 TOPS ÷ 35 GB/s）；decode 的 AI 计算。</dd>
+      <dt>实操步骤</dt><dd>写 <code>bottleneck.md</code>：①给出 RK3576 脊点推导（≈171）②算 decode AI（≈3）③算 prefill AI ④结论「decode 带宽瓶颈、prefill 偏算力」。</dd>
+      <dt>检验标准</dt><dd>能解释「为什么换更强 NPU 但带宽不变，decode 速度几乎不变」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>《参数量验证报告》（一页）</h3></div>
+    <div class="head"><span class="num">2</span><h3>PagedAttention 原理笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>综合本章产出，写一份可交付的验证报告——本章核心产出。</dd>
-      <dt>要掌握</dt><dd>把「config 字段 + 手算 + 脚本 + 内存换算」串成结论。</dd>
-      <dt>实操步骤</dt><dd>写 <code>param_verify.md</code>（一页）：①模型与 config 字段 ②手算结论（2.77B / 3.09B 两个口径）③脚本验证 ④内存换算（fp16/int8/int4）⑤风险（tie、口径歧义）。</dd>
-      <dt>检验标准</dt><dd>别人拿这页，不用问你就能复现 3.09B 并换算出内存。</dd>
+      <dt>目标</dt><dd>用自己的话讲清 PagedAttention 的「分页分块」思想，以及它解决什么问题。</dd>
+      <dt>要掌握</dt><dd>block / block table 的类比；连续分配为什么会碎片化；分页为什么提高并发利用率。</dd>
+      <dt>实操步骤</dt><dd>写 <code>paged_attention.md</code>：①画出「逻辑 token 序列 ↔ block table ↔ 物理 block」的映射示意图（文字框图即可）；②列出分页解决的两个问题（预留浪费、外部碎片）；③写一句端侧取舍（3576 不一定跑 vLLM，但原理要会讲）。</dd>
+      <dt>检验标准</dt><dd>能用「操作系统虚拟内存分页」的类比，30 秒讲清 PagedAttention 是什么、为什么能提高并发显存利用率。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
+    <div class="head"><span class="num">3</span><h3>KV 量化对 PPL 影响的实验设计</h3></div>
     <dl>
-      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
-      <dt>实操步骤</dt><dd>自问自答：每层参数量公式是什么？Qwen2.5-3B 多少参数？embedding 算不算？tie 是什么？3.09B fp16/int8/int4 各多少 GB？</dd>
+      <dt>目标</dt><dd>设计一个能对比「权重量化 vs KV 量化对困惑度(PPL)影响」的实验方案——讲清为什么 KV 更敏感。</dd>
+      <dt>要掌握</dt><dd>PPL（困惑度）是衡量语言模型精度的常用指标；控制变量法：权重保持不动，只改 KV 位宽。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_quant_ppl.md</code>：①实验假设（KV 量化对 PPL 比权重量化更敏感）；②变量设计（权重固定 int8，KV 分 fp16 / int8 / int4 三档）；③评价指标（PPL + 在 2K/8K 两个长度上分别测，看误差是否随上下文累积）；④预期结论与端侧取舍建议。</dd>
+      <dt>检验标准</dt><dd>能说清「为什么 KV 量化误差会随上下文累积、比权重量化更敏感」，并给出端侧建议（优先 int8 KV，int4 需谨慎验证）。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>《端侧 LLM 性能分析报告》（一页）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>综合本章产出，写一份能直接交付的性能分析——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把「KV Cache 大小 + 瓶颈判定 + 优化方向」串成决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>perf_report.md</code>（一页）：①目标模型/场景 ②KV Cache 实测与手算 ③瓶颈结论（带宽）④优化清单（int4、GQA、KV 量化、PagedAttention、上下文裁剪）⑤预期收益。</dd>
+      <dt>检验标准</dt><dd>别人拿这页能直接判断「这产品能不能跑、卡在哪、怎么优化」。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">5</span><h3>秒答训练</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把本章结论练成条件反射（面试必问）。</dd>
+      <dt>实操步骤</dt><dd>自问自答：KV Cache 公式是什么？3B 8K 的 KV 多大？GQA 为什么省内存？算术强度怎么算？RK3576 为什么是带宽瓶颈？decode 理论天花板是多少？PagedAttention 解决什么问题？KV 量化为什么比权重量化更敏感？</dd>
       <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>param_math.md</code> —— 逐矩阵参数量手算表（公式 + Qwen2.5-3B 代入）。</li>
-    <li><code>param_calc.py</code> —— 参数量计算器（读 config.json，分层输出）。</li>
-    <li><code>qwen3b_calc.md</code> —— Qwen2.5-3B 手算过程与脚本对照。</li>
-    <li><code>layer_breakdown.md</code> —— 单层结构图（张量流 + 参数量分布）。</li>
-    <li><code>param_verify.md</code> —— 参数量验证报告（一页，核心产出）。</li>
+    <li><code>kv_cache.md</code> —— KV Cache 手算表（含公式推导 + 长度对照）。</li>
+    <li><code>kv_cache_calc.py</code> —— KV Cache 计算器（参数化、可切换位宽）。</li>
+    <li><code>kv_curve.md</code> —— 上下文长度 → 内存曲线 + 临界点。</li>
+    <li><code>bottleneck.md</code> —— 算术强度推导 + 瓶颈判定。</li>
+    <li><code>paged_attention.md</code> —— PagedAttention 分页原理笔记。</li>
+    <li><code>kv_quant_ppl.md</code> —— KV 量化对 PPL 影响的实验设计。</li>
+    <li><code>perf_report.md</code> —— 端侧 LLM 性能分析报告（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>5 分钟内手算出 Qwen2.5-3B ≈ 3.09B（含 embedding）。</li>
-    <li>能背出每层公式 <code>2h² + 2h·k·d + 3h·I</code> 并解释每项。</li>
-    <li>能说清 GQA 为什么让 K/V 矩阵变小、embedding 是否计入、tie 的含义。</li>
-    <li>能立刻把参数量换算成内存：3.09B fp16 ≈ 6.17GB、int8 ≈ 3.09GB、int4 ≈ 1.54GB。</li>
+    <li>秒算 KV Cache：Qwen2.5-3B 每 token 约 36 KB，8K 约 288 MB。</li>
+    <li>能背出公式 <code>2 × layers × kv_heads × head_dim × seq_len × bytes</code> 并解释每项含义。</li>
+    <li>能说出 GQA（K/V=2 头）是内存与精度的折中，比 MHA 省 8 倍。</li>
+    <li>能判断「RK3576 上 decode 是带宽瓶颈」，并用算术强度（3 ≪ 171）说明。</li>
+    <li>能讲清 PagedAttention 的分页思想，以及它解决的碎片 / 并发利用率问题。</li>
+    <li>能说清 KV 量化（fp16→int8/int4）减半/四分之一带宽，以及它对 PPL 比权重量化更敏感的原因。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「给我一个模型的 config.json，我就能算出参数量。每层的参数是 2 倍 hidden 的平方，加 2 乘 hidden 乘 KV 头数乘 head_dim，加 3 乘 hidden 乘 intermediate，后面再乘层数，最后加上 embedding 的 vocab 乘 hidden。以 Qwen2.5-3B 为例，hidden 2048、36 层、intermediate 11008、词表 15 万、Q 头 16、KV 头 2，head_dim 128，每层约 77M，36 层约 2.77B，embedding 约 0.31B，因为 tie_word_embeddings 是 true 只算一次，总共约 3.09B，和官方一致。FFN 占了参数量的将近八成，所以如果要压模型体积，重点在 FFN。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能看懂 config、能现场手算参数量与内存——模型结构与参数分析能力。</p>
+    <p>「KV Cache 是为了避免 decode 时重算历史 K/V，公式是 2 乘层数乘 KV 头数乘 head_dim 乘序列长度乘字节数。以 Qwen2.5-3B 为例，36 层、GQA、KV 头数 2、head_dim 128，每 token 约 36 KB，8K 上下文大概 288 MB。判断瓶颈我用算术强度：计算量除以访存量。RK3576 的脊点是 6 TOPS 除以 35 GB/s 约等于 171，而 decode 每 token 只做 2×3G 的浮点运算却要读 2 GB 权重，算术强度约等于 3，远低于 171，所以 decode 是带宽瓶颈。理论天花板是 35 GB/s 除以 2 GB 约 17 token/s，实测 5 到 10。所以优化方向是量化、GQA、KV Cache 量化去少读少存，而不是堆算力。KV Cache 的内存管理上，主流是 PagedAttention——把它切成固定大小的 block 分页分配、用块表映射，思路跟操作系统虚拟内存分页一样，能消除碎片、提高并发时的显存利用率，是 vLLM 的核心机制；端侧不一定直接跑 vLLM，但原理和取舍要讲得清。KV 本身也能量化，fp16 到 int8 直接减半带宽、到 int4 降到四分之一，但 KV 参与每一步注意力、误差会随上下文累积，所以比权重量化对 PPL 更敏感，端侧长上下文我一般先上 int8 KV。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能秒算 KV Cache、能定位算力/带宽瓶颈、能讲清 KV 内存管理与量化——内存测算、瓶颈诊断与 KV 优化能力。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3.09B int4 ≈ 1.6 GB，加上 KV Cache 与运行时缓冲，3576 的 <strong>16 GB LPDDR5</strong> 余量充足。</li>
-      <li>FFN 占参数近八成，是<strong>量化与压缩的主战场</strong>；注意 FFN 权重对精度更敏感。</li>
-      <li>若 config 里 <strong>tie_word_embeddings = true</strong>，别把输出层重复计一次，否则参数量会算大。</li>
-      <li>回报参数量时<strong>务必说清口径</strong>（是否含 embedding、是否含 lm_head），这是专业度的体现。</li>
+      <li>3576 内存带宽约 <strong>35 GB/s</strong>，是 LLM decode 的硬天花板；算力 6 TOPS 反而不是瓶颈。</li>
+      <li>LPDDR5 双通道才能跑满带宽，工程上要注意内存颗粒与频率配置。</li>
+      <li>KV Cache 与模型权重<strong>抢同一块带宽</strong>，长上下文会同时拖慢 decode。</li>
+      <li>端侧长上下文优先考虑 <strong>KV Cache int8 量化</strong>（直接减半带宽压力）；int4 KV 收益更大但精度风险高，需实测 PPL。</li>
+      <li>PagedAttention 的<strong>分页思想</strong>要会讲，但 3576 的 NPU KV Cache 多由运行时静态管理，不一定直接跑 vLLM——面试讲原理与取舍即可。</li>
     </ul>
   </div>
 

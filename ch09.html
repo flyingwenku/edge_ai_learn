@@ -30,7 +30,7 @@
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch09-quant-deploy</span>
   </div>
 
@@ -196,6 +196,114 @@ PPL' = exp(0.5400) = <span class="r">1.716</span>
 「我按三关判：PPL 涨幅、人肉对比、带宽利用率与稳定性。
 3B w4a16 若 PPL 涨幅 &lt;5%、实测 &gt;8 tok/s、利用率 ≥60%、长跑不 OOM、
 人肉无事实错误——就上线；否则退 w8a16 或补校准集重转。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：ONNX 算子排坑（PyTorch → ONNX → RKNN）</h3>
+    <p>量化是「转换」的后半程，前半程是<b>算子能不能转过去</b>。NPU 只认一套固定的算子集，PyTorch 里花哨的写法往往在导出 ONNX 或编译 RKNN 时炸掉。报错看似杂乱，其实就三类。</p>
+    <div class="board"><span class="k">转换链路：PyTorch → ONNX → RKNN（三段都要过）</span>
+
+  PyTorch(.pt/.safetensors)
+        │  torch.onnx.export / zoo 的导出脚本
+        ▼
+  ONNX(.onnx)        ← ① 算子是否都被 ONNX 支持？opset 版本对不对？
+        │  rknn-toolkit2: load_onnx → build
+        ▼
+  RKNN(.rknn)        ← ② 算子是否都被 NPU 支持？shape 是否静态？
+
+<span class="k">三段各有各的坑，报错信息不一样，要对号入座。</span></div>
+
+    <div class="board"><span class="k">三类高频报错 → 定位 → 处理</span>
+
+① 不支持的算子（Unsupported operator: XXX）
+   现象：ONNX 里带了自定义 / 冷门算子（如特殊 GridSample、
+         deform conv、自定义 attention、非标 Reduce）。
+   定位：Netron 打开 .onnx 看节点类型；或看 build 日志的算子名。
+   <span class="g">处理：用等价标准算子重写；或把不支持的算子拆成
+         NPU 支持的基础算子组合（如特殊激活拆成 mul/add/sigmoid）。</span>
+
+② opset 版本不匹配（opset version not supported）
+   现象：导出用了 opset 17+，工具链只吃到 11~13；或算子语义随
+         opset 变化（如 Resize / Slice 的属性名改了）。
+   定位：onnx.load 后读 model.opset_import。
+   <span class="g">处理：导出时显式钉住 torch.onnx.export(opset_version=12)；
+         或用 onnx.version_converter 把模型降到目标 opset。</span>
+
+③ 动态 shape（dynamic shape / -1 dims）
+   现象：batch 或序列长度是 -1，NPU 编译期定不了内存布局。
+   定位：Netron 看输入 / 中间张量的 dim 是不是 -1。
+   <span class="g">处理：导出时固定 shape（dynamic_axes 留空）；LLM 变长序列
+         用固定 max_seq_len 导出，或走 rkllm（内部已处理 KV Cache 布局）。</span>
+
+<span class="k">通用心法：报错先问「是 ONNX 不支持，还是 NPU 不支持」——</span>
+ONNX 阶段报错 → 改导出；RKNN 阶段报错 → 换/拆算子或固定 shape。</div>
+    <div class="callout"><strong>排坑顺序：</strong>先用 <code>onnx.checker</code> 确认 ONNX 本身合法，再上 Netron 数算子，最后才 build。别一上来就 build——报错信息会混在一起，定位成本翻倍。</div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：RKNN 算子支持与回退（量产最常见的坑）</h3>
+    <p>NPU 是专用电路，<b>只实现了一部分算子</b>。编译时工具链会把每个算子映射到 NPU；<b>映射不上的就「回退（fallback）」到 CPU 执行</b>。功能上照样算对——但性能会断崖式下跌，这是 RKNN 项目量产翻车的第一名。</p>
+    <div class="board"><span class="k">为什么会暴跌？——数据搬运才是元凶</span>
+
+  NPU 算 3 层 → 回退 1 层 CPU → 再回 NPU 算 5 层 → 又回退 ...
+  每次 NPU ↔ CPU 切换，张量要：
+    ① 从 NPU 内存搬回 CPU 内存
+    ② CPU 算完再搬回 NPU
+  搬运量 = 该张量大小，走的是<b>有限的片外带宽</b>（3576 仅 ~35 GB/s）
+
+  <span class="r">一次特征图搬运 = 几十 MB → 十几毫秒；
+  回退层多起来，decode 速度可以从 15 tok/s 掉到 3 tok/s。</span>
+
+<span class="k">更糟的是</span>：回退常常落在「每个 block 都有」的算子上，
+导致 NPU/CPU 反复横跳，搬运开销 ×层数，直接吃掉全部收益。</div>
+
+    <div class="board"><span class="k">怎么查「哪些算子支持」</span>
+  · rknn-toolkit2 文档：算子支持列表（op support list），
+    逐一列明每个算子在各平台的 NPU / CPU 归属；
+  · build 日志：搜 <span class="g">not supported</span> / <span class="g">fallback</span> / <span class="g">cpu</span>，
+    工具链会打印哪些节点被放到 CPU；
+  · rknn_model_zoo 对应模型的 README：官方已标注已知回退点与规避法。</div>
+
+    <div class="board"><span class="k">怎么避免回退（按优先级）</span>
+① 选「已在 zoo 里跑通」的模型结构——别人踩过的坑别再踩。
+② 替换不支持的算子：用 NPU 支持的基础算子等价重写
+   （如 GELU → 近似 tanh 形式；特殊 Norm → 标准 LayerNorm）。
+③ 融合 / 改写结构：把诱发回退的动态分支改成静态等价实现。
+④ 固定 shape：动态 shape 常直接判给 CPU（见板书⑦）。
+⑤ 改量化配置重试：某些算子在 w8a16 下能被 NPU 接纳，w4a16 不行。
+
+<span class="k">验收口径：build 日志里 fallback 条目为 0，
+且 profiling 显示算子几乎全在 NPU 上。</span></div>
+    <div class="callout"><strong>一句话记住：</strong><span class="key">回退不是「能不能跑」的问题，是「跑不跑得动」的问题。</span>功能上给你算对，性能上直接把你打回原型——量产前必须清干净。</div>
+
+    <h3><span class="tag-lesson">讲解</span>9. 板书⑨：NPU/CPU 混合调度与 profiling（把回退揪出来）</h3>
+    <p>完全不回退很难，架构师要做的是<b>把回退控制在可控范围</b>：该上 NPU 的上 NPU，天然属于 CPU 的交给 CPU，且尽量让同一段计算留在同一侧，减少搬运。</p>
+    <div class="board"><span class="k">哪些层适合 NPU / 哪些适合 CPU</span>
+
+<span class="g">放 NPU（算力密集、数据并行）</span>
+  · 大矩阵乘（QKV / FFN / 输出投影）
+  · 卷积 / 常规激活 / 逐元素乘加
+  · LayerNorm（标准形式）
+<span class="g">放 CPU（控制逻辑、轻量、串行依赖）</span>
+  · tokenizer / detokenizer
+  · sampling（top-k / top-p 采样，含随机数）
+  · RoPE 角度计算、KV Cache 索引等零碎控制流
+  · 动态 shape / 数据依赖的分支
+
+<span class="k">原则：让 NPU 干重活，CPU 干调度；</span>
+<span class="r">同一段计算尽量不跨设备——跨一次 = 一次搬运。</span></div>
+
+    <div class="board"><span class="k">用 profiling 看出回退</span>
+  rknn-toolkit2 的 <span class="g">eval_perf / rknn.eval_perf()</span> 会输出：
+    · 每个算子的耗时
+    · 每个算子跑在 <span class="g">NPU 还是 CPU</span>
+    · 总耗时里 NPU / CPU / 搬运各占多少
+
+<span class="k">怎么读这份 profiling</span>
+  · CPU 占比 &gt; 20% 或个别算子耗时异常 → 十有八九是回退；
+  · 某个小算子耗时比大矩阵乘还长 → 它就在 CPU（还带搬运）；
+  · 结合 build 日志的 fallback 列表，一一对应定位。
+
+<span class="k">板端交叉验证</span>
+  · cat /sys/kernel/debug/rknpu/load   → NPU 利用率低 = 没吃饱；
+  · top 看主进程 CPU%                 → CPU 长期 100%+ = 在替 NPU 干活。</div>
+    <div class="callout"><strong>闭环排障：</strong>profiling 定位「哪个算子掉 CPU」→ 回板书⑧ 用等价替换 / 固定 shape 消掉它 → <b>重跑 profiling 确认 CPU 占比下降</b>。改一个、测一次，别一次改一堆。</div>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -258,6 +366,15 @@ PPL' = exp(0.5400) = <span class="r">1.716</span>
       <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做并复现结论——架构文档标准。</dd>
     </dl>
   </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>profiling 找算子回退（新增）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>跑一次 rknn/llm profiling，找出掉到 CPU 的算子，并给出规避方案。</dd>
+      <dt>要掌握</dt><dd>build 日志里的 not supported / fallback；eval_perf 输出怎么读；CPU 占比与搬运的关系。</dd>
+      <dt>实操步骤</dt><dd>① build 时保留完整日志，grep <code>not supported|fallback|cpu</code> 存成 <code>fallback_list.txt</code>；② 用 <code>rknn.eval_perf()</code> 或板端 profiling 跑一遍，导出每算子耗时与设备归属；③ 挑出耗时异常的 CPU 算子，写 <code>fallback_report.md</code>：算子名 / 原因 / 等价替换或固定 shape 方案 / 重测后的 CPU 占比。</dd>
+      <dt>检验标准</dt><dd>能列出至少 1 个回退算子，给出可行规避方案，并用重跑数据证明 CPU 占比下降（或 fallback 归零）。</dd>
+    </dl>
+  </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
@@ -267,6 +384,7 @@ PPL' = exp(0.5400) = <span class="r">1.716</span>
     <li><code>build.sh</code> / <code>build_rknn.py</code> + <code>build_log.txt</code> —— 真实转换脚本与日志。</li>
     <li><code>ppl_eval.py</code> + <code>ppl_compare.md</code> + <code>human_eval.md</code> —— 量化前后精度对比。</li>
     <li><code>quant_deploy_report.md</code> —— 端侧量化部署报告（一页，核心产出）。</li>
+    <li><code>fallback_list.txt</code> + <code>fallback_report.md</code> —— 算子回退定位与规避（profiling）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
@@ -276,6 +394,8 @@ PPL' = exp(0.5400) = <span class="r">1.716</span>
     <li>会用 <span class="key">PPL 涨幅 &lt;5% / 5-10% / &gt;10%</span> 判据给精度下结论。</li>
     <li>会算带宽利用率（tok/s × 模型GB ÷ 35），并判断是否跑满。</li>
     <li>给「这个量化方案能不能上线」能按「精度关 / 性能关 / 稳定关」三关作答。</li>
+    <li>能说出 ONNX 三类高频报错（不支持算子 / opset 不匹配 / 动态 shape）的定位与处理。</li>
+    <li>能用 build 日志与 profiling 判断哪些算子回退到 CPU，并说清为什么搬运会拖垮性能。</li>
   </ul>
 
   <h2>面试话术</h2>

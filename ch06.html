@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 6 章 · 注意力机制与位置编码（讲义 + 作业）</title>
+<title>第 6 章：FFN、MoE 与架构趋势（讲义 + 作业）</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -22,218 +22,171 @@
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 6 章：注意力机制与位置编码</h1>
-  <p class="lead"><strong>章节目标：</strong>搞懂「<b>注意力决定怎么搬运信息、GQA 决定端侧跑不跑得动</b>」——拿到任意一个模型 config，能一眼算出它的 KV Cache 大小，并说出该不该换成 GQA。</p>
+  <h1>第 6 章：FFN、MoE 与架构趋势</h1>
+  <p class="lead"><strong>章节目标：</strong>搞懂「<b>FFN 存知识、MoE 是云端的省算力游戏、端侧另有答案</b>」——拿到一个端侧场景，能当场说出该选什么架构方向、为什么 MoE 不合适。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch06-attention</span>
+    <span class="chip">产出目录：ch06-arch-trends</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点吃透 Q/K/V 直觉和 GQA 省带宽那笔账。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的手算 / 空表自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写笔记、跑脚本、出对比表。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点是 MoE 为什么在端侧"省算力但不省时间"。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量手算 / 空表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写 MoE 笔记、架构趋势笔记、选型表。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 5 章你把 Transformer 拆成了层。这一章啃最硬的那块骨头——<b>注意力（Attention）</b>。架构师不需要会推导公式，但必须能做到两件事：<span class="key">① 用一句人话解释 Q/K/V 在干什么；② 拿到 config 秒算 KV Cache，说清为什么端侧偏爱 GQA。</span>这两条直接对应面试题。</p>
+    <p>第 4 章你搞懂了注意力。但注意力量只占参数的一小部分——<b>真正"装参数、装知识"的是 FFN</b>。这一章你搞清 FFN 和 MoE，再看清整个架构大方向（Transformer / SSM / 混合），最后拿到一张端侧主流模型清单。<span class="key">面试高频题：给一个端侧场景，你选什么架构、用什么模型？</span></p>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：Q、K、V 的物理含义</h3>
-    <p>别被字母吓到。把注意力想成一次「<b>查字典</b>」：</p>
-    <div class="board"><span class="k">Q / K / V = 提问 / 索引 / 内容</span>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：FFN——Transformer 的"知识仓库"</h3>
+    <p>每个 Transformer 层有两个子块：注意力 + FFN。注意力负责"搬运"，FFN 负责"记忆"。</p>
+    <div class="board"><span class="k">FFN = Feed-Forward Network（前馈网络）</span>
+结构：d → 4d → d   （两层线性 + 一个激活函数）
+  中间隐藏层宽度通常是输入的 4 倍
+  （现代模型用 SwiGLU，实际约 8/3 倍，这里按 4d 讲，便于手算）
 
-  Q (Query)  = 你要查的"问题"     → 当前 token 在问："谁跟我相关？"
-  K (Key)    = 字典的"索引/标签"   → 每个 token 举牌："我是关于什么的"
-  V (Value)  = 字典的"释义/内容"   → 每个 token 真正携带的信息
+<span class="k">参数量公式（两层矩阵）</span>
+  W1: d × 4d
+  W2: 4d × d
+  合计 = 2 × 4d² = <span class="g">8d²</span>
 
-<span class="k">计算三步（这就是注意力）：</span>
-  ① 拿 Q 去比每一个 K     → 算相似度分数  s = Q·K
-  ② softmax 把分数变成权重 → 权重和为 1，越大越"被关注"
-  ③ 按权重把 V 加权求和    → 输出 = 相关 token 内容的加权平均
+<span class="k">手算：d = 2048 的单层 FFN</span>
+  8 × 2048² = 8 × 4,194,304 = <span class="g">33.6M</span> 参数/层
+  36 层 → 33.6M × 36 = <span class="g">约 1.21B</span>
 
-<span class="k">一句话：Q 决定"看哪里"，K 决定"被谁看到"，V 是"被取走的内容"。</span></div>
-    <div class="callout">记住：注意力 = <b>按相关度，从所有 token 的 V 里"加权取货"</b>。它不是"筛选"，而是"加权平均"——所有 token 都会贡献一点，只是相关的高、不相关的低。</div>
+<span class="k">对比同模型的注意力层（GQA）</span>
+  Q: d×d = 4.19M
+  K,V: d×(2×128) = 0.52M 各
+  O: d×d = 4.19M
+  合计 ≈ 9.4M/层 → 36 层 ≈ 0.34B</div>
+    <div class="board"><span class="k">结论：FFN 参数 ≈ 注意力的 3~7 倍</span>
+  3B 这类小模型里，<span class="r">约 2/3 的参数在 FFN</span>。
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：注意力公式的直觉 + 手算</h3>
-    <p>公式只有一个（不用推，看它每一步在干嘛）：</p>
-    <div class="formula">Attention(Q, K, V) = softmax( QKᵀ / √d<sub>k</sub> ) · V</div>
-    <div class="board"><span class="k">四步拆解（对着公式看物理含义）</span>
-  ① QKᵀ        → 每个 query 和每个 key 点积 = 相似度矩阵 (n×n)
-  ② /√d_k      → 缩放，防止点积随维度变大而"爆炸"（下面单独讲）
-  ③ softmax    → 每行归一化成权重（该 query 看各 token 的比例）
-  ④ ×V         → 按权重对 V 做加权求和
+<span class="k">FFN 到底在干什么：知识存储</span>
+  研究共识（ROME、知识编辑等工作）：
+  · 注意力 = "token 之间搬运/聚合信息"（路由）
+  · FFN     = "把知识写进权重里"（记忆 / 查表）
+  所以：
+  模型"知道多少"  ← 主要由 <span class="g">FFN</span> 决定
+  模型"会不会用上下文" ← 主要由 <span class="g">注意力</span> 决定
 
-<span class="k">手算示范：1 个 head，d_k=4，序列长度 n=3</span>
+<span class="k">直觉：FFN 像一个巨大的 key-value 记忆库，</span>
+每个神经元近似"匹配某种特征 → 输出某条知识"。
+模型越大越"博学"，主要就是 FFN 堆得多。</div>
+    <div class="callout">一句话：<b>注意力管"看关系"，FFN 管"记知识"</b>。所以量化时 FFN 权重占大头，也是 KV Cache 之外最大的内存来源。</div>
 
-  q = [1, 0, 1, 0]
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：MoE——稀疏激活原理 + 手算</h3>
+    <div class="board"><span class="k">MoE = Mixture of Experts（混合专家）</span>
+核心想法：把 1 个 FFN 换成 N 个"专家 FFN"，
+每个 token 只走其中 top-k 个（其余专家不参与计算）。
 
-  K = [ k1=[1,0,1,0]
-        k2=[0,1,0,1]
-        k3=[1,1,0,0] ]
+  · 总参数量   = N × 8d²        （所有专家都要<span class="r">存进内存</span>！）
+  · 激活参数量 = k × 8d²        （每个 token 实际算的）
 
-① 相似度 s = q·k
-   s1 = 1·1 + 0·0 + 1·1 + 0·0 = 2
-   s2 = 1·0 + 0·1 + 1·0 + 0·1 = 0
-   s3 = 1·1 + 0·1 + 1·0 + 0·0 = 1
-   s = [2, 0, 1]
+<span class="k">关键区别（面试点）</span>
+  计算量由"激活参数"决定 → 稀疏 → 省算力
+  内存占用由"总参数量"决定 → 很大 → <span class="r">不省内存</span>
 
-② 缩放：/ √d_k = / √4 = / 2
-   s' = [1.0, 0.0, 0.5]
+<span class="k">举例：Mixtral 8×7B</span>
+  8 个专家，top-2 路由
+  总参数 ≈ 47B，激活 ≈ 13B
+  → 算力只花 13B（便宜），但要<span class="r">存 47B</span>（贵）
 
-③ softmax（e^1=2.718, e^0=1, e^0.5=1.649；和 = 5.367）
-   w = [0.507, 0.186, 0.307]      ← 权重和 = 1 ✅
+<span class="k">另一端：DeepSeek-V3</span>
+  总 671B / 激活 37B
+  → 推理算力极省，但内存得按 671B 级别准备
 
-④ 加权 V（设 v1=[1,0], v2=[0,1], v3=[1,1]）
-   out = 0.507·[1,0] + 0.186·[0,1] + 0.307·[1,1]
-       = [0.507+0.307, 0.186+0.307]
-       = <span class="g">[0.814, 0.493]</span>
+<span class="k">一句话：MoE 用"更大的总内存"换"更小的单次算力"。</span></div>
+    <div class="callout"><b>MoE 的本质取舍：</b>它把"算力"和"内存"解耦了——用稀疏激活省算力，代价是总参数量（内存）反而更大。<b>谁的内存便宜、算力贵，谁就用 MoE → 那是云端，不是端侧。</b></div>
 
-<span class="k">物理直觉：输出 = "按相关度加权平均后的 V"。相关度高的 token 占比大。</span></div>
-    <p>再单独把「为什么除以 √d<sub>k</sub>」讲透——这是面试常问的细节：</p>
-    <div class="board"><span class="k">为什么要 /√d_k ？看两种情形</span>
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：为什么端侧少用 MoE</h3>
+    <p>这是本章最重要的判断，四个硬伤，逐个讲：</p>
+    <div class="board"><span class="k">为什么端侧基本不用 MoE？四个硬伤</span>
 
-不缩放：s = [2, 0, 1]   → softmax → [0.665, 0.090, 0.245]  （更尖锐）
-  缩放：s'= [1, 0, 0.5] → softmax → [0.507, 0.186, 0.307]  （更平滑）
+① 内存装不下（最直接）
+   Mixtral 47B，即便压到 int4 也 ≈ 24 GB
+   RK3576 内存上限 16 GB → <span class="r">装不下</span>。
+   端侧要的是"总参数小"，MoE 天生总参数大。
 
-原因：维度 d 越大，点积 q·k 的方差越大 → 分数差距被拉大
-     → softmax 趋于 one-hot（[1,0,0,...]）
-     → 梯度趋近 0，模型"学不动"。
-<span class="g">除以 √d_k 把方差压回 1 量级，softmax 保持"温和"。</span>
+② batch=1 时 MoE 不省时间（最关键！）
+   decode 阶段是<span class="g">带宽瓶颈</span>：每生成 1 个 token，要把权重读一遍。
+   MoE 只激活 k 个专家 → 少算，但权重<r>还是得从内存读</r>（而且读得更碎）。
+   省算力 ≠ 省带宽 → 单用户场景几乎没收益。
+   只有大 batch（云端、多用户）才把 MoE 的稀疏优势吃满。
 
-<span class="k">一句结论：√d_k 是为了防止 softmax 饱和（防止梯度消失）。</span></div>
-    <div class="callout"><b>架构师记这句就够：</b>Q 查、K 被查、V 取货；softmax 是"加权平均"，√d<sub>k</sub> 是"防止权重两极化"。</div>
+③ 调度开销
+   路由 + 动态 shape + 专家分散 → NPU/框架对小算子、动态分支不友好。
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：MHA → MQA → GQA → MLA</h3>
-    <p>这四个是注意力的四种「共享 K/V 的方式」，演进目标只有一个：<b>压缩 KV Cache</b>。</p>
+④ 随机访存
+   路由后读的是"分散在不同地址"的专家权重 → 带宽利用率更低，
+   对 3576 这种带宽本就紧张的板子雪上加霜。
+
+<span class="k">一句话：MoE 是"云端多用户"的省算力方案；</span>
+端侧单用户、带宽受限 → 用密集小模型 + GQA 更实在。</div>
+    <div class="callout"><b>最容易背错的一点：</b>"MoE 省算力"没错，但在端侧单用户推理里，<b>瓶颈是带宽不是算力</b>，而 MoE 一点都不省带宽（总权重还是那么多，读的还是分散的）。<b>所以 MoE 对端侧 decode 几乎没有加速收益。</b></div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：Transformer vs SSM(Mamba) vs 混合</h3>
     <table class="tight">
-      <thead><tr><th>方案</th><th>KV 份数</th><th>KV Cache</th><th>质量</th><th>NPU/端侧友好</th></tr></thead>
+      <thead><tr><th>范式</th><th>计算复杂度</th><th>推理内存</th><th>长文本</th><th>召回/复制</th><th>NPU 成熟度</th></tr></thead>
       <tbody>
-        <tr><td><b>MHA</b> 多头注意力</td><td>= Q 头数（每头独立）</td><td>最大</td><td>最好</td><td>一般（太占带宽）</td></tr>
-        <tr><td><b>MQA</b> 多查询</td><td>1（所有 Q 头共享 1 组）</td><td>最小</td><td>略降</td><td>好</td></tr>
-        <tr><td><b>GQA</b> 分组查询</td><td>G 组（如 2、4、8）</td><td>小</td><td>≈ MHA</td><td><b>最好（端侧甜点）</b></td></tr>
-        <tr><td><b>MLA</b> 潜在注意力</td><td>压成低维 latent 向量</td><td>极小</td><td>≈/优于 MHA</td><td>复杂，NPU 不直接支持</td></tr>
+        <tr><td><b>Transformer</b></td><td>O(n²)</td><td>随 n 增长（KV Cache）</td><td>一般</td><td><b>强</b></td><td>高</td></tr>
+        <tr><td><b>SSM / Mamba</b></td><td>O(n)</td><td>常数（无 KV）</td><td>好</td><td>弱</td><td>低</td></tr>
+        <tr><td><b>混合架构</b></td><td>O(n)~O(n²)</td><td>小</td><td>好</td><td>强（有注意力层）</td><td>中</td></tr>
       </tbody>
     </table>
-    <div class="board"><span class="k">用人话记住四个演进台阶</span>
-  MHA：32 个 Q 头 → 32 组 K/V（最贵，最准）
-  MQA：32 个 Q 头 → <span class="r">1 组</span> K/V（最省，但质量掉）
-  GQA：32 个 Q 头 → <span class="g">8 组</span> K/V（每组被 4 个 Q 头共享）← 折中
-  MLA：把 K/V 压缩成一个低维向量再还原（DeepSeek 用它，省到极致）
+    <div class="board"><span class="k">SSM / Mamba 是什么（一句话）</span>
+  用"状态空间模型"逐 token 递推：h_t = A·h_{t-1} + B·x_t
+  像 RNN 一样，只维护一个<span class="g">固定大小的状态</span> → 内存不随上下文增长。
+  代价：状态"挤"不下太多历史 → 精确回忆/复制能力弱于注意力。
 
-<span class="k">GQA 的核心：多个 Q 头"共用"一组 K/V，KV 份数直接从 heads 降到 G。</span>
-质量损失很小（因为相邻头本来就有冗余），但 KV Cache 直接砍几倍。</div>
-    <div class="callout">记忆锚点：<b>MHA→MQA 是"一刀切共享"，GQA 是"分组共享"</b>。GQA 用很小的质量代价，换回接近 MQA 的内存/带宽收益——这就是它能成为行业默认（Qwen、Llama、Gemma 全用）的原因。</div>
+<span class="k">混合架构：两头都要</span>
+  大部分层用 SSM（省内存、长文本好），少量层插注意力（保住召回）。
+  代表：Jamba、Zamba、NVIDIA Hymba、Qwen3-Next、MiniCPM 的部分版本。
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：为什么 RK3576 偏爱 GQA（带宽手算）</h3>
-    <p>这是本章的<b>核心算账</b>。用 Qwen2.5-3B 的真实 config 来算，你可以跟着手写：</p>
-    <div class="board"><span class="k">模型 config（Qwen2.5-3B 近似）</span>
-  hidden d = 2048
-  heads     = 16     （Q 头数）
-  head_dim  = 128
-  layers L  = 36
-  KV 精度   = fp16（2 字节）
+<span class="k">端侧意义</span>
+  SSM 的"常数内存"对内存吃紧的板子很有吸引力（终于不怕长上下文爆内存）。
+  但 NPU 对 SSM 的递推 scan 支持还不成熟 →
+  <span class="r">目前落地仍以 Transformer + GQA 为主</span>，SSM 作为观察方向。</div>
+    <div class="callout"><b>架构师结论：</b>端侧现在选 <b>Transformer + GQA</b>（生态成熟、NPU 支持好）；<b>Mixed/SSM</b> 作为 2026 之后的长上下文储备，关注别踩坑（算子支持）。</div>
 
-<span class="k">每 token 的 KV Cache 公式</span>
-  KV/token = 2（K和V）× kv_heads × head_dim × 2字节 × L
-
-<span class="k">三种方案的 kv_heads</span>
-  MHA：kv_heads = 16
-  GQA：kv_heads = 2
-  MQA：kv_heads = 1</div>
-    <div class="board"><span class="k">手算：每 token KV Cache</span>
-  MHA: 2×16×128×2×36 = 294,912 B ≈ <span class="r">288 KB</span>
-  GQA: 2× 2×128×2×36 =  36,864 B ≈ <span class="g"> 36 KB</span>   → 是 MHA 的 1/8
-  MQA: 2× 1×128×2×36 =  18,432 B ≈  18 KB
-
-<span class="k">换算成 8K 上下文（8192 token）</span>
-  MHA: 288 KB × 8192 ≈ <span class="r">2.42 GB</span>
-  GQA:  36 KB × 8192 ≈ <span class="g">0.30 GB（302 MB）</span>
-  MQA:  18 KB × 8192 ≈ 0.15 GB（151 MB）
-
-<span class="k">再算"每生成 1 个 token 要读多少 KV"（带宽 35 GB/s）</span>
-  MHA: 2.42 GB / 35 = <span class="r">69 ms</span>
-  GQA: 0.30 GB / 35 = <span class="g">8.6 ms</span>
-  MQA: 0.15 GB / 35 =  4.3 ms
-
-<span class="k">加上权重（3B int4 ≈ 1.5 GB → 1.5/35 ≈ 43 ms）</span>
-  GQA 总耗时 ≈ 43 + 8.6 = 51.6 ms  →  ≈ <span class="g">19 tok/s</span>
-  MHA 总耗时 ≈ 43 + 69  = 112  ms  →  ≈  <span class="r">9 tok/s</span>
-
-<span class="k">结论：8K 上下文下，GQA 相对 MHA 把吞吐拉回约 2 倍。</span></div>
-    <div class="callout"><b>RK3576 偏爱 GQA 的真正原因：</b>decode 阶段是<b>带宽瓶颈</b>，每生成一个 token 都要把整段 KV Cache 从内存读一遍。3576 带宽只有 ~35 GB/s，MHA 的长上下文 KV 会直接把带宽吃光；GQA 把 KV 砍到 1/8，等于给带宽"续命"。<b>GQA 省的不是存储，是每 token 的读取带宽。</b></div>
-
-    <p><b>板书填空 · 请先自己填，再展开答案：</b>下面是一张 KV Cache 手算表（模型同上）。</p>
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：端侧主流模型盘点</h3>
     <table class="tight">
-      <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV 耗时(@35GB/s)</th></tr></thead>
+      <thead><tr><th>模型</th><th>常见规模</th><th>特点</th><th>端侧适配</th><th>许可</th></tr></thead>
       <tbody>
-        <tr><td>MHA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
-        <tr><td>GQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
-        <tr><td>MQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+        <tr><td><b>Qwen2.5</b></td><td>0.5 / 1.5 / 3 / 7B</td><td>中文强、生态全、GQA + RoPE</td><td><b>好</b>（RKNN 有官方示例）</td><td>Apache-2.0</td></tr>
+        <tr><td><b>MiniCPM</b></td><td>2.4B / 4B</td><td>小尺寸强、端侧导向、多模态版</td><td><b>好</b></td><td>开源（部分需授权）</td></tr>
+        <tr><td><b>Phi-3.5-mini</b></td><td>3.8B</td><td>微软、小模型推理能力突出</td><td>中</td><td>MIT</td></tr>
+        <tr><td><b>Gemma-2</b></td><td>2B / 9B</td><td>Google、质量高、GQA</td><td>中</td><td>Gemma 许可</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">端侧选型口诀（按任务挑规模）</span>
+
+  意图识别 / 分类 / 短语槽位   → <span class="g">0.5B ~ 1.5B</span>（int8 即可）
+  简单对话 / 摘要 / RAG 生成    → <span class="g">1.5B ~ 3B</span>（int8 或 int4）
+  复杂推理 / 代码              → 大概率走云端，端侧只兜底
+
+<span class="k">首选 Qwen2.5-1.5B/3B</span>：中文好、GQA、RKNN 官方示例齐全，
+落地风险最低（这是"能用现成的就别自己造"的工程选择）。</div>
+    <div class="callout">记忆锚点：<b>端侧选型 = 任务复杂度 → 规模 → 量化 → 生态支持</b>。前两步看需求，后两步看板子，最后一步看"有没有现成的 RKNN 示例"。</div>
+
+    <p><b>板书填空 · FFN 参数量，先自己填再展开：</b>设 d = 3072，层数 L = 28。</p>
+    <table class="tight">
+      <thead><tr><th>项目</th><th>公式</th><th>单层参数量</th><th>全模型</th></tr></thead>
+      <tbody>
+        <tr><td>单层 FFN</td><td class="fill">8d² = ?</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
-      <table class="tight">
-        <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV(@35GB/s)</th></tr></thead>
-        <tbody>
-          <tr><td>MHA</td><td>16</td><td>288 KB</td><td>≈ 2.42 GB</td><td>69 ms</td></tr>
-          <tr><td>GQA</td><td>2</td><td>36 KB</td><td>≈ 302 MB</td><td>8.6 ms</td></tr>
-          <tr><td>MQA</td><td>1</td><td>18 KB</td><td>≈ 151 MB</td><td>4.3 ms</td></tr>
-        </tbody>
-      </table>
+      <p>8d² = 8 × 3072² = 8 × 9,437,184 = <b>75.5M</b> 参数/层；× 28 层 ≈ <b>2.11B</b>。</p>
+      <p>也就是说：一个"3B 级"模型，光 FFN 就可能占 2B 以上——这正是"FFN 是知识仓库"的数字证据。</p>
     </details>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：位置编码速览（含 RoPE 直觉）</h3>
-    <p>注意力本身是「无序」的——它只算点积，不知道谁在前谁在后。所以必须额外把<b>位置</b>喂进去。</p>
-    <div class="board"><span class="k">三种位置编码速览</span>
-
-① 绝对位置编码（Learned / 正弦）
-   做法：把"位置向量"直接加到 token embedding 上   x = tok_emb + pos_emb
-   优点：直观、简单
-   缺点：长度写死（超过训练长度就"瞎"），外推差
-
-② 相对位置编码（T5 bias / ALiBi）
-   做法：只编码"两个 token 之间的距离"，不管绝对位置
-   优点：天生外推好
-   缺点：实现各异、生态不统一，逐步被 RoPE 取代
-
-③ RoPE 旋转位置编码  ← <span class="g">现在主流（Qwen / Gemma / MiniCPM 全用）</span>
-   做法：不"加"位置，而是把 Q、K 向量按位置<span class="k">旋转一个角度</span></div>
-    <div class="board"><span class="k">RoPE 怎么编码位置（看直觉，不推公式）</span>
-
-把 q、k 的每一对维度看成一个 2D 向量 [x, y]。
-位置 m 的 token，其向量旋转 m·θ；位置 n 旋转 n·θ。
-
-关键性质：
-  旋转后 q_m · 旋转后 k_n = cos( (m-n)·θ ) · |q||k|
-  → 点积只和<span class="g">相对位置 (m-n)</span> 有关！
-
-<span class="k">举例：q = [1,0]</span>
-  位置 0 旋转 0°   → [1, 0]
-  位置 1 旋转 45°  → [0.707, 0.707]
-
-点积随距离变化：
-  m-n = 0 → cos0 = 1.0    （同位置，最相关）
-  m-n 变大 → 点积变小      （离得越远越不相关）
-
-<span class="g">就这么简单：RoPE 用"旋转角度差"来感知"位置差"。没有额外参数，天然带相对位置信息。</span></div>
-    <div class="board"><span class="k">长度外推：为什么 RoPE 能外推、又为什么还要微调</span>
-- RoPE 天然能外推：θ 频率固定，训练 4K 也能"算出" 8K 的角度
-- 但高频维度在长位置"转太快"，模型没见过 → 效果退化
-- 常见外推技巧（只需知道名字和作用）：
-  · 位置插值 (PI)：把 8K 位置压缩回 4K 范围再用
-  · NTK-aware / YaRN：调大 θ 基准（如 10000 → 500000），拉长可用范围
-  · 长上下文微调：继续训练，最稳
-
-<span class="k">架构师结论：选模型先看它的 max_position_embeddings 和是否做过 YaRN/NTK 外推。</span>
-别自己"硬拉"上下文长度——超标会静默变傻。</div>
-    <div class="callout">记住三点：<b>RoPE 用旋转编码相对位置；无额外参数、外推友好；要做长上下文，看模型有没有做 NTK/YaRN 外推。</b></div>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -241,93 +194,95 @@
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>Q/K/V 与注意力手算笔记</h3></div>
+    <div class="head"><span class="num">1</span><h3>FFN 参数量手算笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书①和②整理成自己的话：能用"查字典"讲清 Q/K/V，并复现那笔手算。</dd>
-      <dt>要掌握</dt><dd>Q 查、K 被查、V 取货；softmax 是加权平均；√d_k 防饱和。</dd>
-      <dt>实操步骤</dt><dd>写 <code>attention_handcalc.md</code>：① 用查字典类比解释 Q/K/V；② 手写 q·k → 缩放 → softmax → 加权 V 的全过程（用板书数字）；③ 用一小段文字解释"为什么 /√d_k"。</dd>
-      <dt>检验标准</dt><dd>合上讲义，能给 15 年嵌入式背景的人一句话讲懂注意力。</dd>
+      <dt>目标</dt><dd>把板书①整理成笔记：FFN 结构、参数量公式、在总参数中的占比。</dd>
+      <dt>要掌握</dt><dd>8d² 公式；FFN 为什么是"知识存储"；FFN vs 注意力的参数对比。</dd>
+      <dt>实操步骤</dt><dd>写 <code>ffn_params.md</code>：① d→4d→d 结构与 8d² 推导（一句）；② 用 d=2048/L=36 手算单层与全模型；③ 一句话解释"为什么模型越大越博学"。</dd>
+      <dt>检验标准</dt><dd>能当场算出任意 d、任意层数的 FFN 参数量，并说出它占总参数约 2/3。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>注意力方案对比表</h3></div>
+    <div class="head"><span class="num">2</span><h3>MoE 笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书③扩成一张完整对比表：MHA / MQA / GQA / MLA。</dd>
-      <dt>要掌握</dt><dd>四者 KV 份数、KV Cache、质量、端侧友好度的差别与演进动机。</dd>
-      <dt>实操步骤</dt><dd>写 <code>attention_compare.md</code>：5 列对比表 + 一句话"为什么端侧默认 GQA"。</dd>
-      <dt>检验标准</dt><dd>能说清 MQA 和 GQA 的区别（一刀切 vs 分组），以及 GQA 为什么是折中点。</dd>
+      <dt>目标</dt><dd>写清 MoE 的原理、参数量拆解、以及端侧不适用的四个理由。</dd>
+      <dt>要掌握</dt><dd>总参数 vs 激活参数；稀疏激活；batch=1 时为什么不省时间。</dd>
+      <dt>实操步骤</dt><dd>写 <code>moe_notes.md</code>：① 用 Mixtral 8×7B 和 DeepSeek-V3 举例算总/激活参数；② 列四个端侧硬伤；③ 一句话结论"MoE 是云端方案"。</dd>
+      <dt>检验标准</dt><dd>能讲清"MoE 省算力但不省带宽"，并说明端侧单用户为什么没收益。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>位置编码笔记</h3></div>
+    <div class="head"><span class="num">3</span><h3>架构趋势笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>梳理绝对 / 相对 / RoPE 三种位置编码，重点写清 RoPE 的直觉。</dd>
-      <dt>要掌握</dt><dd>RoPE 用旋转编码相对位置；无参数、外推友好；外推技巧 PI/NTK/YaRN。</dd>
-      <dt>实操步骤</dt><dd>写 <code>position_encoding.md</code>：三种方案对比 + RoPE 的"[1,0] 旋转"手算例子 + 外推注意事项。</dd>
-      <dt>检验标准</dt><dd>能不写公式讲清"RoPE 为什么能感知相对位置"。</dd>
+      <dt>目标</dt><dd>梳理 Transformer / SSM(Mamba) / 混合三条路线。</dd>
+      <dt>要掌握</dt><dd>三者复杂度、内存、长文本、召回、NPU 成熟度差异。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_trends.md</code>：① 三范式对比表；② SSM 的一句话原理（h_t = A·h_{t-1} + B·x_t）；③ 混合架构举例；④ 端侧该怎么选。</dd>
+      <dt>检验标准</dt><dd>能说出"SSM 常数内存很香，但 NPU 支持不成熟，端侧暂时还是 Transformer+GQA"。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>KV Cache 手算脚本（核心实操）</h3></div>
+    <div class="head"><span class="num">1</span><h3>架构对比表 + 端侧判断</h3></div>
     <dl>
-      <dt>目标</dt><dd>用代码把板书④的账算出来，做到"输入 config，输出三种方案的 KV 大小与带宽耗时"。</dd>
-      <dt>要掌握</dt><dd>KV Cache 公式；带宽耗时 = KV / 带宽；不同上下文长度的变化趋势。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：输入 <code>d=2048, heads=16, head_dim=128, layers=36, ctx=[1024,4096,8192]</code>，分别按 MHA/GQA(kv=2)/MQA 打印每 token KV、总 KV(MB)、@35GB/s 每 token 读取耗时(ms)；再打印"权重1.5GB + KV"的估算 tok/s。复用第 1 章内存估算思路。</dd>
-      <dt>检验标准</dt><dd>脚本跑通，输出能复现板书数字：GQA 8K ≈ 302 MB、每 token 读 8.6 ms。</dd>
+      <dt>目标</dt><dd>把上午的趋势笔记变成一张能直接用于决策的对比表。</dd>
+      <dt>要掌握</dt><dd>用"场景 → 架构"的映射做判断，而不是罗列名词。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_compare.md</code>：6 列对比表（Transformer / SSM / 混合）+ 每个给一句"端侧适用性"结论。</dd>
+      <dt>检验标准</dt><dd>别人拿这张表，能直接决定"这个项目用 Transformer+GQA"。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>用真实 config 验证</h3></div>
+    <div class="head"><span class="num">2</span><h3>端侧主流模型盘点表</h3></div>
     <dl>
-      <dt>目标</dt><dd>拿一个真实模型的 <code>config.json</code>，验证你的脚本和判断。</dd>
-      <dt>要掌握</dt><dd>从 config 里找 <code>num_attention_heads / num_key_value_heads / hidden_size / num_hidden_layers / max_position_embeddings</code>。</dd>
-      <dt>实操步骤</dt><dd>（能上网就下载 Qwen2.5-3B 的 <code>config.json</code>；不能就按讲义给定 config）写 <code>attention_verify.md</code>：贴出关键字段 → 用脚本算 KV Cache → 对比 MHA/GQA 收益 → 一句话"这个模型适不适合 3576"。</dd>
-      <dt>检验标准</dt><dd>能从 config 读出 kv_heads 并算出 KV 大小，而不是背数字。</dd>
+      <dt>目标</dt><dd>把板书⑤扩成你自己的模型清单。</dd>
+      <dt>要掌握</dt><dd>各模型规模、特点、端侧适配、许可；不同任务该挑多大。</dd>
+      <dt>实操步骤</dt><dd>写 <code>model_inventory.md</code>：模型清单表（可加 Roboflow 之外你关注的模型）+ "任务复杂度 → 规模"的推荐口诀。</dd>
+      <dt>检验标准</dt><dd>给你一个端侧任务，你能 30 秒报出"用哪个模型、多大、什么量化"。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
+    <div class="head"><span class="num">3</span><h3>场景架构推荐（一页）+ 秒答</h3></div>
     <dl>
-      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
-      <dt>实操步骤</dt><dd>自问自答：Q/K/V 各是什么？为什么要 /√d_k？GQA 和 MQA 区别？GQA 为什么省内存？3576 8K 上下文 GQA 的 KV 多大？RoPE 怎么编码位置？</dd>
-      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
+      <dt>目标</dt><dd>综合本章，给一个真实端侧场景写推荐架构——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把架构方向、模型、量化、理由串成一段决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_recommend.md</code>（一页）：场景设定（如"离线智能音箱，1.5B 意图识别 + 简单对话"）→ 架构（Transformer+GQA）→ 模型（Qwen2.5-1.5B/3B）→ 量化（RKNN int8/int4）→ 为什么不用 MoE / SSM → 风险。</dd>
+      <dt>检验标准</dt><dd>30 秒内把理由讲完，且每条都有数据或机制支撑。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>attention_handcalc.md</code> —— Q/K/V 直觉 + 注意力手算全过程。</li>
-    <li><code>attention_compare.md</code> —— MHA / MQA / GQA / MLA 对比表（核心产出）。</li>
-    <li><code>position_encoding.md</code> —— 位置编码笔记（绝对 / 相对 / RoPE）。</li>
-    <li><code>kv_cache_calc.py</code> —— KV Cache 与带宽手算脚本。</li>
-    <li><code>attention_verify.md</code> —— 用真实 config 验证的结论。</li>
+    <li><code>ffn_params.md</code> —— FFN 结构与参数量手算笔记。</li>
+    <li><code>moe_notes.md</code> —— MoE 原理 + 端侧四硬伤笔记（核心产出）。</li>
+    <li><code>arch_trends.md</code> —— Transformer / SSM / 混合趋势笔记（核心产出）。</li>
+    <li><code>arch_compare.md</code> —— 架构对比表与端侧判断。</li>
+    <li><code>model_inventory.md</code> —— 端侧主流模型盘点表。</li>
+    <li><code>arch_recommend.md</code> —— 场景架构推荐（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>用"查字典"讲清 Q/K/V：Q 查、K 被查、V 取货。</li>
-    <li>说出 /√d<sub>k</sub> 的作用：防止 softmax 饱和（梯度消失）。</li>
-    <li>说清 MQA 与 GQA 的区别：一刀切共享 vs 分组共享。</li>
-    <li>给出 GQA 为什么省内存的答案（KV 份数从 heads 降到 G，直接砍 KV Cache 到 1/8 量级）。</li>
-    <li>能从 config 算出 KV Cache，并判断模型适不适合 RK3576。</li>
+    <li>说出 FFN 参数量公式 8d²，并知道它约占总参数 2/3（知识存储）。</li>
+    <li>说清 MoE 的总参数 vs 激活参数，以及"省算力不省内存/带宽"。</li>
+    <li>说清端侧不用 MoE 的四个理由（内存、batch=1 不省时间、调度、随机访存）。</li>
+    <li>对比 Transformer / SSM / 混合，并给出端侧选择。</li>
+    <li>给一个端侧场景，能推荐架构方向 + 模型 + 量化。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「注意力本质是加权取值：Q 是提问、K 是被检索的索引、V 是内容，用 QKᵀ 算相似度、softmax 归一化、再对 V 加权求和，除以 √d_k 是为了防止分数随维度变大后 softmax 饱和、梯度消失。端侧最关键的是 KV Cache：MHA 每个 Q 头一组 KV，GQA 是多个头共享一组、把 KV 份数从 16 降到 2，KV Cache 直接砍到约 1/8。我们拿 3B 模型算过，8K 上下文下 MHA 的 KV 约 2.4GB、GQA 只有 300MB，因为 decode 是带宽瓶颈、RK3576 带宽只有 35GB/s，GQA 每生成一个 token 读 KV 从 69ms 降到 8.6ms，端到端吞吐能拉回约两倍，所以端侧一律优先 GQA。位置编码上现在主流是 RoPE，用旋转角度差编码相对位置，没有额外参数、外推友好，长上下文则看模型有没有做 NTK 或 YaRN 外推。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能讲清注意力机制与 KV Cache 的端侧取舍——注意力机制能力。</p>
+    <p>「Transformer 层里参数大头是 FFN，结构是 d→4d→d，参数量 8d²，占整个模型约三分之二，它的作用是知识存储——注意力负责搬运信息、FFN 负责把知识写进权重。MoE 是把单个 FFN 换成多个专家、每个 token 只激活 top-k，比如 Mixtral 总参数 47B、激活 13B。但 MoE 在端侧基本不用：一是总参数量大、内存装不下；二是 decode 阶段瓶颈是带宽不是算力，MoE 只省算力、不省带宽，单用户 batch=1 几乎没收益，只有云端大 batch 才划算；三是路由和动态 shape 对 NPU 不友好，还会带来随机访存。架构趋势上，现在有 Transformer、SSM/Mamba 和混合三条路线，SSM 是常数内存、长文本好但精确召回弱、NPU 支持也不成熟；所以端侧我目前选 Transformer + GQA，模型优先用 Qwen2.5-1.5B/3B，生态和 RKNN 支持最稳。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能判断架构方向与模型选型、讲清 MoE 的端侧取舍——架构趋势能力。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 的瓶颈是<strong>带宽（~35 GB/s）</strong>，不是算力。注意力层选型的第一标准永远是"KV Cache 省不省带宽"。</li>
-      <li>优先选 <strong>GQA 模型</strong>（Qwen2.5、Gemma、MiniCPM 都是 GQA），MHA 长上下文会明显掉速。</li>
-      <li>MLA 省得更多，但 RKNN/NPU <strong>不直接支持</strong>，端侧落地成本高；目前仍以 GQA 为甜点。</li>
-      <li>做长上下文方案时，先确认模型的 <code>max_position_embeddings</code>，不要盲目拉长——超标会静默"变傻"。</li>
+      <li>3576 内存上限 16GB，<strong>MoE 模型（如 Mixtral 47B）根本装不下</strong>，架构评审时直接排除。</li>
+      <li>端侧 decode 是<strong>带宽瓶颈</strong>，MoE 的稀疏优势在 batch=1 场景吃不到，别被"省算力"忽悠。</li>
+      <li>选模型优先看<strong>是否 GQA + 是否有 RKNN 官方示例</strong>（Qwen2.5 / MiniCPM 最省心）。</li>
+      <li>SSM/混合架构作为长上下文储备观察，但落地前先确认 NPU 算子支持，别踩"跑不起来"的坑。</li>
     </ul>
   </div>
 

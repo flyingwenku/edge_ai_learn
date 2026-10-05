@@ -35,13 +35,13 @@
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch14-resume-interview</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把经验包装、简历模板、5 话术、讲解稿看懂。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把经验包装、简历模板、5 话术、讲解稿、量产向问答看懂。</li>
     <li><strong>第 2 步 填模板：</strong>用讲义给的简历条目模板和讲解稿模板，先填一版草稿。</li>
     <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」改成终稿并做模拟面试。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」，5 句核心话术必须脱口而出才算毕业。</li>
@@ -147,6 +147,74 @@
 <span class="k">反馈表：</span>每题记「秒答 / 卡顿 / 答不出」，卡住的当场补进话术本。
 <span class="g">目标：一轮下来，「卡顿」项清零。</span></div>
     <div class="callout"><b>一句话结论：</b>模拟面试的价值在<b>暴露卡点</b>；把每个卡点补进话术本，直到能连续答完三轮不卡。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：面试问答准备（量产 / 架构师向高频）</h3>
+    <p>前面 5 句话术是「技术点」；量产和架构师面会往「<b>取舍、稳定性、成本</b>」三个方向深挖。这三类问题不能只背结论，要能讲出<span class="key">为什么</span>。</p>
+    <div class="board"><span class="k">面试问答准备（三组高频，背结论 + 补推理）</span>
+
+<span class="k">(a) 选型 trade-off</span>
+Q：为什么选 3B 不选 1.5B？
+A：看任务难度。1.5B 够「意图识别 + 简单多轮」，更省内存带宽
+   （int4 ≈1GB、实测 15~25 tok/s）；3B 多轮 / 工具调用更稳，
+   但 int4 ≈2GB、带宽翻倍，实测 <span class="r">5~10 tok/s</span>。
+   要「稍复杂对话 + function calling 准确率」→ 3B；
+   只要「唤醒 + 意图」→ 1.5B 性价比更高。
+
+Q：3B 会内存溢出吗？怎么防？
+A：3B int4 权重 2GB + KV(4K) 0.3GB + 运行时 0.5GB ≈ <span class="g">2.8GB</span>；
+   4GB 设备再叠 CV/RAG 就紧张，8GB 安全。
+   风险：KV 随上下文线性涨（8K 翻倍）+ 并发叠加 → OOM。
+   对策：限 max_context、KV 量化 / 分页、并发前预检可用内存、留 1GB 水位。
+
+Q：降级边界怎么定？
+A：写死阈值，不靠感觉——可用内存 &lt; 阈值 → 缩上下文 →
+   再不行 <span class="g">3B → 1.5B</span> → 最后只保 唤醒 + ASR + 本地工具。
+
+<span class="k">(b) 稳定性</span>
+Q：长跑内存泄漏怎么发现 / 处理？
+A：24h / 72h 压测看 RSS 曲线是否单调上升。
+   常见泄漏源：KV Cache 未复用 / 未释放、中间张量、句柄 / 日志、RAG 索引常驻增长。
+   对策：KV 复用与定期释放、内存水位告警、watchdog + 推理进程隔离重启。
+
+Q：NPU 异常复位怎么办？
+A：加推理超时检测（&gt; 阈值判卡死）→ 释放 RKNN context →
+   重新 init → 重试 N 次 → 仍失败降级到 CPU 或转云；
+   配合看门狗监控 NPU 状态寄存器并记录日志定位。
+
+<span class="k">(c) 成本</span>
+Q：DDR 怎么选？带宽和成本怎么权衡？
+A：容量（4/6/8GB）× 位宽（32/64bit）× 速率（→ 带宽）共同决定成本与 tok/s。
+   带宽升 → 推理快 → BOM 涨。
+   只跑 1.5B：<span class="g">LPDDR4X 4GB</span> 足够、最省；
+   要 3B / 多模型并发：上 <span class="g">LPDDR4X/5 8GB</span>，带宽是瓶颈、值得花。
+
+Q：BOM 里内存占多少？
+A：本地语音助手里 DDR ≈ <span class="g">$6 / $42 ≈ 14%</span>，
+   是仅次主控的第二大件、也是最灵敏的成本杠杆。</div>
+    <div class="callout"><b>一句话结论：</b>三类问题一条主线——<b>选型看任务、稳定性靠压测与降级、成本盯 DDR 与带宽</b>；每个答案都要能补一句「为什么不选另一个」。</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书填空：DDR 选型矩阵（填完展开答案）</h3>
+    <p>给你三块内存，判断各能跑什么模型、适合什么产品（容量 / 带宽越大越贵）。</p>
+    <table class="tight">
+      <thead><tr><th>选型</th><th>容量 / 类型</th><th>3B int4 可行？（填）</th><th>适合产品（填）</th></tr></thead>
+      <tbody>
+        <tr><td>A</td><td>4GB LPDDR4X</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>B</td><td>8GB LPDDR4X</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>C</td><td>8GB LPDDR5（带宽更高）</td><td class="fill">?</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案（先自己填！）</summary>
+      <div class="board">A 4GB LPDDR4X：3B 勉强（≈2.8GB），叠 CV/RAG 易 OOM
+  → 适合<span class="g">纯 1.5B 语音助手</span>，成本最低
+B 8GB LPDDR4X：3B + 轻并发安全
+  → 适合<span class="g">3B 语音助手 / 中端边缘盒子</span>
+C 8GB LPDDR5 ：同容量带宽更高，3B tok/s 更好
+  → 适合<span class="g">3B + 多模型并发</span>的产品，BOM 更高
+
+<span class="k">结论：</span>先定「模型规模 + 是否并发」，再反推内存容量与带宽；
+1.5B 不必上 8GB，3B / 并发才值得加钱买带宽。</div>
+    </details>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -209,6 +277,15 @@
       <dt>检验标准</dt><dd>简历一页或两页内；HR 扫 30 秒能命中三类岗位关键词。</dd>
     </dl>
   </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>面试问答答题卡（选型 / 稳定性 / 成本）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书⑥的三组高频问题整理成你的答题卡：每题「结论 + 推理 + 反问」。</dd>
+      <dt>要掌握</dt><dd>选型 trade-off（3B vs 1.5B / 内存溢出 / 降级边界）；稳定性（长跑泄漏 / NPU 复位）；成本（DDR 选型 / 带宽权衡 / BOM 占比）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>qa-card.md</code>：三组共 7 题，每题写「一句话结论 + 30 秒推理 + 可能的追问与应对」，并标出答案里的硬数字（2GB / 2.8GB / 5~10 tok/s / $6 / $42 / 1GB 水位）。掐表练到每题 30 秒讲完。</dd>
+      <dt>检验标准</dt><dd>随机抽一题能立刻答出结论并展开推理；被追问「为什么不选另一个」不卡。</dd>
+    </dl>
+  </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
@@ -219,6 +296,7 @@
     <li><code>mock-interview.md</code> —— 模拟面试记录 + 反馈表。</li>
     <li><code>resume-final.md</code> —— 可投递简历终稿（导出 PDF）。</li>
     <li><code>job-targets.md</code> —— 目标岗位清单 + 打招呼话术。</li>
+    <li><code>qa-card.md</code> —— 面试问答答题卡（选型 / 稳定性 / 成本）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
@@ -228,6 +306,7 @@
     <li>2 分钟自我介绍能完成「15 年 → 端侧 AI 架构师」的桥接。</li>
     <li>5 分钟项目讲解稿能不看稿讲出 80%。</li>
     <li>三轮模拟面试，「卡顿 / 答不出」项清零。</li>
+    <li>能答清选型（3B vs 1.5B）、稳定性（长跑泄漏 / NPU 复位）、成本（DDR / 带宽 / BOM）三类高频问题。</li>
   </ul>
 
   <h2>面试话术</h2>

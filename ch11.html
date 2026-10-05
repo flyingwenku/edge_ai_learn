@@ -28,27 +28,27 @@
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
   <h1>第 11 章：项目主体搭建</h1>
-  <p class="lead"><strong>章节目标：</strong>把前 10 章的零件组装成一个<b>能对话的端侧 AI 助手 demo v0.1</b>——RK3576 上跑 1.5B/3B int4，本地无网对话跑通，并留下基准性能记录。这是你面试最硬的作品。</p>
+  <p class="lead"><strong>章节目标：</strong>把前 10 章的零件组装成一个<b>既能「看」也能「说」的端侧 AI demo v0.1</b>——摄像头 <b>YOLO 类小模型</b>负责感知（检测），本地 <b>1.5B/3B int4 LLM</b>负责交互（对话），RK3576 上无网跑通双任务，并留下双任务基准性能记录。这是你面试最硬的作品。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
-    <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">上午 4h · 4 个任务</span>
+    <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch11-project-demo</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把分层架构、最小对话循环、HTTP 服务看懂，不懂就问我。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的内存预算表 / TTFT 手算自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」把 demo 真搭起来、跑通对话。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把分层架构、<b>CV+LLM 双任务共存</b>、最小对话循环、HTTP 服务看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的内存预算表 / NPU 时间片表 / TTFT 手算自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」把 demo 真搭起来、跑通检测 + 对话。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>前面各章是零件：会算内存、会量化、会转换、会调优。这一章是把零件<b>拼成一台能跑的机器</b>。目标只有一个——<span class="key">端侧本地、断网、能对话</span>，并且能拿出数字证明它跑得动。</p>
-    <div class="callout"><strong>交付物定义很硬：</strong>一段命令能启动、一个 HTTP 接口能问、本地无网能答、有一张基准性能表。做到这几条，你的简历就有了「可演示项目」。</div>
+    <p>前面各章是零件：会算内存、会量化、会转换、会调优。这一章是把零件<b>拼成一台能跑的机器</b>。这版 demo 有两个目标——端侧本地、断网、<b>既能「看」（摄像头检测）又能「说」（本地对话）</b>，而且能拿出数字证明<b>两个模型在同一块 16GB 板子上共存</b>还跑得动。</p>
+    <div class="callout"><strong>交付物定义很硬：</strong>一段命令能启动、一个 HTTP 服务既<b>能问（对话）</b>又<b>能看（检测）</b>、本地无网能答、有一张<b>双任务基准表</b>。做到这几条，你的简历就有了「可演示项目」。</div>
 
     <h3><span class="tag-lesson">讲解</span>1. 板书①：项目分层架构（四层）</h3>
     <p>架构师先画图再写码。四层职责清晰，换模型/换服务方式时只动一层。</p>
@@ -60,28 +60,178 @@
 ├─────────────────────────────────────────┤
 │ ③ 服务层  会话管理、prompt 组装、流式输出  │
 │    session.py · prompt_template.py       │
+│    + 双任务编排 orchestrator.py（本章新增）│
 ├─────────────────────────────────────────┤
 │ ② 推理层  rkllm 加载 / 生成 / 采样        │
+│    + 感知层 detector.py（RKNN 检测）       │
 │    rkllm wrapper · callback 流式          │
 ├─────────────────────────────────────────┤
 │ ① 模型层  qwen2.5-3b-w4a16.rkllm + tokenizer│
+│    + yolov8n-int8.rknn（检测模型）         │
 └─────────────────────────────────────────┘
 
 <span class="k">设计原则：每层只依赖下一层，模型换代不动上层。</span>
 <span class="g">面试点：能画出这张图并说清各层职责，就是"架构"而不是"脚本"。</span></div>
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：模型与工具链选型</h3>
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：双任务升级——CV 检测 + 本地 LLM 共存</h3>
+    <p>只做对话的 demo，面试官会觉得「无非套了个壳」。升级为<b>「感知 + 交互」双任务</b>，你才真正在解决端侧的核心矛盾：<b>两个模型抢同一块 NPU 和同一片内存，怎么排兵布阵</b>。分工先记牢：<span class="key">CV 管「看」，LLM 管「说」</span>。</p>
+    <div class="board"><span class="k">双任务数据流（不是流水线，是共享资源的两个任务）</span>
+
+摄像头帧(15~30fps) ──► 预处理 resize / 归一化
+        │
+        ▼
+① 感知：CV 检测模型（YOLOv8n，int8 .rknn，跑 NPU）
+        每帧 → 检测框 / 类别 / 置信度 → JSON
+        │  （去抖：连续 N 帧稳定才升级为"事件"）
+        ▼
+② 事件聚合：把逐帧检测压成"发生了什么"
+        例：连续 10 帧出现 person → 事件 {person, 持续 0.7s}
+        │
+        ▼
+③ 交互：本地 LLM（Qwen2.5-1.5B/3B，w4a16 .rkllm，跑 NPU）
+        把事件/摘要拼进 prompt → 生成自然语言解释 / 回答
+        │
+        ▼
+④ 输出：屏幕 / TTS / HTTP 返回
+
+<span class="k">分工一句话：</span>CV 管"看"（瞬时、结构化、低延迟），
+LLM 管"说"（语义、交互、可解释）。
+<span class="g">两者共享 NPU + 内存，谁也离不开谁，但要抢资源。</span></div>
+
+    <p><b>第一个要算的账：内存预算。</b>很多人一听「双模型」就慌，其实检测模型小得可怜。看数：</p>
+    <div class="board"><span class="k">双任务内存预算（3B LLM + YOLOv8n，4K 上下文）</span>
+
+  LLM 权重 w4a16              ≈ 2.000 GB
+  LLM KV Cache @4K            ≈ 1.200 GB
+  LLM runtime + 对齐          ≈ 0.500 GB
+  CV 模型 YOLOv8n int8        ≈ 0.005 GB   ← 才 5 MB！
+  CV runtime / 激活 / 帧缓冲  ≈ 0.045 GB
+  系统 + 其它进程             ≈ 1.000 GB
+  ─────────────────────────────────────────
+  合计                        ≈ <span class="g">4.75 GB</span>（16GB 板：宽裕）
+
+<span class="k">关键结论：</span>CV 检测模型只有几 MB，
+真正吃内存的仍是 <span class="r">LLM 的权重 + KV</span>。
+所以"双任务内存不够"的锅，永远先算 LLM 那笔账。</div>
+
+    <p><b>第二个要算的账：NPU 时间片。</b>RK3576 只有一块 NPU，CV 和 LLM 都得排队用它。先把各自的占用算清楚：</p>
+    <div class="board"><span class="k">NPU 时间片与并发</span>
+
+RK3576 NPU：int8 6 TOPS，一块共享的加速资源
+CV 检测(YOLOv8n 640, int8)：单帧 ≈ <span class="g">12 ms</span>
+LLM(Qwen2.5-3B) decode：8 t/s → 单 token ≈ 125 ms（带宽受限）
+
+<span class="k">CV 吃掉多少 NPU 时间片？</span>
+  15 fps：15 × 12 ms = 180 ms/s  → <span class="g">18%</span>
+  30 fps：30 × 12 ms = 360 ms/s  → <span class="g">36%</span>
+  → 检测很轻，NPU 算力完全够。CV 从来不是算力问题。
+
+<span class="r">冲突点：LLM 的一次长 prefill（512 token ≈ 1.2s）会把 NPU 占满，</span>
+<span class="r">这 1.2s 内 CV 帧只能排队 → 检测掉帧、报警延迟。</span>
+
+<span class="k">共存策略（按优先级）：</span>
+  ① 事件驱动：无目标时 CV 降到 5fps 空跑，检测到目标才叫 LLM
+  ② 时间片：给 CV 保底帧率（如 10fps），LLM prefill 分块让路
+  ③ 分核/多实例：NPU 支持多核时 CV 与 LLM 各占核
+  ④ 降上下文：prefill 越短，占坑越少</div>
+
+    <p><b>第三个要算的账：谁才是瓶颈。</b>三项资源（算力 / 时间片 / 带宽）一起看，别拍脑袋：</p>
+    <div class="board"><span class="k">双任务瓶颈判定</span>
+
+  NPU 算力  ：CV 18~36% + LLM 少量 → <span class="g">有余量，不是瓶颈</span>
+  NPU 时间片：并发时 CV 被 LLM 长 prefill 饿到 → <span class="k">次要瓶颈</span>
+  内存带宽  ：LLM decode 每 token 读 2GB → 35 GB/s → 17 t/s 理论
+             实测 5~10 t/s → <span class="r">主瓶颈</span>
+  内存容量  ：双任务 ≈ 4.75GB / 16GB → <span class="g">不是瓶颈</span>
+
+<span class="k">一句话：</span>双任务 demo 的瓶颈，主因仍是 <span class="r">LLM 的内存带宽</span>；
+CV 只是"抢时间片"的次要矛盾。优化先压 LLM 带宽（量化 / 前缀缓存），
+再去谈给 CV 让路。</div>
+    <div class="formula">带宽利用率 = decode_tps × 权重_G B ÷ 35 GB/s</div>
+
+    <p><b>练习（板书填空）：</b>把 NPU 时间片占比和双任务内存合计自己算出来，再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>配置</th><th>CV 帧率</th><th>单帧 NPU</th><th>CV 占 NPU 时间片</th><th>双任务内存合计</th><th>结论</th></tr></thead>
+      <tbody>
+        <tr><td>3B / ctx2K / CV15fps</td><td>15</td><td>12 ms</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>3B / ctx4K / CV30fps</td><td>30</td><td>12 ms</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>1.5B / ctx4K / CV30fps</td><td>30</td><td>12 ms</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案（先自己填！）</summary>
+      <p>NPU 时间片 = 帧率 × 单帧毫秒 ÷ 1000：15fps → <b>18%</b>，30fps → <b>36%</b>。<br>
+      内存合计 = LLM 权重 + KV + runtime(0.5) + CV(0.05) + 系统(1.0)：<br>
+      · 3B / 2K：2.0 + 0.56 + 0.5 + 0.05 + 1.0 ≈ <b>4.11GB</b> → 流畅；<br>
+      · 3B / 4K：2.0 + 1.2 + 0.5 + 0.05 + 1.0 ≈ <b>4.75GB</b> → 可行，但 30fps 时并发会互相拖累；<br>
+      · 1.5B / 4K：1.0 + 0.6 + 0.5 + 0.05 + 1.0 ≈ <b>3.15GB</b> → 内存宽松，代价是回答质量下降。<br>
+      注意：三行里 NPU 时间片都不高（≤36%），说明<b>算力不是瓶颈</b>，真正的坎是 LLM 的带宽和并发时的排队。</p>
+    </details>
+
+    <p><b>目录结构也要为双任务重排。</b>感知、推理、编排各归各位，别把检测代码塞进 service 里。</p>
+    <div class="board"><span class="k">双任务项目目录结构</span>
+
+edge-agent/
+├── models/
+│   ├── llm/qwen2.5-3b-w4a16.rkllm
+│   ├── llm/qwen2.5-1.5b-w4a16.rkllm
+│   └── cv/yolov8n-int8.rknn
+├── cv/                     # 感知：摄像头 + 检测
+│   ├── capture.py          # V4L2 取帧
+│   ├── detector.py         # RKNN 检测封装
+│   └── events.py           # 去抖 / 事件聚合
+├── inference/              # LLM 推理
+│   ├── rkllm_wrapper.py
+│   └── sampler.py
+├── service/
+│   ├── session.py
+│   ├── prompt_template.py
+│   └── orchestrator.py     # 双任务调度（时间片 / 事件驱动）
+├── server.py               # HTTP: /v1/chat/completions + /detect
+├── scripts/
+│   ├── bench_cv.sh
+│   ├── bench_llm.sh
+│   └── bench_dual.sh
+└── docs/
+    ├── architecture.md
+    └── bench_dual.md</div>
+
+    <p><b>基准也要记双任务的账。</b>单任务基线 + 并发掉幅，缺一不可——只报单任务数字，等于没说清共存是否可行。</p>
+    <div class="board"><span class="k">双任务基准记录模板</span>
+
+【环境】板型= RK3576 ; NPU= 6 TOPS ; 内存= 16GB
+        LLM= qwen2.5-3b-w4a16 ; ctx= 4096
+        CV= yolov8n-int8 ; 输入= 640 ; 帧率目标= 15fps
+【单任务基线】
+  CV : 单帧延迟=__ms → 最大 fps=__  内存(RSS 增量)=__MB
+  LLM: TTFT=__ms  decode=__ t/s  内存=__MB  NPU=__%
+【双任务并发】
+  CV  实测 fps=__  帧延迟 P95=__ms
+  LLM TTFT=__ms   decode=__ t/s
+  合计内存峰值=__MB
+  互相拖累：CV fps 掉 __% / LLM decode 掉 __%
+【瓶颈判定】
+  带宽利用率 = decode_tps × 权重GB / 35 = __%
+  结论：瓶颈 = 内存带宽 / NPU 时间片 / 其它</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：模型与工具链选型</h3>
     <div class="board"><span class="k">选型结论（回顾前几章，直接给答案）</span>
 
 模型     <span class="g">Qwen2.5-1.5B / 3B Instruct</span>（中文强、生态好）
 精度     <span class="g">w4a16 int4</span>（端侧甜点，内存/速度平衡）
 工具链   <span class="g">rknn-llm（rkllm）</span> 转 .rkllm，NPU 原生
-服务     先 CLI 跑通 → 再包 HTTP（OpenAI 兼容）
+检测模型 <span class="g">YOLOv8n（int8）</span> → .rknn，NPU 感知
+服务     先 CLI 跑通 → 再包 HTTP（OpenAI 兼容 + /detect）
 
 <span class="k">为什么 1.5B 和 3B 都准备？</span>
   3B：回答质量好，decode 约 8 t/s（带宽瓶颈）
-  1.5B：更轻，decode 约 15 t/s，内存 < 1GB
+  1.5B：更轻，decode 约 15 t/s，内存 &lt; 1GB
   → <span class="g">3B 做质量场景，1.5B 做断网降级/极速场景</span>
+
+<span class="k">为什么检测走 RKNN 而不是 rkllm？</span>
+  rkllm 是 <span class="r">LLM 专用</span>工具链；检测是 CNN，
+  用 <span class="g">RKNN Toolkit</span> 把 YOLOv8n 转成 .rknn，直吃 NPU。
+  <span class="g">同一个 NPU，两套工具链产物——这正是"共享硬件"的落地。</span>
 
 <span class="k">内存预算（3B int4 + 4K 上下文）</span>
   模型权重 w4a16         ≈ 2.0 GB
@@ -103,10 +253,10 @@
       <summary>点击展开答案（先自己填！）</summary>
       <p>KV = 上下文 × 0.28MB：2K≈<b>0.56GB</b>，4K≈<b>1.2GB</b>，8K≈<b>2.3GB</b>。<br>
       总占用 = 2.0(模型) + KV + 1.5(其它)：2K≈<b>4.1GB</b>，4K≈<b>4.7GB</b>，8K≈<b>5.8GB</b>。<br>
-      16GB 都能塞下，但 8K 时 KV 已经超过模型本身一半——这就是第 4 章说的「KV 抢带宽/抢内存」，上下文不是免费拉的。</p>
+      16GB 都能塞下，但 8K 时 KV 已经超过模型本身一半——这就是第 5 章说的「KV 抢带宽/抢内存」，上下文不是免费拉的。加上 CV 之后每档再 +0.05GB，可忽略。</p>
     </details>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：最小对话循环（先跑通再说）</h3>
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：最小对话循环（先跑通再说）</h3>
     <p>别一上来写架构。先用官方 <b>rkllm Python API</b> 跑通一次「问一句、答一句」，这是所有上层的基础。</p>
     <div class="board"><span class="k">最小可跑：chat_loop.py</span>
 from rkllm.api import RKLLM
@@ -130,8 +280,8 @@ while True:
   ③ <span class="g">先不管多轮、先不管包装，跑通单轮 = v0 里程碑</span></div>
     <div class="callout"><strong>排错顺序：</strong>① 模型能不能 load ② 单轮能不能出字 ③ 出字是否乱码（tokenizer）④ 是否流式。按这个顺序查，别一锅乱炖。</div>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：包成 HTTP 服务（OpenAI 兼容）</h3>
-    <p>CLI 只能自己玩。做成 HTTP 接口，才能接前端、接 App、被别人集成。做成 OpenAI 兼容格式最值钱——别人的代码改个 base_url 就能用你。</p>
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：包成 HTTP 服务（OpenAI 兼容 + 检测接口）</h3>
+    <p>CLI 只能自己玩。做成 HTTP 接口，才能接前端、接 App、被别人集成。做成 OpenAI 兼容格式最值钱——别人的代码改个 base_url 就能用你。双任务版本再加一个感知接口。</p>
     <div class="board"><span class="k">server.py（Flask 最简版，OpenAI 兼容）</span>
 from flask import Flask, request, jsonify
 from rkllm.api import RKLLM
@@ -151,6 +301,12 @@ def chat():
                                  "content": "".join(buf)}}]
     })
 
+@app.post("/detect")          # 双任务新增：感知接口
+def detect():
+    frame = cv.capture_once()
+    boxes = detector.run(frame)             # 返回结构化检测结果
+    return jsonify(boxes)                   # [{"cls","conf","box"}, ...]
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
 
@@ -159,11 +315,11 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"你好"}]}'
 
-<span class="g">兼容 OpenAI 格式 = 生态红利：以后换更强模型，
-只要接口不变，上层前端一行不用改。</span></div>
+<span class="g">对话走 /v1/chat/completions，感知走 /detect，
+一个服务两个能力——这就是"多模态端侧"的最小形态。</span></div>
 
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：基准性能记录（拿数字说话）</h3>
-    <div class="board"><span class="k">四项基准（demo 验收必留）</span>
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：基准性能记录（拿数字说话）</h3>
+    <div class="board"><span class="k">五项基准（双任务 demo 验收必留）</span>
 
 ① 首 token 时延 TTFT = prompt_tokens ÷ prefill_tps
    示例：512 tok ÷ 430 t/s ≈ <span class="g">1.2 s</span>
@@ -173,34 +329,44 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 ③ 内存     free -m 前后对比（看 RSS 增量）
 ④ NPU 利用率  cat /sys/kernel/debug/rknpu/load
+⑤ <span class="g">双任务并发（本章升级项）</span>
+   CV 实测 fps + LLM decode 的互相掉幅
+   → 并发掉幅越小，说明时间片策略越好
 
-<span class="k">一键采集（bench.sh 片段）</span>
+<span class="k">一键采集（bench_dual.sh 片段）</span>
 free -m | awk 'NR==2{print "mem_before="$3"MB"}'
+# 启动 CV 检测（15fps）...
+# 同时跑一次 40-token LLM 生成 ...
 START=$(date +%s.%N)
-# 跑一次 40-token 生成 ...
+# ... 生成 40 token ...
 END=$(date +%s.%N)
 echo "decode_tps=$(echo "40/($END-$START)" | bc -l)"
+echo "cv_fps=$(cat /tmp/cv_fps.txt)"
 cat /sys/kernel/debug/rknpu/load
 
 <span class="k">带宽校验：</span>decode 8 t/s × 2.0GB ÷ 35 = 45.7% 利用率
 → 与第 9/10 章对上，说明记录可信。</div>
 
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：demo v0.1 验收标准</h3>
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：demo v0.1 验收标准</h3>
     <div class="board"><span class="k">v0.1 过关清单（全过才算完成）</span>
 
 □ 本地无网启动          —— 拔网线还能聊
 □ 首 token &lt; 2s         —— TTFT 达标
 □ decode ≥ 5 t/s        —— 能连续读
+□ <span class="g">检测链路可跑通</span>        —— 摄像头/视频 → /detect 返回框
+□ <span class="g">双任务共存不崩</span>        —— CV 与 LLM 并发，内存峰值 &lt; 6GB
+□ <span class="g">事件驱动生效</span>          —— 无目标时 CV 自动降帧，省 NPU
 □ 连续对话 ≥ 10 分钟    —— 不 OOM、不崩
 □ HTTP 接口可调通        —— curl 有正常返回
-□ 基准表已落盘          —— 四项指标齐全
+□ 基准表已落盘          —— 五项指标齐全
 
 <span class="k">被问"项目做了什么"→ 标准答：</span>
-「我在 RK3576 上用 rknn-llm 把 Qwen2.5-3B 量化成 w4a16 并部署，
-搭了四层架构的端侧 AI 助手：模型层、推理层、服务层、交互层，
-CLI 和 OpenAI 兼容 HTTP 都能对话，本地断网可用，
-首 token 约 1.2s、decode 约 8 tok/s、内存约 2.1GB、
-带宽利用率约 45%，瓶颈在内存带宽。」</div>
+「我在 RK3576 上搭了一个"感知 + 交互"的端侧 AI 助手：
+用 RKNN 把 YOLOv8n 量化成 int8 跑摄像头检测，用 rknn-llm 把 Qwen2.5-3B
+量化成 w4a16 做本地对话，两个模型共享一块 NPU 和 16GB 内存，
+四层架构、CLI 和 OpenAI 兼容 HTTP 都能用，本地断网可用，
+首 token 约 1.2s、decode 约 8 tok/s、检测单帧约 12ms、
+并发内存约 4.8GB，瓶颈在内存带宽。」</div>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -210,92 +376,118 @@ CLI 和 OpenAI 兼容 HTTP 都能对话，本地断网可用，
   <div class="task">
     <div class="head"><span class="num">1</span><h3>架构图 + 目录骨架</h3></div>
     <dl>
-      <dt>目标</dt><dd>画四层架构图，并建出对应目录结构。</dd>
-      <dt>要掌握</dt><dd>四层职责；每层只依赖下一层的原则。</dd>
-      <dt>实操步骤</dt><dd>写 <code>architecture.md</code>（四层图 + 职责表）；建目录 <code>models/ inference/ service/ ui/ scripts/</code>。</dd>
-      <dt>检验标准</dt><dd>能对着图说清「换模型只动模型层，换接口只动交互层」。</dd>
+      <dt>目标</dt><dd>画四层架构图，并建出对应目录结构（含双任务的 cv/ 与 orchestrator）。</dd>
+      <dt>要掌握</dt><dd>四层职责；每层只依赖下一层的原则；检测与推理各自归层。</dd>
+      <dt>实操步骤</dt><dd>写 <code>architecture.md</code>（四层图 + 职责表）；建目录 <code>models/ cv/ inference/ service/ scripts/ docs/</code>。</dd>
+      <dt>检验标准</dt><dd>能对着图说清「换模型只动模型层，换接口只动交互层，换传感器只动 cv/」。</dd>
     </dl>
   </div>
   <div class="task">
     <div class="head"><span class="num">2</span><h3>模型准备（复用第 9 章产物）</h3></div>
     <dl>
-      <dt>目标</dt><dd>拿到可加载的 <code>.rkllm</code>（3B 和/或 1.5B w4a16）。</dd>
-      <dt>要掌握</dt><dd>内存预算（模型+KV）；w4a16 为什么是端侧默认。</dd>
-      <dt>实操步骤</dt><dd>把第 9 章转好的模型放入 <code>models/</code>；写 <code>models/README.md</code> 记录模型名、格式、大小、来源配置。</dd>
-      <dt>检验标准</dt><dd><code>ls -lh models/</code> 能看到模型文件，大小符合 w4a16 预期（3B ≈ 2GB）。</dd>
+      <dt>目标</dt><dd>拿到可加载的 <code>.rkllm</code>（3B 和/或 1.5B w4a16）与可加载的检测 <code>.rknn</code>。</dd>
+      <dt>要掌握</dt><dd>内存预算（模型+KV+CV）；w4a16 为什么是端侧默认；检测模型为什么走 RKNN。</dd>
+      <dt>实操步骤</dt><dd>把第 9 章转好的 LLM 放入 <code>models/llm/</code>，把 YOLOv8n int8 放入 <code>models/cv/</code>；写 <code>models/README.md</code> 记录名称、格式、大小、来源配置。</dd>
+      <dt>检验标准</dt><dd><code>ls -lh models/llm models/cv</code> 能看到模型文件，LLM 大小符合 w4a16 预期（3B ≈ 2GB），检测模型 ≈ 几 MB。</dd>
     </dl>
   </div>
   <div class="task">
     <div class="head"><span class="num">3</span><h3>最小对话循环跑通</h3></div>
     <dl>
-      <dt>目标</dt><dd>按板书③跑通「问一句、答一句」，带流式。</dd>
+      <dt>目标</dt><dd>按板书④跑通「问一句、答一句」，带流式。</dd>
       <dt>要掌握</dt><dd>load_rkllm 参数；callback 流式；排错四步顺序。</dd>
       <dt>实操步骤</dt><dd>写 <code>ui/chat_loop.py</code>，加载模型，输入问题打印回答；记录第一次跑通的截图或日志到 <code>first_run.log</code>。</dd>
       <dt>检验标准</dt><dd>能连续输入 3 个问题、每次都有回答，且是流式吐字。</dd>
     </dl>
   </div>
+  <div class="task">
+    <div class="head"><span class="num">4</span><h3>摄像头检测链路跑通（感知模块 · 本章新增）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书②跑通「取帧 → 检测 → 结构化结果」，为双任务打底。</dd>
+      <dt>要掌握</dt><dd>V4L2/视频取帧；RKNN 检测封装（输入 resize/归一化）；检测结果 JSON 化；单帧延迟怎么测。</dd>
+      <dt>实操步骤</dt><dd>写 <code>cv/capture.py</code> + <code>cv/detector.py</code>：从摄像头或一段视频取帧，调 RKNN 检测，把每帧的 <code>{cls,conf,box}</code> 写入 <code>detect_log.json</code>；统计单帧延迟（跑 100 帧取均值/P95）。</dd>
+      <dt>检验标准</dt><dd>单帧延迟 &lt; 33ms（具备 ≥30fps 潜力）；<code>detect_log.json</code> 含类别/置信度/坐标；对无目标帧能正确输出空列表。</dd>
+    </dl>
+  </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>包成 HTTP 服务（OpenAI 兼容）</h3></div>
+    <div class="head"><span class="num">1</span><h3>包成 HTTP 服务（OpenAI 兼容 + /detect）</h3></div>
     <dl>
-      <dt>目标</dt><dd>按板书④把对话包成 <code>/v1/chat/completions</code> 接口。</dd>
-      <dt>要掌握</dt><dd>Flask 路由；OpenAI 兼容格式；curl 测试。</dd>
-      <dt>实操步骤</dt><dd>写 <code>service/server.py</code>；<code>python server.py</code> 启动；用 curl 发一条消息并保存返回到 <code>curl_test.txt</code>。</dd>
-      <dt>检验标准</dt><dd>curl 返回 JSON，<code>choices[0].message.content</code> 是正常回答。</dd>
+      <dt>目标</dt><dd>按板书⑤把对话与检测各包成接口：<code>/v1/chat/completions</code> + <code>/detect</code>。</dd>
+      <dt>要掌握</dt><dd>Flask 多路由；OpenAI 兼容格式；curl 测试；两个接口共享同一进程的资源。</dd>
+      <dt>实操步骤</dt><dd>写 <code>service/server.py</code>（加载 LLM 与检测模型）；<code>python server.py</code> 启动；用 curl 分别调两个接口，把返回保存到 <code>curl_test.txt</code>。</dd>
+      <dt>检验标准</dt><dd>对话接口返回 JSON 且 <code>choices[0].message.content</code> 正常；<code>/detect</code> 返回检测框数组。</dd>
     </dl>
   </div>
   <div class="task pm">
     <div class="head"><span class="num">2</span><h3>基准性能采集（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>按板书⑤测出四项基准并写入表。</dd>
+      <dt>目标</dt><dd>按板书⑥测出五项基准并写入表。</dd>
       <dt>要掌握</dt><dd>TTFT 手算；decode tok/s；内存与 NPU 利用率取法；带宽校验。</dd>
-      <dt>实操步骤</dt><dd>写 <code>scripts/bench.sh</code>，跑 3 次取均值，输出 <code>bench_report.md</code>（TTFT / decode / 内存 / NPU / 带宽利用率）。</dd>
-      <dt>检验标准</dt><dd>四项数字齐全，且带宽利用率与公式一致（±10%）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>scripts/bench_llm.sh</code> + <code>scripts/bench_cv.sh</code>，各跑 3 次取均值，输出 <code>bench_report.md</code>（TTFT / decode / CV 单帧 / 内存 / NPU / 带宽利用率）。</dd>
+      <dt>检验标准</dt><dd>五项数字齐全，且带宽利用率与公式一致（±10%）。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>demo v0.1 验收 + 演示记录</h3></div>
+    <div class="head"><span class="num">3</span><h3>双任务共存基准 + 调度调优（本章核心新增）</h3></div>
     <dl>
-      <dt>目标</dt><dd>对照板书⑥清单逐项验收，产出演示记录——本章核心产出。</dd>
-      <dt>要掌握</dt><dd>六项验收标准；如何讲清项目价值。</dd>
-      <dt>实操步骤</dt><dd>写 <code>demo_v0.1.md</code>：①启动命令 ②接口示例 ③验收清单打勾 ④基准表 ⑤30 秒演示脚本（要讲的话）⑥已知问题/下一步。</dd>
-      <dt>检验标准</dt><dd>照这份文档，别人能在 5 分钟内跑起你的 demo 并复现基准数字。</dd>
+      <dt>目标</dt><dd>量化 CV 与 LLM 并发时的互相拖累，定位瓶颈，给出可落地的共存策略。</dd>
+      <dt>要掌握</dt><dd>时间片 vs 事件驱动；谁被饿到；带宽/算力/时间片三类瓶颈的判定。</dd>
+      <dt>实操步骤</dt><dd>写 <code>scripts/bench_dual.sh</code>，分别在「只跑 CV」「只跑 LLM」「双任务并发」三态各跑 3 次，按板书②模板填 <code>bench_dual.md</code>；记录 CV fps 与 LLM decode 的掉幅；写 <code>service/orchestrator.py</code>（时间片或事件驱动）并说明策略。</dd>
+      <dt>检验标准</dt><dd>能量化并发掉幅；能一句话判断瓶颈是内存带宽还是 NPU 时间片；给出的共存策略在并测中把掉幅降低（对比无策略时）。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>demo v0.1 验收 + 演示记录</h3></div>
+    <dl>
+      <dt>目标</dt><dd>对照板书⑦清单逐项验收，产出演示记录——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>九项验收标准；如何讲清「感知 + 交互」双任务的价值。</dd>
+      <dt>实操步骤</dt><dd>写 <code>demo_v0.1.md</code>：①启动命令 ②两个接口示例 ③验收清单打勾 ④双任务基准表 ⑤30 秒演示脚本（要讲的话）⑥已知问题/下一步。</dd>
+      <dt>检验标准</dt><dd>照这份文档，别人能在 5 分钟内跑起你的 demo、复现检测与对话，并复现双任务基准数字。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>architecture.md</code> —— 四层架构图 + 职责表 + 目录骨架。</li>
-    <li><code>models/README.md</code> —— 模型清单（名称/格式/大小/来源配置）。</li>
+    <li><code>architecture.md</code> —— 四层架构图 + 职责表 + 目录骨架（含双任务）。</li>
+    <li><code>models/README.md</code> —— 模型清单（LLM + 检测：名称/格式/大小/来源配置）。</li>
     <li><code>ui/chat_loop.py</code> + <code>first_run.log</code> —— 最小对话循环与首次跑通记录。</li>
-    <li><code>service/server.py</code> + <code>curl_test.txt</code> —— OpenAI 兼容 HTTP 服务与测试。</li>
-    <li><code>scripts/bench.sh</code> + <code>bench_report.md</code> —— 基准性能采集与报告。</li>
-    <li><code>demo_v0.1.md</code> —— 能对话的 demo 验收与演示记录（核心产出）。</li>
+    <li><code>cv/capture.py</code> + <code>cv/detector.py</code> + <code>detect_log.json</code> —— 摄像头检测链路与结果日志。</li>
+    <li><code>service/server.py</code> + <code>curl_test.txt</code> —— OpenAI 兼容 HTTP + 检测服务与测试。</li>
+    <li><code>service/orchestrator.py</code> —— 双任务调度（时间片 / 事件驱动）。</li>
+    <li><code>scripts/bench_llm.sh</code> / <code>bench_cv.sh</code> / <code>bench_dual.sh</code> + <code>bench_report.md</code> —— 基准采集与报告。</li>
+    <li><code>bench_dual.md</code> —— 双任务并发基准（含互相掉幅与瓶颈判定）。</li>
+    <li><code>demo_v0.1.md</code> —— 「感知 + 交互」demo 验收与演示记录（核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
     <li>能画出四层架构并说清每层职责与依赖方向。</li>
-    <li>能算内存预算：3B int4 模型 ≈2GB、KV@4K ≈1.2GB、合计 ≈4.7GB。</li>
+    <li>能算内存预算：3B int4 模型 ≈2GB、KV@4K ≈1.2GB、CV ≈0.05GB、合计 ≈4.75GB。</li>
+    <li>能说清为什么 CV 用 RKNN、LLM 用 rkllm，两者如何共享一块 NPU。</li>
+    <li>能算 NPU 时间片：CV 15fps ≈18%、30fps ≈36%，并指出并发时 CV 会被 LLM 长 prefill 饿到。</li>
+    <li>能判断双任务瓶颈：主瓶颈是 LLM 内存带宽，次要是 NPU 时间片，算力与容量都不是瓶颈。</li>
     <li>能脱口说出最小对话循环的三步（load → run → callback 流式）。</li>
     <li>能解释「为什么做成 OpenAI 兼容接口」。</li>
-    <li>demo 能在本地无网启动并对话，四项基准有数字。</li>
+    <li>demo 能在本地无网启动、能看能说，双任务基准有数字。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「我做了一个基于 RK3576 的端侧 AI 助手：模型是 Qwen2.5-3B 的 w4a16 int4，用 rknn-llm 转换部署到 NPU，架构分四层——模型层、推理层、服务层、交互层，层间单向依赖，换模型不影响上层。交互上既做了 CLI 也做了 OpenAI 兼容的 HTTP 接口，本地断网能跑。基准上首 token 约 1.2 秒、decode 约 8 tok/s、内存约 2.1GB、带宽利用率约 45%，瓶颈在内存带宽，所以我下一步会试 batch 和投机解码继续压延迟。这个项目从头到尾的量化、部署、调优都是我做的。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能独立交付一个可演示、可复现、有性能数字的端侧 AI 项目——最硬的面试作品。</p>
+    <p>「我做了一个基于 RK3576 的端侧 AI 助手，是一个「感知 + 交互」双任务 demo：感知用 RKNN 部署 YOLOv8n int8 做摄像头检测，单帧约 12ms；交互用 rknn-llm 部署 Qwen2.5-3B 的 w4a16 int4 做本地对话。两个模型共享同一块 NPU 和 16GB 内存——内存上检测模型才几 MB，真正的开销是 LLM 权重 2GB 加 KV Cache，双任务合计约 4.8GB；时间片上检测只占 18%~36%，冲突点在 LLM 的长 prefill 会饿到 CV，所以我用事件驱动加保底帧率来调度。架构分四层，层间单向依赖，交互既有 CLI 也有 OpenAI 兼容的 HTTP 接口，还有 /detect 感知接口，本地断网能跑。基准上首 token 约 1.2 秒、decode 约 8 tok/s、带宽利用率约 45%，结论是瓶颈在内存带宽而不是算力，所以下一步会试批处理、前缀缓存和投机解码继续压延迟。」</p>
+    <p style="margin:0"><strong>能力标签：</strong>能独立交付一个可演示、可复现、有性能数字的「多模态端侧」项目——最硬的面试作品。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
       <li>模型放在本地 <code>models/</code>（eMMC/NVMe），加载后常驻内存；<strong>首次 load 较慢</strong>，别误判为卡死。</li>
-      <li>3576 内存 16GB，但 demo + 系统 + KV + 其它服务要一起算；<strong>3B int4 建议上下文 ≤4K</strong>，8K 会让 KV 涨到 2.3GB。</li>
-      <li>NPU 单核，服务端并发（batch）能把带宽利用率从 ~45% 拉到 ~80%，是提升吞吐的正道。</li>
+      <li>3576 内存 16GB，但 demo + 系统 + KV + 检测缓冲 + 其它服务要一起算；<strong>3B int4 建议上下文 ≤4K</strong>，8K 会让 KV 涨到 2.3GB。</li>
+      <li>检测模型务必走 <strong>RKNN Toolkit（int8 .rknn）</strong>，不要用 rkllm——rkllm 只吃 LLM。</li>
+      <li>NPU 是共享资源，CV 与 LLM 会<strong>抢时间片</strong>：给 CV 设保底帧率，LLM prefill 尽量分块；NPU 多核时优先给两者分核。</li>
+      <li>NPU 单核场景下，服务端并发（batch）能把带宽利用率从 ~45% 拉到 ~80%，是提升吞吐的正道。</li>
       <li>demo 用 <code>1.5B</code> 做断网降级/极速模式、<code>3B</code> 做质量模式——<strong>一套代码两个档位</strong>，面试时是加分项。</li>
       <li>HTTP 服务记得绑 <code>0.0.0.0</code> 才能被外部访问；生产要加超时与限流，避免长 prompt 打满内存。</li>
     </ul>
