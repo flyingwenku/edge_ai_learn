@@ -3,416 +3,298 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 9 章 · 模型转换与量化部署（讲义 + 作业）</title>
+<title>第 9 章：LLM④ FFN、MoE 与架构趋势</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html">第 4 章</a>
-    <a href="ch05.html">第 5 章</a>
-    <a href="ch06.html">第 6 章</a>
-    <a href="ch07.html">第 7 章</a>
-    <a href="ch08.html">第 8 章</a>
-    <a href="ch09.html" class="active">第 9 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html" class="active">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 9 章：模型转换与量化部署</h1>
-  <p class="lead"><strong>章节目标：</strong>把「会算」变成「会落地」——用 <b>rknn-toolkit2</b> 把 3B 模型转成 NPU 能吃的 <code>.rknn</code>，做完校准、量化、精度对比，最后能拍板回答面试官那句：<span class="key">「这个量化方案能不能上线？」</span></p>
+  <h1>第 9 章：LLM④ FFN、MoE 与架构趋势</h1>
+  <p class="lead"><strong>章节目标：</strong>搞懂「<b>FFN 存知识、MoE 是云端的省算力游戏、端侧另有答案</b>」——拿到一个端侧场景，能当场说出该选什么架构方向、为什么 MoE 不合适。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 4 个任务</span>
-    <span class="chip">产出目录：ch09-quant-deploy</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch09-llm-trend</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把整条转换流水线和量化配置看懂，不懂就问我。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的配置表 / PPL 手算 / 带宽利用率自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真跑一遍转换与量化，出报告。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点是 MoE 为什么在端侧"省算力但不省时间"。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量手算 / 空表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写 MoE 笔记、架构趋势笔记、选型表。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 1~2 章你在纸上算：模型多大、用哪种量化、多少 tok/s。但架构师不能只会算，还得<b>真的把模型塞进 NPU</b>。这一步 90% 的人会翻车——不是报错就是精度崩，原因几乎都出在<b>校准集和量化配置</b>上。</p>
-    <div class="callout"><strong>你要能三件事：</strong>① 说清整条转换流水线每一步在干嘛；② 用一份配置把模型转出来并跑通；③ 量化前后精度差多少、<span class="key">差到什么程度就不能上线</span>。</div>
+    <p>第 7 章你搞懂了注意力。但注意力量只占参数的一小部分——<b>真正"装参数、装知识"的是 FFN</b>。这一章你搞清 FFN 和 MoE，再看清整个架构大方向（Transformer / SSM / 混合），最后拿到一张端侧主流模型清单。<span class="key">核心问题：给一个端侧场景，你选什么架构、用什么模型？</span></p>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：整条流水线（HF → ONNX → RKNN → .rknn）</h3>
-    <p>NPU 不认识 PyTorch，只认识瑞芯微自己的 <b>.rknn</b>。所以中间要有「翻译」：先把 PyTorch 换成通用格式 ONNX，再由 rknn-toolkit2 编译成 .rknn。</p>
-    <div class="board"><span class="k">端侧 LLM 转换流水线（四段）</span>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：FFN——Transformer 的"知识仓库"</h3>
+    <p>每个 Transformer 层有两个子块：注意力 + FFN。注意力负责"搬运"，FFN 负责"记忆"。</p>
+    <div class="board"><span class="k">FFN = Feed-Forward Network（前馈网络）</span>
+结构：d → 4d → d   （两层线性 + 一个激活函数）
+  中间隐藏层宽度通常是输入的 4 倍
+  （现代模型用 SwiGLU，实际约 8/3 倍，这里按 4d 讲，便于手算）
 
-① 原始权重    HuggingFace  /  PyTorch  (.safetensors)
-        │     取到模型 + tokenizer
-        ▼
-② 转换准备    ONNX 导出 / 直接喂 rkllm 的权重转换脚本
-        │     小模型走 onnx → rknn-toolkit2
-        │     LLM 走 rknn-llm（rkllm）一键转换
-        ▼
-③ 量化 + 编译  <span class="g">rknn-toolkit2</span> / rkllm
-        │     <span class="g">build(do_quantization=True, dataset=校准集)</span>
-        ▼
-④ 产物        <span class="k">.rknn</span>  （NPU 直接加载，与硬件绑定）
+<span class="k">参数量公式（两层矩阵）</span>
+  W1: d × 4d
+  W2: 4d × d
+  合计 = 2 × 4d² = <span class="g">8d²</span>
 
-<span class="k">关键：.rknn 是"过编译"的</span>——它针对目标平台（rk3576）
-做过算子映射和量化，换个平台要在新平台重转。
-所以 <span class="r">target_platform 一定要写对</span>。</div>
-    <p>两条路线怎么选：小模型/ViT 走 <b>onnx + rknn-toolkit2</b>；LLM 走 <b>rknn-llm（rkllm）</b>，它内部封装了量化与权重打包，一条命令出 .rkllm。</p>
+<span class="k">手算：d = 2048 的单层 FFN</span>
+  8 × 2048² = 8 × 4,194,304 = <span class="g">33.6M</span> 参数/层
+  36 层 → 33.6M × 36 = <span class="g">约 1.21B</span>
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：量化配置三件套</h3>
-    <p>PTQ（训练后量化）能不能成，就看这三个参数。少一个都跑不起来，配错任何一个精度就崩。</p>
-    <div class="board"><span class="k">三件套 —— 缺一不可</span>
+<span class="k">对比同模型的注意力层（GQA）</span>
+  Q: d×d = 4.19M
+  K,V: d×(2×128) = 0.52M 各
+  O: d×d = 4.19M
+  合计 ≈ 9.4M/层 → 36 层 ≈ 0.34B</div>
+    <div class="board"><span class="k">结论：FFN 参数 ≈ 注意力的 3~7 倍</span>
+  3B 这类小模型里，<span class="r">约 2/3 的参数在 FFN</span>。
 
-① dataset（校准集）     <span class="r">必须给，且要真实</span>
-     作用：让量化器"看"一遍真实输入，统计每个张量的动态范围
-     形态：rknn-toolkit2 用小样本 bin/npy；
-           rkllm 用一段真实 prompt 文本
+<span class="k">FFN 到底在干什么：知识存储</span>
+  研究共识（ROME、知识编辑等工作）：
+  · 注意力 = "token 之间搬运/聚合信息"（路由）
+  · FFN     = "把知识写进权重里"（记忆 / 查表）
+  所以：
+  模型"知道多少"  ← 主要由 <span class="g">FFN</span> 决定
+  模型"会不会用上下文" ← 主要由 <span class="g">注意力</span> 决定
 
-② quantized_dtype（量化类型）
-     告诉编译器：权重几位、激活几位
-     <span class="g">w8a8</span>  权重 8 / 激活 8   → 最稳，3576 首选
-     <span class="g">w8a16</span> 权重 8 / 激活 16  → 精度更高，慢一些
-     <span class="g">w4a16</span> 权重 4 / 激活 16  → LLM 端侧主流，省内存
+<span class="k">直觉：FFN 像一个巨大的 key-value 记忆库，</span>
+每个神经元近似"匹配某种特征 → 输出某条知识"。
+模型越大越"博学"，主要就是 FFN 堆得多。</div>
+    <div class="callout">一句话：<b>注意力管"看关系"，FFN 管"记知识"</b>。所以量化时 FFN 权重占大头，也是 KV Cache 之外最大的内存来源。</div>
 
-③ quantized_algorithm（量化算法）
-     normal         最直接（max 定标），快、够用
-     mmse           最小化量化误差，慢一点、精度更好
-     kl_divergence  分布对齐，对激活敏感场景好
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：MoE——稀疏激活原理 + 手算</h3>
+    <div class="board"><span class="k">MoE = Mixture of Experts（混合专家）</span>
+核心想法：把 1 个 FFN 换成 N 个"专家 FFN"，
+每个 token 只走其中 top-k 个（其余专家不参与计算）。
 
-<span class="k">一句话：dtype 决定"多省"，algorithm 决定"多准"。</span></div>
-    <div class="board"><span class="k">rkllm 转换配置示例（config.json）</span>
-{
-  "target_platform": "rk3576",
-  "model_path": "Qwen2.5-3B-Instruct",
-  "quantized_dtype": "w4a16",       <span class="g">// 权重 4 位，激活 16 位</span>
-  "quantized_algorithm": "normal",
-  "num_npu_core": 1,
-  "group_size": 128
-}
+  · 总参数量   = N × 8d²        （所有专家都要<span class="r">存进内存</span>！）
+  · 激活参数量 = k × 8d²        （每个 token 实际算的）
 
-<span class="k">rknn-toolkit2（小模型）等价写法</span>
-rknn.config(quantized_dtype='w8a8',
-            quantized_algorithm='mmse',
-            optimization_level=3)
-rknn.build(do_quantization=True, dataset='dataset.txt')</div>
+<span class="k">关键区别（要点）</span>
+  计算量由"激活参数"决定 → 稀疏 → 省算力
+  内存占用由"总参数量"决定 → 很大 → <span class="r">不省内存</span>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：校准集怎么做（决定成败）</h3>
-    <p>量化的本质是「给每个张量找一把尺子」。尺子的量程由校准数据决定——<b>你喂什么，它就以为世界长什么样</b>。喂错，线上就崩。</p>
-    <div class="board"><span class="k">校准集三条军规</span>
+<span class="k">举例：Mixtral 8×7B</span>
+  8 个专家，top-2 路由
+  总参数 ≈ 47B，激活 ≈ 13B
+  → 算力只花 13B（便宜），但要<span class="r">存 47B</span>（贵）
 
-① 要真实   用产品里真实的输入分布。
-           聊天模型 → 用真实用户问答；别用随机噪声。
-           <span class="r">用随机数据校准 = 上线后精度崩的头号原因</span>
+<span class="k">另一端：DeepSeek-V3</span>
+  总 671B / 激活 37B
+  → 推理算力极省，但内存得按 671B 级别准备
 
-② 要够量   LLM：<span class="g">100 ~ 500 条</span>代表性 prompt；
-           视觉小模型：<span class="g">100 ~ 500 张</span>真实图片。
-           太少 → 统计不稳；太多 → 转换慢，收益递减。
+<span class="k">一句话：MoE 用"更大的总内存"换"更小的单次算力"。</span></div>
+    <div class="callout"><b>MoE 的本质取舍：</b>它把"算力"和"内存"解耦了——用稀疏激活省算力，代价是总参数量（内存）反而更大。<b>谁的内存便宜、算力贵，谁就用 MoE → 那是云端，不是端侧。</b></div>
 
-③ 要覆盖   长度覆盖短/中/长（如 64 / 512 / 2048 tok）；
-           内容覆盖你的真实任务（客服/翻译/代码都要有样本）。
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：为什么端侧少用 MoE</h3>
+    <p>这是本章最重要的判断，四个硬伤，逐个讲：</p>
+    <div class="board"><span class="k">为什么端侧基本不用 MoE？四个硬伤</span>
 
-<span class="k">dataset.txt 长这样（每行一条样本文件路径）</span>
-calib/sample_000.bin
-calib/sample_001.bin
-...
-（LLM 路线则直接给一个 prompts.txt，每行一句真实问题）</div>
-    <div class="callout"><strong>面试加分点：</strong>「校准集不是随便凑几百条，要匹配线上输入分布，长短和任务类型都覆盖，否则 outlier 会把某些层 scale 撑大、整层精度塌。」</div>
+① 内存装不下（最直接）
+   Mixtral 47B，即便压到 int4 也 ≈ 24 GB
+   RK3576 内存上限 16 GB → <span class="r">装不下</span>。
+   端侧要的是"总参数小"，MoE 天生总参数大。
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：量化前后精度怎么比（PPL + 人肉）</h3>
-    <p>架构师不看「感觉变笨了」，要看<b>数字</b>。语言模型最通用的是<b>困惑度 PPL</b>：模型对下一 token 有多「困惑」，越低越好。</p>
-    <div class="formula">PPL = exp( −(1/N) · Σ ln p(wᵢ) )</div>
-    <p>先看手算，再套到量化对比上：</p>
-    <div class="board"><span class="k">手算：5 个 token 的概率 p = [0.8, 0.6, 0.9, 0.5, 0.7]</span>
+② batch=1 时 MoE 不省时间（最关键！）
+   decode 阶段是<span class="g">带宽瓶颈</span>：每生成 1 个 token，要把权重读一遍。
+   MoE 只激活 k 个专家 → 少算，但权重<r>还是得从内存读</r>（而且读得更碎）。
+   省算力 ≠ 省带宽 → 单用户场景几乎没收益。
+   只有大 batch（云端、多用户）才把 MoE 的稀疏优势吃满。
 
-ln p = [-0.2231, -0.5108, -0.1054, -0.6931, -0.3567]
-Σ ln p = -1.8891
-平均负对数似然 = 1.8891 / 5 = <span class="g">0.3778</span>
-PPL = exp(0.3778) = <span class="g">1.459</span>
+③ 调度开销
+   路由 + 动态 shape + 专家分散 → NPU/框架对小算子、动态分支不友好。
 
-<span class="k">量化后同位置概率变成 p' = [0.7, 0.5, 0.8, 0.4, 0.6]</span>
-Σ ln p' = -2.7001 → 平均 = 0.5400
-PPL' = exp(0.5400) = <span class="r">1.716</span>
+④ 随机访存
+   路由后读的是"分散在不同地址"的专家权重 → 带宽利用率更低，
+   对 3576 这种带宽本就紧张的板子雪上加霜。
 
-ΔPPL = 1.716 − 1.459 = 0.257  →  相对 <span class="r">+17.6%</span>
+<span class="k">一句话：MoE 是"云端多用户"的省算力方案；</span>
+端侧单用户、带宽受限 → 用密集小模型 + GQA 更实在。</div>
+    <div class="callout"><b>最容易背错的一点：</b>"MoE 省算力"没错，但在端侧单用户推理里，<b>瓶颈是带宽不是算力</b>，而 MoE 一点都不省带宽（总权重还是那么多，读的还是分散的）。<b>所以 MoE 对端侧 decode 几乎没有加速收益。</b></div>
 
-<span class="k">经验判据（语言模型）：
-  PPL 涨幅 &lt; 5%    → 放心上线
-  5% ~ 10%         → 抽样人肉看，多半可接受
-  &gt; 10%           → 危险，换 w8a16 或调校准集</span></div>
-    <p><b>人肉对比（PPL 之外的必做项）：</b>固定 20 个真实问题，原始模型和量化模型各答一遍，记录「是否跑题 / 是否重复 / 是否截断 / 是否答对」。表格存档，这是给产品经理看的东西。</p>
-    <div class="board"><span class="k">人肉对比记录表（模板）</span>
-#  | 问题        | 原始质量(1-5) | 量化质量(1-5) | 现象
----|-------------|--------------|--------------|----------------
- 1 | 北京天气？    |      5       |      5       | 一致
- 2 | 算 17×23     |      5       |      3       | 量化后算错
- 3 | 写首五言诗    |      4       |      4       | 少一句
-...
-<span class="k">统计：平均分差 &gt; 0.5 或出现"事实错误"≥2 条 → 不能上线。</span></div>
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：Transformer vs SSM(Mamba) vs 混合</h3>
+    <table class="tight">
+      <thead><tr><th>范式</th><th>计算复杂度</th><th>推理内存</th><th>长文本</th><th>召回/复制</th><th>NPU 成熟度</th></tr></thead>
+      <tbody>
+        <tr><td><b>Transformer</b></td><td>O(n²)</td><td>随 n 增长（KV Cache）</td><td>一般</td><td><b>强</b></td><td>高</td></tr>
+        <tr><td><b>SSM / Mamba</b></td><td>O(n)</td><td>常数（无 KV）</td><td>好</td><td>弱</td><td>低</td></tr>
+        <tr><td><b>混合架构</b></td><td>O(n)~O(n²)</td><td>小</td><td>好</td><td>强（有注意力层）</td><td>中</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">SSM / Mamba 是什么（一句话）</span>
+  用"状态空间模型"逐 token 递推：h_t = A·h_{t-1} + B·x_t
+  像 RNN 一样，只维护一个<span class="g">固定大小的状态</span> → 内存不随上下文增长。
+  代价：状态"挤"不下太多历史 → 精确回忆/复制能力弱于注意力。
 
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：三个调优旋钮 + 带宽利用率</h3>
-    <p>精度/速度不达标时，按下面顺序调。别瞎改，一次动一个变量。</p>
-    <div class="board"><span class="k">旋钮一览（按性价比排序）</span>
+<span class="k">混合架构：两头都要</span>
+  大部分层用 SSM（省内存、长文本好），少量层插注意力（保住召回）。
+  代表：Jamba、Zamba、NVIDIA Hymba、Qwen3-Next、MiniCPM 的部分版本。
 
-① group_size（int4 专用）  常见 32 / 64 / <span class="g">128</span>
-     小 → 组内更精细、精度更高，但 scale 开销↑
-     128 是默认甜点（回顾第 2 章：开销仅 ~3%）
+<span class="k">端侧意义</span>
+  SSM 的"常数内存"对内存吃紧的板子很有吸引力（终于不怕长上下文爆内存）。
+  但 NPU 对 SSM 的递推 scan 支持还不成熟 →
+  <span class="r">目前落地仍以 Transformer + GQA 为主</span>，SSM 作为观察方向。</div>
+    <div class="callout"><b>架构师结论：</b>端侧现在选 <b>Transformer + GQA</b>（生态成熟、NPU 支持好）；<b>Mixed/SSM</b> 作为 2026 之后的长上下文储备，关注别踩坑（算子支持）。</div>
 
-② 校准数据   换更贴近线上、覆盖更全的样本
-     <span class="g">性价比最高的一招</span>，往往比调算法管用
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：端侧主流模型盘点</h3>
+    <table class="tight">
+      <thead><tr><th>模型</th><th>常见规模</th><th>特点</th><th>端侧适配</th><th>许可</th></tr></thead>
+      <tbody>
+        <tr><td><b>Qwen2.5</b></td><td>0.5 / 1.5 / 3 / 7B</td><td>中文强、生态全、GQA + RoPE</td><td><b>好</b>（RKNN 有官方示例）</td><td>Apache-2.0</td></tr>
+        <tr><td><b>MiniCPM</b></td><td>2.4B / 4B</td><td>小尺寸强、端侧导向、多模态版</td><td><b>好</b></td><td>开源（部分需授权）</td></tr>
+        <tr><td><b>Phi-3.5-mini</b></td><td>3.8B</td><td>微软、小模型推理能力突出</td><td>中</td><td>MIT</td></tr>
+        <tr><td><b>Gemma-2</b></td><td>2B / 9B</td><td>Google、质量高、GQA</td><td>中</td><td>Gemma 许可</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">端侧选型口诀（按任务挑规模）</span>
 
-③ NPU 核心数 num_npu_core
-     3576 是<span class="r">单核 6 TOPS</span>（3588 才三核）；
-     3576 上固定 1，调它没意义；迁 3588 时才有 1/2/3 可选
+  意图识别 / 分类 / 短语槽位   → <span class="g">0.5B ~ 1.5B</span>（int8 即可）
+  简单对话 / 摘要 / RAG 生成    → <span class="g">1.5B ~ 3B</span>（int8 或 int4）
+  复杂推理 / 代码              → 大概率走云端，端侧只兜底
 
-<span class="k">带宽利用率（判断跑没跑满的关键指标）</span>
-  decode 实测 6 tok/s（NPU 独占场景），模型 int4 3B ≈ 2.0 GB
-  有效带宽 = 6 × 2.0 = 12 GB/s
-  利用率   = 12 / 16 = <span class="g">75%</span>（对 NPU 独占上沿 16 GB/s）
-  <span class="k">→ &lt; 60% 说明没跑满，还有调优空间（batch/算子）</span>
-  <span class="k">→ 产品真实场景可达带宽只有 7~11 GB/s，decode 会降到 3.5~5.5 tok/s</span></div>
-    <div class="callout"><strong>一句话记住：</strong><span class="key">带宽利用率 = tok/s × 模型真实GB ÷ 有效带宽上限</span>（NPU 独占 12~16 / 产品 7~11 GB/s）。它是判断「瓶颈在带宽还是在别处」的尺子，比单纯看 tok/s 有用得多。</div>
+<span class="k">首选 Qwen2.5-1.5B/3B</span>：中文好、GQA、RKNN 官方示例齐全，
+落地风险最低（这是"能用现成的就别自己造"的工程选择）。</div>
+    <div class="callout">记忆锚点：<b>端侧选型 = 任务复杂度 → 规模 → 量化 → 生态支持</b>。前两步看需求，后两步看板子，最后一步看"有没有现成的 RKNN 示例"。</div>
 
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：上线判断（本章结论）</h3>
-    <div class="board"><span class="k">能不能上线？三关过完才敢点头</span>
-
-① 精度关   PPL 涨幅 &lt;5% 且人肉对比无事实错误
-② 性能关   tok/s 达产品延迟目标（如 &gt; 5 tok/s）
-           且带宽利用率 ≥ 60%（说明已榨干带宽）
-③ 稳定关   连续对话 30 分钟不 OOM、不崩、显存/内存平稳
-
-三关全过 → <span class="g">可以上线</span>
-任一不过 → <span class="r">回退方案：w4a16 → w8a16，或换校准集重转</span>
-
-<span class="k">被问「这个量化方案能不能上线」→ 标准答：</span>
-「我按三关判：PPL 涨幅、人肉对比、带宽利用率与稳定性。
-3B w4a16 若 PPL 涨幅 &lt;5%、实测 &gt;5 tok/s、利用率 ≥60%、长跑不 OOM、
-人肉无事实错误——就上线；否则退 w8a16 或补校准集重转。」</div>
-
-    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：ONNX 算子排坑（PyTorch → ONNX → RKNN）</h3>
-    <p>量化是「转换」的后半程，前半程是<b>算子能不能转过去</b>。NPU 只认一套固定的算子集，PyTorch 里花哨的写法往往在导出 ONNX 或编译 RKNN 时炸掉。报错看似杂乱，其实就三类。</p>
-    <div class="board"><span class="k">转换链路：PyTorch → ONNX → RKNN（三段都要过）</span>
-
-  PyTorch(.pt/.safetensors)
-        │  torch.onnx.export / zoo 的导出脚本
-        ▼
-  ONNX(.onnx)        ← ① 算子是否都被 ONNX 支持？opset 版本对不对？
-        │  rknn-toolkit2: load_onnx → build
-        ▼
-  RKNN(.rknn)        ← ② 算子是否都被 NPU 支持？shape 是否静态？
-
-<span class="k">三段各有各的坑，报错信息不一样，要对号入座。</span></div>
-
-    <div class="board"><span class="k">三类高频报错 → 定位 → 处理</span>
-
-① 不支持的算子（Unsupported operator: XXX）
-   现象：ONNX 里带了自定义 / 冷门算子（如特殊 GridSample、
-         deform conv、自定义 attention、非标 Reduce）。
-   定位：Netron 打开 .onnx 看节点类型；或看 build 日志的算子名。
-   <span class="g">处理：用等价标准算子重写；或把不支持的算子拆成
-         NPU 支持的基础算子组合（如特殊激活拆成 mul/add/sigmoid）。</span>
-
-② opset 版本不匹配（opset version not supported）
-   现象：导出用了 opset 17+，工具链只吃到 11~13；或算子语义随
-         opset 变化（如 Resize / Slice 的属性名改了）。
-   定位：onnx.load 后读 model.opset_import。
-   <span class="g">处理：导出时显式钉住 torch.onnx.export(opset_version=12)；
-         或用 onnx.version_converter 把模型降到目标 opset。</span>
-
-③ 动态 shape（dynamic shape / -1 dims）
-   现象：batch 或序列长度是 -1，NPU 编译期定不了内存布局。
-   定位：Netron 看输入 / 中间张量的 dim 是不是 -1。
-   <span class="g">处理：导出时固定 shape（dynamic_axes 留空）；LLM 变长序列
-         用固定 max_seq_len 导出，或走 rkllm（内部已处理 KV Cache 布局）。</span>
-
-<span class="k">通用心法：报错先问「是 ONNX 不支持，还是 NPU 不支持」——</span>
-ONNX 阶段报错 → 改导出；RKNN 阶段报错 → 换/拆算子或固定 shape。</div>
-    <div class="callout"><strong>排坑顺序：</strong>先用 <code>onnx.checker</code> 确认 ONNX 本身合法，再上 Netron 数算子，最后才 build。别一上来就 build——报错信息会混在一起，定位成本翻倍。</div>
-
-    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：RKNN 算子支持与回退（量产最常见的坑）</h3>
-    <p>NPU 是专用电路，<b>只实现了一部分算子</b>。编译时工具链会把每个算子映射到 NPU；<b>映射不上的就「回退（fallback）」到 CPU 执行</b>。功能上照样算对——但性能会断崖式下跌，这是 RKNN 项目量产翻车的第一名。</p>
-    <div class="board"><span class="k">为什么会暴跌？——数据搬运才是元凶</span>
-
-  NPU 算 3 层 → 回退 1 层 CPU → 再回 NPU 算 5 层 → 又回退 ...
-  每次 NPU ↔ CPU 切换，张量要：
-    ① 从 NPU 内存搬回 CPU 内存
-    ② CPU 算完再搬回 NPU
-  搬运量 = 该张量大小，走的是<b>有限的片外带宽</b>（3576 产品场景仅 7~11 GB/s，NPU 独占 12~16）
-
-  <span class="r">一次特征图搬运 = 几十 MB → 十几毫秒；
-  回退层多起来，decode 速度可以从 6~8 tok/s 掉到 2 tok/s 上下。</span>
-
-<span class="k">更糟的是</span>：回退常常落在「每个 block 都有」的算子上，
-导致 NPU/CPU 反复横跳，搬运开销 ×层数，直接吃掉全部收益。</div>
-
-    <div class="board"><span class="k">怎么查「哪些算子支持」</span>
-  · rknn-toolkit2 文档：算子支持列表（op support list），
-    逐一列明每个算子在各平台的 NPU / CPU 归属；
-  · build 日志：搜 <span class="g">not supported</span> / <span class="g">fallback</span> / <span class="g">cpu</span>，
-    工具链会打印哪些节点被放到 CPU；
-  · rknn_model_zoo 对应模型的 README：官方已标注已知回退点与规避法。</div>
-
-    <div class="board"><span class="k">怎么避免回退（按优先级）</span>
-① 选「已在 zoo 里跑通」的模型结构——别人踩过的坑别再踩。
-② 替换不支持的算子：用 NPU 支持的基础算子等价重写
-   （如 GELU → 近似 tanh 形式；特殊 Norm → 标准 LayerNorm）。
-③ 融合 / 改写结构：把诱发回退的动态分支改成静态等价实现。
-④ 固定 shape：动态 shape 常直接判给 CPU（见板书⑦）。
-⑤ 改量化配置重试：某些算子在 w8a16 下能被 NPU 接纳，w4a16 不行。
-
-<span class="k">验收口径：build 日志里 fallback 条目为 0，
-且 profiling 显示算子几乎全在 NPU 上。</span></div>
-    <div class="callout"><strong>一句话记住：</strong><span class="key">回退不是「能不能跑」的问题，是「跑不跑得动」的问题。</span>功能上给你算对，性能上直接把你打回原型——量产前必须清干净。</div>
-
-    <h3><span class="tag-lesson">讲解</span>9. 板书⑨：NPU/CPU 混合调度与 profiling（把回退揪出来）</h3>
-    <p>完全不回退很难，架构师要做的是<b>把回退控制在可控范围</b>：该上 NPU 的上 NPU，天然属于 CPU 的交给 CPU，且尽量让同一段计算留在同一侧，减少搬运。</p>
-    <div class="board"><span class="k">哪些层适合 NPU / 哪些适合 CPU</span>
-
-<span class="g">放 NPU（算力密集、数据并行）</span>
-  · 大矩阵乘（QKV / FFN / 输出投影）
-  · 卷积 / 常规激活 / 逐元素乘加
-  · LayerNorm（标准形式）
-<span class="g">放 CPU（控制逻辑、轻量、串行依赖）</span>
-  · tokenizer / detokenizer
-  · sampling（top-k / top-p 采样，含随机数）
-  · RoPE 角度计算、KV Cache 索引等零碎控制流
-  · 动态 shape / 数据依赖的分支
-
-<span class="k">原则：让 NPU 干重活，CPU 干调度；</span>
-<span class="r">同一段计算尽量不跨设备——跨一次 = 一次搬运。</span></div>
-
-    <div class="board"><span class="k">用 profiling 看出回退</span>
-  rknn-toolkit2 的 <span class="g">eval_perf / rknn.eval_perf()</span> 会输出：
-    · 每个算子的耗时
-    · 每个算子跑在 <span class="g">NPU 还是 CPU</span>
-    · 总耗时里 NPU / CPU / 搬运各占多少
-
-<span class="k">怎么读这份 profiling</span>
-  · CPU 占比 &gt; 20% 或个别算子耗时异常 → 十有八九是回退；
-  · 某个小算子耗时比大矩阵乘还长 → 它就在 CPU（还带搬运）；
-  · 结合 build 日志的 fallback 列表，一一对应定位。
-
-<span class="k">板端交叉验证</span>
-  · cat /sys/kernel/debug/rknpu/load   → NPU 利用率低 = 没吃饱；
-  · top 看主进程 CPU%                 → CPU 长期 100%+ = 在替 NPU 干活。</div>
-    <div class="callout"><strong>闭环排障：</strong>profiling 定位「哪个算子掉 CPU」→ 回板书⑧ 用等价替换 / 固定 shape 消掉它 → <b>重跑 profiling 确认 CPU 占比下降</b>。改一个、测一次，别一次改一堆。</div>
+    <p><b>板书填空 · FFN 参数量，先自己填再展开：</b>设 d = 3072，层数 L = 28。</p>
+    <table class="tight">
+      <thead><tr><th>项目</th><th>公式</th><th>单层参数量</th><th>全模型</th></tr></thead>
+      <tbody>
+        <tr><td>单层 FFN</td><td class="fill">8d² = ?</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案</summary>
+      <p>8d² = 8 × 3072² = 8 × 9,437,184 = <b>75.5M</b> 参数/层；× 28 层 ≈ <b>2.11B</b>。</p>
+      <p>也就是说：一个"3B 级"模型，光 FFN 就可能占 2B 以上——这正是"FFN 是知识仓库"的数字证据。</p>
+    </details>
   </div>
 
   <h2>练习（交作业）</h2>
-  <p class="lead">讲义看懂后动手真跑一遍。做完贴回来我批改。</p>
+  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>转换流水线笔记 + 环境搭建</h3></div>
+    <div class="head"><span class="num">1</span><h3>FFN 参数量手算笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书①整理成一张流水线图，并装好 rknn-toolkit2 / rkllm 环境。</dd>
-      <dt>要掌握</dt><dd>HF→ONNX→RKNN→.rknn 每步作用；LLM 走 rkllm、小模型走 toolkit2 的分工。</dd>
-      <dt>实操步骤</dt><dd>写 <code>pipeline.md</code>：四段流水线图 + 每步命令。装环境：<code>pip install rknn-toolkit2 rknn-toolkit-lite2</code>；<code>python -c "from rknn.api import RKNN; print(RKNN())"</code> 验证。</dd>
-      <dt>检验标准</dt><dd>能白板画出四段流程，并说清为什么 .rknn 与平台绑定。</dd>
+      <dt>目标</dt><dd>把板书①整理成笔记：FFN 结构、参数量公式、在总参数中的占比。</dd>
+      <dt>要掌握</dt><dd>8d² 公式；FFN 为什么是"知识存储"；FFN vs 注意力的参数对比。</dd>
+      <dt>实操步骤</dt><dd>写 <code>ffn_params.md</code>：① d→4d→d 结构与 8d² 推导（一句）；② 用 d=2048/L=36 手算单层与全模型；③ 一句话解释"为什么模型越大越博学"。</dd>
+      <dt>检验标准</dt><dd>能当场算出任意 d、任意层数的 FFN 参数量，并说出它占总参数约 2/3。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>准备校准集（核心前置）</h3></div>
+    <div class="head"><span class="num">2</span><h3>MoE 笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>按板书③做一份真正匹配线上分布的校准集。</dd>
-      <dt>要掌握</dt><dd>校准集三条军规；为什么不能随机数据；dataset.txt 格式。</dd>
-      <dt>实操步骤</dt><dd>收集 <code>200 条</code>真实 prompt（长短各覆盖）写入 <code>calib/prompts.txt</code>；小模型路线另备 <code>calib/*.bin</code> 并生成 <code>dataset.txt</code>。</dd>
-      <dt>检验标准</dt><dd>校准集长度覆盖短/中/长三档，任务类型 ≥3 类，附一句「为什么不随机」。</dd>
+      <dt>目标</dt><dd>写清 MoE 的原理、参数量拆解、以及端侧不适用的四个理由。</dd>
+      <dt>要掌握</dt><dd>总参数 vs 激活参数；稀疏激活；batch=1 时为什么不省时间。</dd>
+      <dt>实操步骤</dt><dd>写 <code>moe_notes.md</code>：① 用 Mixtral 8×7B 和 DeepSeek-V3 举例算总/激活参数；② 列四个端侧硬伤；③ 一句话结论"MoE 是云端方案"。</dd>
+      <dt>检验标准</dt><dd>能讲清"MoE 省算力但不省带宽"，并说明端侧单用户为什么没收益。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>量化配置三件套对比表</h3></div>
+    <div class="head"><span class="num">3</span><h3>架构趋势笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书②扩成 w8a8 / w8a16 / w4a16 三档对比。</dd>
-      <dt>要掌握</dt><dd>dtype 三层含义；algorithm 三种差异；各自适用场景。</dd>
-      <dt>实操步骤</dt><dd>写 <code>quant_config.md</code>：dtype 对比表（位宽/体积/精度/速度/适用）+ algorithm 三行说明 + 你的默认配置结论。</dd>
-      <dt>检验标准</dt><dd>能说清「dtype 决定多省、algorithm 决定多准」，并给出 3576 默认 w4a16 的理由。</dd>
+      <dt>目标</dt><dd>梳理 Transformer / SSM(Mamba) / 混合三条路线。</dd>
+      <dt>要掌握</dt><dd>三者复杂度、内存、长文本、召回、NPU 成熟度差异。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_trends.md</code>：① 三范式对比表；② SSM 的一句话原理（h_t = A·h_{t-1} + B·x_t）；③ 混合架构举例；④ 端侧该怎么选。</dd>
+      <dt>检验标准</dt><dd>能说出"SSM 常数内存很香，但 NPU 支持不成熟，端侧暂时还是 Transformer+GQA"。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>真跑一次转换 + 量化（核心实操）</h3></div>
+    <div class="head"><span class="num">1</span><h3>架构对比表 + 端侧判断</h3></div>
     <dl>
-      <dt>目标</dt><dd>用 <code>config.json</code> 把 3B 模型转成 <code>.rkllm</code>/.rknn 并成功加载。</dd>
-      <dt>要掌握</dt><dd>do_quantization=True + dataset 的实际调用；build 日志怎么看。</dd>
-      <dt>实操步骤</dt><dd>写 <code>build.sh</code> / <code>build_rknn.py</code>，跑 <code>--target_platform rk3576 --quantized_dtype w4a16</code>；记录 build 日志中的每层量化耗时/告警，存入 <code>build_log.txt</code>。</dd>
-      <dt>检验标准</dt><dd>产出可加载的模型文件，能指着日志说出哪些算子出现了量化告警。</dd>
+      <dt>目标</dt><dd>把上午的趋势笔记变成一张能直接用于决策的对比表。</dd>
+      <dt>要掌握</dt><dd>用"场景 → 架构"的映射做判断，而不是罗列名词。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_compare.md</code>：6 列对比表（Transformer / SSM / 混合）+ 每个给一句"端侧适用性"结论。</dd>
+      <dt>检验标准</dt><dd>别人拿这张表，能直接决定"这个项目用 Transformer+GQA"。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>量化前后精度对比（PPL + 人肉）</h3></div>
+    <div class="head"><span class="num">2</span><h3>端侧主流模型盘点表</h3></div>
     <dl>
-      <dt>目标</dt><dd>用 PPL 和 20 题人肉对比，量化前后各跑一遍。</dd>
-      <dt>要掌握</dt><dd>PPL 公式与手算；PPL 涨幅判据（&lt;5% / 5-10% / &gt;10%）；人肉记录表。</dd>
-      <dt>实操步骤</dt><dd>写 <code>ppl_eval.py</code> 在固定测试集上算 PPL（原始 vs 量化），输出 <code>ppl_compare.md</code>；再填 <code>human_eval.md</code>（20 题，两列打分 + 现象）。</dd>
-      <dt>检验标准</dt><dd>给出 PPL 涨幅百分比 + 人肉平均分差，并套判据下结论。</dd>
+      <dt>目标</dt><dd>把板书⑤扩成你自己的模型清单。</dd>
+      <dt>要掌握</dt><dd>各模型规模、特点、端侧适配、许可；不同任务该挑多大。</dd>
+      <dt>实操步骤</dt><dd>写 <code>model_inventory.md</code>：模型清单表（可加上你关注的其它模型）+ "任务复杂度 → 规模"的推荐口诀。</dd>
+      <dt>检验标准</dt><dd>给你一个端侧任务，你能 30 秒报出"用哪个模型、多大、什么量化"。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>《端侧量化部署报告》（本章核心产出）</h3></div>
+    <div class="head"><span class="num">3</span><h3>场景架构推荐（一页）+ 秒答</h3></div>
     <dl>
-      <dt>目标</dt><dd>综合所有产出，给一个「能不能上线」的明确结论——一页纸。</dd>
-      <dt>要掌握</dt><dd>把流水线 + 配置 + 校准集 + 精度 + 带宽利用率串成一个决策。</dd>
-      <dt>实操步骤</dt><dd>写 <code>quant_deploy_report.md</code>（一页）：①模型与配置 ②校准集说明 ③精度对比(PPL/人肉) ④带宽利用率 ⑤上线判断与回退方案。</dd>
-      <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做并复现结论——架构文档标准。</dd>
-    </dl>
-  </div>
-  <div class="task pm">
-    <div class="head"><span class="num">4</span><h3>profiling 找算子回退（新增）</h3></div>
-    <dl>
-      <dt>目标</dt><dd>跑一次 rknn/llm profiling，找出掉到 CPU 的算子，并给出规避方案。</dd>
-      <dt>要掌握</dt><dd>build 日志里的 not supported / fallback；eval_perf 输出怎么读；CPU 占比与搬运的关系。</dd>
-      <dt>实操步骤</dt><dd>① build 时保留完整日志，grep <code>not supported|fallback|cpu</code> 存成 <code>fallback_list.txt</code>；② 用 <code>rknn.eval_perf()</code> 或板端 profiling 跑一遍，导出每算子耗时与设备归属；③ 挑出耗时异常的 CPU 算子，写 <code>fallback_report.md</code>：算子名 / 原因 / 等价替换或固定 shape 方案 / 重测后的 CPU 占比。</dd>
-      <dt>检验标准</dt><dd>能列出至少 1 个回退算子，给出可行规避方案，并用重跑数据证明 CPU 占比下降（或 fallback 归零）。</dd>
+      <dt>目标</dt><dd>综合本章，给一个真实端侧场景写推荐架构——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把架构方向、模型、量化、理由串成一段决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>arch_recommend.md</code>（一页）：场景设定（如"离线智能音箱，1.5B 意图识别 + 简单对话"）→ 架构（Transformer+GQA）→ 模型（Qwen2.5-1.5B/3B）→ 量化（RKNN int8/int4）→ 为什么不用 MoE / SSM → 风险。</dd>
+      <dt>检验标准</dt><dd>30 秒内把理由讲完，且每条都有数据或机制支撑。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>pipeline.md</code> —— 四段转换流水线图 + 每步命令。</li>
-    <li><code>calib/prompts.txt</code> —— 200 条真实校准 prompt（覆盖长短与任务类型）。</li>
-    <li><code>quant_config.md</code> —— w8a8 / w8a16 / w4a16 三档配置对比与默认结论。</li>
-    <li><code>build.sh</code> / <code>build_rknn.py</code> + <code>build_log.txt</code> —— 真实转换脚本与日志。</li>
-    <li><code>ppl_eval.py</code> + <code>ppl_compare.md</code> + <code>human_eval.md</code> —— 量化前后精度对比。</li>
-    <li><code>quant_deploy_report.md</code> —— 端侧量化部署报告（一页，核心产出）。</li>
-    <li><code>fallback_list.txt</code> + <code>fallback_report.md</code> —— 算子回退定位与规避（profiling）。</li>
+    <li><code>ffn_params.md</code> —— FFN 结构与参数量手算笔记。</li>
+    <li><code>moe_notes.md</code> —— MoE 原理 + 端侧四硬伤笔记（核心产出）。</li>
+    <li><code>arch_trends.md</code> —— Transformer / SSM / 混合趋势笔记（核心产出）。</li>
+    <li><code>arch_compare.md</code> —— 架构对比表与端侧判断。</li>
+    <li><code>model_inventory.md</code> —— 端侧主流模型盘点表。</li>
+    <li><code>arch_recommend.md</code> —— 场景架构推荐（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>能说清「量化配置三件套」分别是什么、少哪个会怎样。</li>
-    <li>能解释「为什么校准集不能用随机数据」。</li>
-    <li>会用 <span class="key">PPL 涨幅 &lt;5% / 5-10% / &gt;10%</span> 判据给精度下结论。</li>
-    <li>会算带宽利用率（tok/s × 模型GB ÷ 有效带宽上限），并判断是否跑满。</li>
-    <li>给「这个量化方案能不能上线」能按「精度关 / 性能关 / 稳定关」三关作答。</li>
-    <li>能说出 ONNX 三类高频报错（不支持算子 / opset 不匹配 / 动态 shape）的定位与处理。</li>
-    <li>能用 build 日志与 profiling 判断哪些算子回退到 CPU，并说清为什么搬运会拖垮性能。</li>
+    <li>说出 FFN 参数量公式 8d²，并知道它约占总参数 2/3（知识存储）。</li>
+    <li>说清 MoE 的总参数 vs 激活参数，以及"省算力不省内存/带宽"。</li>
+    <li>说清端侧不用 MoE 的四个理由（内存、batch=1 不省时间、调度、随机访存）。</li>
+    <li>对比 Transformer / SSM / 混合，并给出端侧选择。</li>
+    <li>给一个端侧场景，能推荐架构方向 + 模型 + 量化。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「端侧量化部署我走 rknn-toolkit2 / rkllm：先导出权重，再给一份匹配线上分布的校准集做 PTQ，量化配置三件套是 dataset、quantized_dtype、quantized_algorithm——dtype 决定多省、algorithm 决定多准，3576 上我默认 w4a16 + normal，group_size 128。转完我会量化前后对比：算 PPL，涨幅控制在 5% 以内，再做一轮 20 题人肉对比确认没有事实错误；性能上看带宽利用率，tok/s 乘模型大小除以有效带宽上限（NPU 独占 12~16 GB/s，产品 7~11），到 60% 以上才算榨干带宽。三关都过我才判断可以上线，否则回退 w8a16 或换校准集重转。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能把模型真正转成端侧可用产物，并用数字判断量化方案是否可上线——端侧量化部署能力。</p>
+    <span class="tag">要点回顾</span>
+    <p>Transformer 层里参数大头是 FFN，结构是 d→4d→d，参数量 8d²，占整个模型约三分之二；它的作用是知识存储——注意力负责搬运信息、FFN 负责把知识写进权重。</p>
+    <p>MoE 是把单个 FFN 换成多个专家、每个 token 只激活 top-k，比如 Mixtral 总参数 47B、激活 13B。但 MoE 在端侧基本不用：一是总参数量大、内存装不下；二是 decode 阶段瓶颈是带宽不是算力，MoE 只省算力、不省带宽，单用户 batch=1 几乎没收益，只有云端大 batch 才划算；三是路由和动态 shape 对 NPU 不友好，还会带来随机访存。</p>
+    <p style="margin:0">架构趋势上，现在有 Transformer、SSM/Mamba 和混合三条路线，SSM 是常数内存、长文本好但精确召回弱、NPU 支持也不成熟；所以端侧目前选 Transformer + GQA，模型优先用 Qwen2.5-1.5B/3B，生态和 RKNN 支持最稳。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>RK3576 的 NPU 是 <strong>单核 6 TOPS</strong>，<code>num_npu_core</code> 固定为 1；「试核心数」是 RK3588 三核才有的玩法，3576 上调它没意义。</li>
-      <li>3576 以 <strong>int8 定点加速为主</strong>，<code>w4a16</code> 多为 int8 模拟或部分算子支持——转完务必实测 tok/s 和精度，别想当然。</li>
-      <li>LLM 走 <strong>rknn-llm（rkllm）</strong> 一键转换，比手搓 ONNX 稳；小模型/ViT 才用 rknn-toolkit2。</li>
-      <li><code>target_platform</code> 必须写 <code>rk3576</code>；换板子要重转，产物不通用。</li>
+      <li>3576 内存上限 16GB，<strong>MoE 模型（如 Mixtral 47B）根本装不下</strong>，架构评审时直接排除。</li>
+      <li>端侧 decode 是<strong>带宽瓶颈</strong>，MoE 的稀疏优势在 batch=1 场景吃不到，别被"省算力"忽悠。</li>
+      <li>选模型优先看<strong>是否 GQA + 是否有 RKNN 官方示例</strong>（Qwen2.5 / MiniCPM 最省心）。</li>
+      <li>SSM/混合架构作为长上下文储备观察，但落地前先确认 NPU 算子支持，别踩"跑不起来"的坑。</li>
     </ul>
   </div>
 

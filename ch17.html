@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 17 章：项目收尾、稳定性与架构文档</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html" class="active">17</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>第 17 章：项目收尾、稳定性与架构文档</h1>
+  <p class="lead"><strong>章节目标：</strong>把前面各章的零件收口成「<b>一个能现场演示、能长期稳定运行的端侧 agent + 一份能讲清每个决策理由的架构文档 + 一份覆盖稳定性/功耗/降级的运维清单</b>」——这是把项目从「能跑」推进到「能长期可靠运行」的最后一环。</p>
+  <div class="pill-row">
+    <span class="chip">状态：进行中</span>
+    <span class="chip">上午 4h · 4 个任务</span>
+    <span class="chip">下午 4h · 4 个任务</span>
+    <span class="chip">产出目录：ch17-closeout</span>
+  </div>
+
+  <h2>这一页怎么用（学习流程）</h2>
+  <ul class="clean">
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把 function calling、RAG、性能测试、架构文档、<b>稳定性 / 功耗 / 异常降级</b>几块看懂。</li>
+    <li><strong>第 2 步 填板书练习：</strong>讲义里的模板 / 空表先自己写，再看「答案」核对。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写代码、跑指标、成文档。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，能当场演示 + 讲清理由 + 说出降级策略才算过。</li>
+  </ul>
+
+  <h2>课堂讲义（板书）</h2>
+  <div class="lesson">
+    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
+    <p>前面你已经有：量化（能算内存）、部署（能跑起来）、RAG 思路、端侧调优。但真正交付时，别人只看<b>成品</b>。本章把零件收口成一个可演示的 agent，并产出一份<b>架构设计文档</b>，再补上真正让项目「能上线」的三件事：<b>稳定性、功耗与发热、异常降级</b>。记住这条判据：<span class="key">文档的价值不在「写了什么」，而在「每个选择你都能说出为什么不选另一个」，以及「出问题时会怎么退」。</span></p>
+
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：function calling——让本地模型会「用工具」</h3>
+    <p>本地模型只会说话不够，架构师要让它能<b>干活</b>：查天气、设闹钟。做法就是 function calling 最小闭环——<b>模型只负责「吐结构化请求」，真正执行永远在本地代码手里</b>。</p>
+    <div class="board"><span class="k">本地工具调用（function calling）最小闭环</span>
+
+① 注册工具 schema（给模型看的「菜单」）
+   tools = [
+     {"name":"get_weather","desc":"查某城市天气","params":{"city":"str"}},
+     {"name":"set_alarm","desc":"设定闹钟","params":{"time":"HH:MM","label":"str"}}
+   ]
+
+② 模型输出 <span class="k">结构化调用请求</span>（不是自然语言！）
+   用户：「明天几点下雨？顺便 7 点叫我」
+   模型 → {"tool":"get_weather","args":{"city":"本地"}}
+   模型 → {"tool":"set_alarm","args":{"time":"07:00","label":"起床"}}
+
+③ 本地执行器：解析 JSON → 跑本地函数 → 结果回填 → 二次生成
+   执行(get_weather) → {"temp":18,"rain":"14:00"} → 塞回 prompt → 组织成人话
+
+<span class="g">关键：模型不接触真实系统，调用请求经本地代码校验后才执行。</span>
+安全、可控、断网也能跑（工具本身是离线的）。</div>
+    <div class="callout"><b>一句话结论：</b>function calling 的本质是「<b>让模型吐 JSON，而不是吐散文</b>」；执行权、校验权、权限永远留在本地代码里——这正是端侧架构师的掌控点。</div>
+    <p>给分不清「工具描述、约束、兜底」的写法补一条模板：</p>
+    <div class="board"><span class="k">工具 schema 写法模板</span>
+{
+  "name": "set_alarm",
+  "description": "设置一个本地闹钟",          ← 越具体，模型越少乱调
+  "parameters": {
+    "type":"object",
+    "properties":{
+      "time":{"type":"string","description":"24 小时制 HH:MM"},
+      "label":{"type":"string","description":"闹钟名称，可空"}
+    },
+    "required":["time"]
+  }
+}
+<span class="r">兜底：解析失败 / 参数非法 → 不执行，回一句「我没听清，你再说一遍」。</span>
+<span class="g">宁可让模型说「我不确定」，也不让它乱调工具。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：本地 RAG——轻量向量库 + 检索闭环</h3>
+    <p>模型不知道你的私域知识（产品手册、内部文档）。本地 RAG 让它「开卷考试」，且全程离线。流程就两步：<b>离线建库 + 在线检索</b>。</p>
+    <div class="board"><span class="k">本地 RAG 最小闭环（离线、无外网）</span>
+
+① 离线建库（一次性，跑在 PC 上）
+   文档 → 切块 chunk（300~500 字，重叠 50）→ 向量化 embedding
+        → 写入本地向量库 → 建索引
+
+② 在线检索（每次提问，跑在端侧）
+   问题 → 向量化 → 向量库 top-k 相似 chunk（k=3~5）
+        → 拼进 prompt → 本地 LLM 生成带引用的答案
+
+<span class="k">轻量向量库选型（端侧内存优先）</span>
+   sqlite-vec   ：单文件、零依赖、可嵌入，<span class="g">首选</span>
+   FAISS(CPU)   ：快，但要单独带库
+   chroma 本地态：开发方便，端侧偏重
+
+<span class="k">内存预算：</span>几万条 chunk 的索引 ≈ <span class="g">&lt; 50MB</span>，完全塞得下。
+额外开销：embedding 模型也要端侧化（可用小模型，如 bge-small 量化版）。</div>
+    <div class="callout"><b>一句话结论：</b>RAG = 「<b>检索</b>」+「<b>生成</b>」两步；本地 RAG 的难点不是向量库，而是<b>把 embedding 模型也压到端侧能跑</b>，并把索引内存控制在几十 MB。</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：性能测试四件套（端侧 LLM 的体检表）</h3>
+    <p>没有数据的架构文档是散文。端侧 LLM 的性能就测四样，每一样都对应一个用户体感或一个硬件瓶颈。</p>
+    <div class="board"><span class="k">性能测试四件套</span>
+
+① 首 token 延迟 TTFT：提交到吐出第 1 个字  → 体感「快不快」
+② 生成速度 tok/s     ：稳定阶段每秒 token   → 体感「流不流畅」
+③ 内存峰值 RSS       ：运行最高占用          → 决定「塞不塞得进」
+④ NPU 利用率         ：NPU 是否吃满          → 判断瓶颈在算力还是带宽
+
+<span class="k">测量模板（每次必须记录环境，否则数据没用）</span>
+   模型=/量化=/上下文长度=/线程数=/温度=
+   TTFT=___ms   tok/s=___   RSS=___MB   NPU=___%</div>
+    <p>怎么用这四个数下结论？看一条推理：</p>
+    <div class="board"><span class="k">用数据定位瓶颈（可直接写入文档 / 汇报）</span>
+3B int4 权重 ≈ <span class="g">2GB</span>
+每生成 1 token 需读一遍权重：2GB
+RK3576 内存带宽：峰值 <span class="k">19</span> / NPU 独占 <span class="k">12~16</span> / 产品 <span class="k">7~11 GB/s</span>
+3B int4 tok/s = 带宽 / 2 ≈ NPU 独占 <span class="g">6~8</span>、产品 <span class="g">3.5~5.5</span>
+实测           = <span class="r">3.5~5.5 tok/s</span>（产品落地数字）
+
+结论：算力没吃满、NPU 利用率不高 → <span class="r">瓶颈是内存带宽，不是 NPU</span>。
+优化方向：降比特（更狠量化）、减上下文、增加前缀缓存，而不是堆算力。</div>
+    <div class="callout"><b>一句话结论：</b>端侧 LLM 的性能瓶颈<b>通常是内存带宽而非算力</b>；四个指标一起看，才能判断该往「量化 / 上下文 / 缓存」哪个方向优化。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：架构设计文档模板（一页纸 ADR）</h3>
+    <p>架构文档别写成长篇报告，用 <b>ADR（Architecture Decision Record）</b>思路：一页讲清七件事。这是本章的<b>核心产出</b>。</p>
+    <div class="board"><span class="k">《架构设计文档》一页纸模板</span>
+
+1. 背景与目标   ：要解决什么问题、给谁用、约束（成本/功耗/尺寸/离线）
+2. 需求与指标   ：功能列表 + <span class="g">可量化指标</span>（TTFT&lt;1s, tok/s&gt;4, 内存&lt;2GB）
+3. 方案总览     ：一张分层图（应用 / 编排 / 推理 / 硬件）
+4. 关键决策 ADR ：每条 = 决策 + 理由 + 备选 + 代价（<span class="k">最重要</span>）
+5. 数据流       ：语音/文本 → 预处理 → 推理 → 工具/RAG → 输出
+6. 性能实测     ：四件套实测表（带环境）
+7. 风险与降级   ：断网 / 过热 / 内存不足 各自怎么办</div>
+    <p>其中「关键决策」每条都按同一个骨架写，逼你暴露真实的权衡：</p>
+    <div class="board"><span class="k">ADR 单条骨架</span>
+决策：<span class="g">用 RKNN int8 落地，而非 llama.cpp</span>
+理由：RK3576 有 NPU，RKNN 原生吃 NPU，能效比 CPU 高数倍
+备选：llama.cpp + GGUF（跨平台好，但走 CPU，速度/功耗差）
+代价：int4 在 NPU 支持有限，需退回 int8；平台被 RKNN 绑定
+<span class="k">→ 每条决策都能回答「为什么不选另一个」，文档就合格。</span></div>
+    <div class="callout"><b>一句话结论：</b>架构文档的合格线只有一条——<b>每个技术选择都能讲清「备选是什么、为什么不要它、代价是什么」</b>，并且第 7 段「风险与降级」要能对应到板书⑧的降级策略。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：Demo 演示脚本（照着讲，3 分钟）</h3>
+    <p>演示不是「随便点两下」，而是<b>每个演示点对应一个架构能力</b>，串成一条有说服力的线。</p>
+    <div class="board"><span class="k">3 分钟 Demo 剧本</span>
+
+0:00 定位一句话：「这是跑在 RK3576 上的<span class="g">离线</span>语音助手，断网可用。」
+0:20 演示 1 基础对话：「你好，介绍下你自己」      → 看<span class="k">流式输出</span>
+0:50 演示 2 function calling：「查天气 / 设 7 点闹钟」→ 看<span class="k">工具调用</span>
+1:20 演示 3 本地 RAG：「按我上传的手册，XX 怎么操作」→ 看<span class="k">检索引用</span>
+1:50 演示 4 断网降级：拔网线 → 仍能对话（本地 1.5B）→ 看<span class="k">鲁棒性</span>
+2:20 报指标：TTFT / tok/s / 内存 / NPU 四个数
+2:40 收尾：「架构文档在这，每个决策我都能讲清理由。」</div>
+    <div class="callout"><b>一句话结论：</b>Demo 的目的不是「能跑」，而是<b>让每个演示点都映射到一个架构能力</b>——对话=推理、工具=编排、RAG=数据、断网=降级。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：稳定性——让 demo 连续跑不停机</h3>
+    <p>能演示 3 分钟不算本事，能<b>连续跑 72 小时不崩</b>才是产品。稳定性就三件事：<b>内存不泄漏、NPU 不假死、掉电不失联</b>。</p>
+    <div class="board"><span class="k">稳定性第一杀手：内存泄漏（RSS 单调上涨）</span>
+
+现象：连续请求几小时后 OOM / 被 OOM-killer 杀掉
+根因（端侧 LLM 常见）：
+  ① 每次 run 新建 callback 闭包 / 大 buffer，没释放
+  ② 会话结束 KV Cache 没清，越堆越多
+  ③ numpy / 张量临时对象在长生命周期进程里累积
+  ④ 日志 / 缓存无限增长
+
+排查三步：
+  ① 粗看斜率：while true; do grep VmRSS /proc/$PID/status; sleep 60; done
+     → 稳定态 RSS 曲线应"平"，斜率 ≈ 0
+  ② 定位 Python 分配：tracemalloc 打快照 diff
+  ③ 定位 C 层：valgrind --tool=massif（或用厂商内存统计）
+
+手算判据：
+  单请求泄漏 0.5 MB × 10000 请求 = 5 GB → 必崩
+  单请求泄漏 0.01 MB × 10000 请求 = 100 MB → 可接受
+  → 目标：每 100 请求 RSS 增量 &lt; <span class="g">5 MB</span>
+
+修复：
+  · llm 实例全局单例，长生命周期
+  · 会话数设上限（LRU 淘汰），结束即释放 KV
+  · 定期 gc.collect()，限制日志大小</div>
+    <div class="board"><span class="k">NPU 异常复位 / 看门狗</span>
+现象：NPU hang、返回错误码、设备 busy、整进程假死
+
+措施：
+  ① 请求级超时：单次推理 &gt; 30s 判失败，不无限等
+  ② 超时后复位：重新 init runtime / reload 驱动
+  ③ 看门狗：systemd WatchdogSec=60 或硬件 WDT，进程定时喂狗
+  ④ 健康探针：/healthz 返回 NPU 状态，异常即重启服务
+
+手算：
+  看门狗超时 = 最长单次推理 P99 × 3
+  例：prefill P99 ≈ 3s → 超时设 10s，留 3 倍余量</div>
+    <div class="board"><span class="k">掉电与恢复（工业 / 车载场景必备）</span>
+  ① 模型 / 配置只读挂载，防止被写坏
+  ② 运行状态落盘用"原子写"：写 tmp → fsync → rename（防半截文件）
+  ③ 用 sqlite（WAL 模式）存会话 / 状态，掉电可恢复
+  ④ 开机自启：systemd service，配合 Restart=always
+  ⑤ eMMC 保护：只读挂载 + 日志限大小（logrotate），别把闪存写坏</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：功耗与发热——续航与降频</h3>
+    <p>端侧设备的宿命是「没有插头」。功耗决定续航，发热决定性能会不会越跑越慢——这两条都得算，不能只报最好成绩。</p>
+    <div class="board"><span class="k">功耗估算：算续航的第一步</span>
+P_整板 ≈ P_静态 + P_NPU + P_CPU + P_外设
+典型值（RK3576 级）：
+  待机（仅系统）    ≈ 1.0 ~ 2.0 W
+  NPU 满载          ≈ 3.0 ~ 5.0 W
+  整板 + 摄像头/屏  ≈ 5.0 ~ 8.0 W
+
+手算续航：
+  电池 5000 mAh × 3.7 V = 18.5 Wh
+  整板 5 W → 续航 = 18.5 / 5 ≈ <span class="g">3.7 h</span>
+  降帧 / 降频到 3 W → 续航 = 18.5 / 3 ≈ <span class="g">6.2 h</span>
+
+降功耗手段：
+  ① CV 降帧（15 → 5 fps）
+  ② 事件驱动：闲着就休眠 NPU
+  ③ DVFS 降频（顶频很贵，能效最差的区间是高频段）
+  ④ 空闲休眠 / 定时唤醒</div>
+    <div class="formula">续航(h) = 电池容量(Wh) ÷ 整板平均功耗(W)</div>
+    <div class="board"><span class="k">发热与降频：性能会"越跑越慢"</span>
+机理：长时间推理 → SoC 温度 ↑ → 触发热保护 → DVFS 降频 → tok/s 掉
+记录：画 tok/s vs 温度 / 时间的曲线，别只报"最好成绩"
+散热：散热片、风冷、导热硅胶；让温度稳住后再测稳态性能
+阈值：设告警温度（如 75℃），超过即降帧 / 缩上下文
+结论：性能表必须区分「峰值」与「稳态（如连续 30 分钟后）」
+<span class="k">→ 端侧要的是稳态性能，不是 30 秒冲刺。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：异常降级——三层降级策略</h3>
+    <p>硬件会出错、会过热、会没电。架构师的功力不在「一切正常时跑多快」，而在<b>「出问题时还能用」</b>。降级要主动设计，不是崩了再说。</p>
+    <div class="board"><span class="k">三层降级（从"降性能"到"保命"）</span>
+
+触发条件              → 降级动作                     → 代价
+─────────────────────────────────────────────────────────────
+NPU 错误 / 超时        → LLM 从 NPU 切 CPU           → decode 8→1.5 t/s
+                        （llama.cpp + GGUF 兜底）
+内存 &gt; 阈值(如 90%)    → 3B 降 1.5B                   → 质量↓，内存 2.0→1.0GB
+温度 &gt; 阈值(如 75℃)    → 降 CV 帧率 + 缩上下文        → 体感变慢
+电量 &lt; 阈值(如 15%)    → 停 CV 检测，只留对话         → 感知能力关闭
+LLM 连续失败 N 次      → 退到纯规则 / 关键词模式       → 无自由对话，保核心功能
+
+<span class="k">三层归纳：</span>
+  第 1 层 硬件降级：NPU → CPU
+  第 2 层 模型降级：3B → 1.5B
+  第 3 层 功能降级：对话 → 规则 / 关键词
+
+<span class="k">原则：</span>每级都要有 ① 触发条件 ② 自动切换 ③ 可观测日志 ④ 恢复条件。
+没有"恢复条件"的降级，是单程票——容易降下去上不来。</div>
+    <p><b>练习（板书填空）：</b>把三级降级的「触发 / 动作 / 代价 / 恢复条件」自己补齐，再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>层级</th><th>触发条件(填)</th><th>降级动作(填)</th><th>代价(填)</th><th>恢复条件(填)</th></tr></thead>
+      <tbody>
+        <tr><td>硬件降级</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>模型降级</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>功能降级</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案（先自己填！）</summary>
+      <p><b>硬件降级：</b>触发＝NPU 报错 / 超时连续 K 次；动作＝LLM 切 CPU（llama.cpp + GGUF）；代价＝decode 从 8 掉到约 1.5 t/s、功耗反升（能效差）；恢复＝NPU 复位成功且探测通过 → 切回 NPU。<br>
+      <b>模型降级：</b>触发＝内存占用 &gt; 90% 或温度 &gt; 75℃ 或电量 &lt; 30%；动作＝3B 换 1.5B；代价＝回答质量下降、内存从 2.0GB 降到 1.0GB；恢复＝内存 / 温度 / 电量回到安全区 → 换回 3B。<br>
+      <b>功能降级：</b>触发＝LLM 连续失败 N 次；动作＝退到纯规则 / 关键词匹配（只保留核心功能，如检测报警）；代价＝失去自由对话与语义理解；恢复＝LLM 健康探针恢复 → 重新启用对话。<br>
+      <b>要点：</b>「恢复条件」最容易漏——不写恢复条件，服务就卡在降级态回不来。这条是 checklist 的必查项。</p>
+    </details>
+  </div>
+
+  <h2>练习（交作业）</h2>
+  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+
+  <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>接入本地 function calling（查天气 + 设闹钟）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>让本地模型能调用至少 2 个本地工具，且调用请求经过本地校验后才执行。</dd>
+      <dt>要掌握</dt><dd>工具 schema 怎么写；模型输出的结构化请求怎么解析；解析失败怎么兜底。</dd>
+      <dt>实操步骤</dt><dd>写 <code>tools_registry.py</code>：定义 <code>get_weather</code>、<code>set_alarm</code> 两个工具（离线假数据即可）；写 <code>agent_demo.py</code>：把工具菜单注入 prompt，让本地模型输出 JSON 调用，本地解析并执行，再把结果回填生成自然语言回复。记录 3 个成功用例 + 1 个非法参数兜底用例。</dd>
+      <dt>检验标准</dt><dd>说「查下天气」能触发 <code>get_weather</code> 并返回离线天气；说「7 点叫我」能触发 <code>set_alarm</code>；乱说一句不会误触发工具。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>搭一个本地轻量 RAG 知识库</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用本地向量库（sqlite-vec / FAISS）对一份自有文档做检索问答，全程离线。</dd>
+      <dt>要掌握</dt><dd>切块（chunk 大小 + 重叠）、向量化、top-k 检索、把检索片段拼进 prompt。</dd>
+      <dt>实操步骤</dt><dd>写 <code>rag_local.py</code>：① 把一份 ≥10 页的文档切块；② 向量化并写入本地向量库；③ 提问时检索 top-3 chunk；④ 拼进 prompt 让本地模型生成带来源的答案。记录索引文件大小（证明 &lt; 50MB 级别）。</dd>
+      <dt>检验标准</dt><dd>问一个只有文档里才有答案的问题，模型能答对并引用出处；问无关问题时不硬编。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>性能测试脚本（四件套）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>写一个可复用的脚本，一次跑出 TTFT / tok/s / 内存峰值 / NPU 利用率。</dd>
+      <dt>要掌握</dt><dd>怎么测首个 token 的时间；怎么稳定统计 tok/s；怎么抓进程内存峰值；怎么读 NPU 利用率。</dd>
+      <dt>实操步骤</dt><dd>写 <code>perf_test.py</code>：固定 prompt 跑 N 次，输出四个指标 + 运行环境（模型/量化/上下文/线程/温度）。内存用进程 RSS 采样取峰值；NPU 用平台工具（如 <code>rknn</code> runtime perf 或系统接口）读取。结果先存 CSV。</dd>
+      <dt>检验标准</dt><dd>脚本一条命令跑完，输出四个数；重复跑两次结果接近（说明测量稳定）。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">4</span><h3>稳定性压测 + 内存泄漏排查（本章新增）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>证明服务能长时间连续推理而内存不涨（对应板书⑥）。</dd>
+      <dt>要掌握</dt><dd>RSS 采样；泄漏判据「每 100 请求增量 &lt; 5MB」；tracemalloc 定位；会话淘汰与 gc。</dd>
+      <dt>实操步骤</dt><dd>写 <code>stability_test.py</code>：连续发 N=1000 请求（短 prompt），每 100 次记录一次 RSS，落盘 <code>stability_rss.csv</code> 并画曲线；若曲线单调上升，用 tracemalloc 抓快照 diff 定位泄漏点并修复，修完再跑一遍对比。</dd>
+      <dt>检验标准</dt><dd>每 100 请求 RSS 增量 &lt; 5MB；修复前后曲线对比明显（修后有平台化/见顶趋势）；能说出这次泄漏的根因。</dd>
+    </dl>
+  </div>
+
+  <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
+  <div class="task pm">
+    <div class="head"><span class="num">1</span><h3>跑全套性能测试并写《性能测试报告》</h3></div>
+    <dl>
+      <dt>目标</dt><dd>在 RK3576（或等效环境）上跑出真实四件套数据，并给出瓶颈判断。</dd>
+      <dt>要掌握</dt><dd>从数据反推瓶颈（带宽 vs 算力）；对照组（不同量化 / 不同上下文）；峰值 vs 稳态。</dd>
+      <dt>实操步骤</dt><dd>写 <code>perf_report.md</code>：① 测试环境；② 四件套实测表（至少 2 组对照，如 Q4 vs Q8 或 2K vs 8K 上下文）；③ 用「权重体积 ÷ 带宽 = 理论 tok/s」做一次推算，指出瓶颈；④ 附一条<strong>稳态</strong>测试（连续跑 30 分钟，记录 tok/s 与温度变化）。</dd>
+      <dt>检验标准</dt><dd>报告能一句话说清「瓶颈在哪、为什么、下一步优化方向是什么」，并区分峰值与稳态性能。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>写架构设计文档（一页纸，核心产出）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书④模板，输出本项目的一页纸架构文档，含 ≥3 条 ADR。</dd>
+      <dt>要掌握</dt><dd>每条 ADR 写清「决策 / 理由 / 备选 / 代价」；指标是可量化的；第 7 段「风险与降级」要对应板书⑧。</dd>
+      <dt>实操步骤</dt><dd>写 <code>architecture.md</code>：七段结构（背景/指标/总览/ADR/数据流/实测/风险）；至少 3 条 ADR（量化方案、框架选型、端云或降级策略）。模型图可用文字分层或代码块画。</dd>
+      <dt>检验标准</dt><dd>别人拿这页文档，不用问你就能讲出每个决策的理由——这是架构师的标准。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>串联 Demo + 演示彩排</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把对话、工具、RAG、断网降级串成一个 3 分钟现场演示。</dd>
+      <dt>要掌握</dt><dd>演示节奏；每个演示点对应哪个架构能力；指标怎么播报。</dd>
+      <dt>实操步骤</dt><dd>写 <code>demo_script.md</code>（照板书⑤填时间轴）+ 把 <code>agent_demo.py</code> 与 <code>rag_local.py</code> 合成一个入口。完整彩排 ≥2 次，掐表 3 分钟内完成，断网场景必须真拔网线验证。</dd>
+      <dt>检验标准</dt><dd>陌生人看一遍就能听懂「这东西强在哪」；断网后对话不崩。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>写《稳定性与异常降级 checklist》（本章核心新增）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>产出一份可直接用于验收的运维 checklist，覆盖稳定性、掉电恢复、功耗发热、异常降级（对应板书⑥⑦⑧）。</dd>
+      <dt>要掌握</dt><dd>降级的四要素（触发 / 动作 / 代价 / 恢复）；看门狗超时怎么定；功耗换算续航；稳态性能。</dd>
+      <dt>实操步骤</dt><dd>写 <code>stability_degradation_checklist.md</code>：分五块——① 长时间推理内存（RSS 斜率、每 100 请求增量判据）；② NPU 复位与看门狗（超时、喂狗、健康探针）；③ 掉电与恢复（原子写、只读挂载、自启、状态恢复）；④ 功耗与发热（功耗估算 <code>Wh ÷ W = 续航</code>、温度阈值、降频记录）；⑤ 异常降级（三层降级决策表，含恢复条件）。每项写清检查点、判断标准、验证方法、当前状态。</dd>
+      <dt>检验标准</dt><dd>别人照这份 checklist 能逐项验证服务是否「可长期运行」；降级表每条都写明了恢复条件（避免降下去回不来）。</dd>
+    </dl>
+  </div>
+
+  <h2>当日产出（要落盘）</h2>
+  <ul class="clean">
+    <li><code>tools_registry.py</code> —— 本地工具定义（查天气 / 设闹钟）。</li>
+    <li><code>agent_demo.py</code> —— function calling 闭环 + 统一 demo 入口。</li>
+    <li><code>rag_local.py</code> —— 本地轻量向量库 RAG（离线检索问答）。</li>
+    <li><code>perf_test.py</code> —— 四件套性能测试脚本。</li>
+    <li><code>perf_report.md</code> —— 性能测试报告（含瓶颈推算与稳态数据）。</li>
+    <li><code>stability_test.py</code> + <code>stability_rss.csv</code> —— 连续推理稳定性压测与内存曲线。</li>
+    <li><code>architecture.md</code> —— 架构设计文档（一页纸 ADR，核心产出）。</li>
+    <li><code>stability_degradation_checklist.md</code> —— 稳定性与异常降级 checklist（核心新增）。</li>
+    <li><code>demo_script.md</code> —— 3 分钟演示剧本。</li>
+  </ul>
+
+  <h2>检验标准（自测）</h2>
+  <ul class="clean">
+    <li>能现场演示：基础对话 + 工具调用 + RAG 检索 + 断网降级，四段全过。</li>
+    <li>能讲清每个架构决策的理由（备选是什么、为什么不要、代价是什么）。</li>
+    <li>能报出四件套实测数据，并用「权重 ÷ 带宽」解释瓶颈，区分峰值与稳态。</li>
+    <li>能说清 function calling 为什么「模型只吐 JSON、执行在本地」。</li>
+    <li>能说清本地 RAG 的索引开销为什么只有几十 MB 级别。</li>
+    <li>能说清内存泄漏的判据（每 100 请求 &lt; 5MB）与排查工具（RSS 采样 / tracemalloc）。</li>
+    <li>能说出看门狗超时怎么定（P99 × 3），以及 NPU 异常如何复位。</li>
+    <li>能算续航（Wh ÷ W），并说出降频对稳态性能的影响。</li>
+    <li>能背出三层降级（NPU→CPU、3B→1.5B、对话→规则）并给出恢复条件。</li>
+  </ul>
+
+  <h2>本节要点回顾</h2>
+  <ul class="clean">
+    <li>function calling 的本质是让模型吐结构化 JSON，而不是吐散文；执行权、校验权、权限始终留在本地代码手里，断网也能用。</li>
+    <li>本地 RAG =「检索」+「生成」两步：离线建库切块向量化，在线检索 top-k 拼进 prompt；难点是把 embedding 模型也端侧化，索引内存控制在几十 MB。</li>
+    <li>性能测试四件套：TTFT、tok/s、内存峰值 RSS、NPU 利用率，一起看才能判断优化方向。</li>
+    <li>端侧 LLM 的瓶颈通常是内存带宽而非算力：每生成 1 token 要读一遍权重，用「权重 ÷ 带宽」即可推算理论 tok/s。</li>
+    <li>架构文档按一页纸 ADR 写七段，核心是「关键决策」——每条写清决策 / 理由 / 备选 / 代价，并让「风险与降级」对应到降级策略。</li>
+    <li>Demo 的价值在于每个演示点映射一个架构能力：对话=推理、工具=编排、RAG=数据、断网=降级。</li>
+    <li>稳定性三件事：内存不泄漏（每 100 请求 RSS 增量 &lt; 5MB）、NPU 不假死（请求级超时 + 复位 + 看门狗）、掉电不失联（原子写 + 只读挂载 + 自启）。</li>
+    <li>功耗决定续航（Wh ÷ W），发热决定稳态性能；性能表要区分峰值与稳态，别只报最好成绩。</li>
+    <li>异常降级分三层：硬件降级（NPU→CPU）、模型降级（3B→1.5B）、功能降级（对话→规则），每层都要有触发条件、自动切换、可观测日志和恢复条件。</li>
+  </ul>
+
+  <h2>RK3576 特别提示</h2>
+  <div class="note">
+    <ul class="clean" style="padding-left:2px">
+      <li><strong>NPU 利用率：</strong>用 RKNN runtime / 平台自带 perf 接口读取；如果 NPU 打不满 100%，多半是<strong>内存带宽喂不饱</strong>，而不是算力不够。</li>
+      <li><strong>内存要留 headroom：</strong>3B int4 权重约 2GB，加上 KV Cache、RAG 索引、运行时，留足余量，别贴着上限跑；长时间跑要盯 RSS 斜率。</li>
+      <li><strong>温度与降频：</strong>长时间推理会触发热降频，tok/s 会掉——性能报告要记录温度与<strong>稳态</strong>成绩，别只报最好成绩。</li>
+      <li><strong>NPU 假死与看门狗：</strong>3576 上 NPU 偶发 hang，务必加请求级超时 + 复位逻辑 + <code>systemd WatchdogSec</code>，否则服务会整体卡住。</li>
+      <li><strong>掉电保护：</strong>eMMC 反复掉电易写坏，状态落盘用原子写 + sqlite(WAL)，模型与配置尽量只读挂载。</li>
+      <li><strong>降级链路要实测：</strong>NPU→CPU、3B→1.5B、对话→规则三级降级，演示时最好现场触发一级（如拔网线/限内存），证明「降级真的能自动发生」。</li>
+      <li><strong>工具/RAG 全程离线：</strong>这正是端侧相对云端的最大卖点，演示时一定要真拔网线验证。</li>
+      <li>带宽口径统一记住：RK3576 LPDDR5-4800 峰值 ≈19GB/s，NPU 独占 12~16GB/s，产品场景 7~11GB/s。</li>
+    </ul>
+  </div>
+
+  <div class="footer">听懂讲义 → 填板书模板 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+</div>
+</body>
+</html>

@@ -3,330 +3,404 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 14 章 · 简历与面试准备（讲义 + 作业）</title>
+<title>第 14 章：性能调优与精度评估</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html">第 4 章</a>
-    <a href="ch05.html">第 5 章</a>
-    <a href="ch06.html">第 6 章</a>
-    <a href="ch07.html">第 7 章</a>
-    <a href="ch08.html">第 8 章</a>
-    <a href="ch09.html">第 9 章</a>
-    <a href="ch10.html">第 10 章</a>
-    <a href="ch11.html">第 11 章</a>
-    <a href="ch12.html">第 12 章</a>
-    <a href="ch13.html">第 13 章</a>
-    <a href="ch14.html" class="active">第 14 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html" class="active">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 14 章：简历与面试准备</h1>
-  <p class="lead"><strong>章节目标：</strong>把 15 年经验 + 端侧 AI 项目，<b>翻译成招聘方听得懂的「架构师语言」</b>——简历能过筛、话术能脱口、讲解稿能讲 5 分钟。这是冲刺计划的收口章。</p>
+  <h1>第 14 章：性能调优与精度评估</h1>
+  <p class="lead"><strong>章节目标：</strong>从「能跑」到「跑得快」——掌握 NPU 核心数 / batch / 量化配置 / CPU+NPU 混合 / 投机解码几大手段，能在给定延迟目标下<b>调出达标配置</b>，并说清每一步为什么有效。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
-    <span class="chip">产出目录：ch14-resume-interview</span>
+    <span class="chip">产出目录：ch14-perf</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把经验包装、简历模板、5 话术、讲解稿、量产向问答看懂。</li>
-    <li><strong>第 2 步 填模板：</strong>用讲义给的简历条目模板和讲解稿模板，先填一版草稿。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」改成终稿并做模拟面试。</li>
-    <li><strong>第 4 步 自测：</strong>对着「检验标准」，5 句核心话术必须脱口而出才算毕业。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把性能指标和五大优化手段看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的配置矩阵 / 加速比手算自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」跑配置矩阵、出调优报告。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>技术你已经会了，这章解决「<b>怎么把自己卖出去</b>」。你的优势是 15 年嵌入式，短板是叙事——把「老」讲成「稳」，把「底层」讲成「架构底座」。<span class="key">招聘方买的不是你的过去，是你对目标岗位的匹配度。</span></p>
+    <p>性能调优不是「多试几次碰运气」，而是<b>先建指标、再测基线、然后一次只动一个变量</b>。做端侧系统设计要能说清：这个配置为什么快、瓶颈在哪、还有多少空间。</p>
+    <div class="callout"><strong>本章要能四件事：</strong>① 说清看哪些性能指标；② 会建基线和算 Amdahl 上限；③ 会跑配置矩阵找最优；④ 给一个延迟目标，<span class="key">能反推出该动哪些旋钮</span>。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：15 年经验「重新包装」</h3>
-    <p>别把 15 年经验写成一条长河，要写成「<b>一条通往端侧 AI 架构师的因果链</b>」。</p>
-    <div class="board"><span class="k">15 年经验重新包装公式</span>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：性能指标体系（先会量，才会调）</h3>
+    <p>「快」是个模糊词。端侧对话至少拆成两组指标：<b>首响（prefill）</b>和<b>吐字（decode）</b>，二者瓶颈完全不同。</p>
+    <div class="board"><span class="k">五个必测指标</span>
 
-  过去我做了什么 ：嵌入式底层 / 驱动 / 系统集成（15 年）
-  现在我要讲的   ：<span class="g">系统架构 + 端侧 AI 落地</span>
-  <span class="k">桥接逻辑（核心）</span>：
-  「15 年嵌入式让我比纯算法背景的人更懂<span class="g">硬件边界、
-   内存、功耗、量产</span>——而端侧 AI 恰恰吃这些。」
+① TTFT（首 token 时延）  用户按下回车到第一个字出现
+     ≈ prompt_tokens ÷ prefill 吞吐(tok/s)
+     受算力影响大（prefill 是算力瓶颈）
 
-  <span class="g">强化：</span>架构决策、边界权衡、量产落地、跨团队协作
-  <span class="r">弱化：</span>纯算法调参、发论文、只会写驱动
+② decode tok/s（吐字速度）
+     生成阶段每秒出多少 token
+     <span class="g">受带宽影响大</span>（每 token 读一遍全部权重）
 
-<span class="k">一句话人设：</span>「懂硬件的 AI 架构师，能把模型真正落到产品上。」</div>
-    <div class="callout"><b>一句话结论：</b>经验包装的关键是<b>把「年限」翻译成「匹配度」</b>——不是「干了 15 年」，而是「15 年硬件功底正好是端侧 AI 落地的稀缺能力」。</div>
-    <p>目标岗位与关键词，简历里必须自然出现（不堆砌）：</p>
-    <div class="board"><span class="k">岗位关键词（自然嵌入简历与话术）</span>
-  · 端侧 AI 架构师
-  · 边缘 AI 架构师
-  · AI 系统架构师
-<span class="g">配套技术词：</span>RKNN / RK3576 / 量化(int4/int8) / KV Cache /
-  内存带宽 / 端云协同 / RAG / function calling / BOM / 功耗</div>
+③ 内存占用（RSS / 模型常驻）
+     free -m / nvidia-smi 类比 → 端侧用 free、/proc/self/status
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：简历项目条目模板（STAR）</h3>
-    <p>项目条目不要写成「负责了什么」，要写成 <b>问题 / 方案 / 数据 / 结果</b>四段，每段带数字、能扛追问。</p>
-    <div class="board"><span class="k">简历项目条目模板（STAR）</span>
+④ NPU 利用率
+     cat /sys/kernel/debug/rknpu/load   （看到百分比）
 
-项目名：RK3576 端侧 AI 语音助手（离线可演示）
-角色  ：端侧 AI 架构师 / 负责人
-时间  ：2024.xx - 2025.xx
-技术  ：RK3576 / 1.5B~3B int4 / RKNN / 本地 RAG / function calling
+⑤ 带宽利用率 = decode_tok/s × 模型真实GB ÷ 有效带宽上限（NPU 独占 12~16 GB/s）
+     判断"是不是带宽瓶颈"的核心尺子
 
-· <span class="k">问题(S)</span>：产品要求离线可用、隐私不出端、成本控制在 $50，
-          云端方案延迟高且断网即废。
-· <span class="k">方案(A)</span>：端侧跑 1.5B~3B int4 做意图识别与简单对话，
-          复杂推理走云端；用 RKNN 吃 NPU；接本地 RAG +
-          function calling；设计断网降级到本地 1.5B。
-· <span class="k">数据(M)</span>：TTFT ___ms；生成 <span class="g">3.5~5.5 tok/s</span>（产品；NPU 独占 6~8）；内存峰值约 <span class="g">2GB</span>；
-          BOM ≈ <span class="g">$42</span>；平均功耗 2.5W → 续航 <span class="g">8h</span>。
-· <span class="k">结果(R)</span>：___（如：完成端到端 demo 并演示通过 / 成本较云端
-          方案降 ___% / 断网可用率 100%）。
+<span class="k">一句话：新用户感受 TTFT，长时间对话感受 decode tok/s。</span></div>
 
-写法要求：每行动词开头、带数字、≤5 行、经得起追问。</div>
-    <div class="callout"><b>一句话结论：</b>项目条目 = <b>STAR 四段 × 硬数字</b>；没有数字的简历条目，面试官会自动降权。</div>
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：基线 + Amdahl（优化前先算天花板）</h3>
+    <p>没基线就没优化。先测「什么都不改」的原始数字，再算理论加速上限，避免白忙。</p>
+    <div class="board"><span class="k">基线表（先填原始配置）</span>
+配置              TTFT    decode   内存     NPU   带宽利用率
+baseline          1200ms  6.0 t/s  2.1GB   70%   75.0%
+...
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：5 句核心话术（必须脱口而出）</h3>
-    <p>这 5 句覆盖面试官最常问的五个技术点。<b>先背结论，再补推理。</b></p>
-    <div class="board"><span class="k">① 内存估算</span>
-  3B int4 约 <span class="g">2GB</span>，RK3576 带宽是 LPDDR5-4800 的 <span class="k">19GB/s</span> 峰值、NPU 独占 <span class="k">12~16</span>、产品 <span class="k">7~11GB/s</span>；
-  产品场景只有 <span class="r">3.5~5.5 tok/s</span>（NPU 独占 6~8），
-  瓶颈在<span class="r">带宽</span>。
+<span class="k">Amdahl 定律：先看瓶颈占总时间多少</span>
+加速比 = 1 / ( (1−p) + p/S )
+   p = 可优化部分占比， S = 该部分加速倍数
 
-<span class="k">② 框架选型</span>
-  RK3576 用 <span class="g">RKNN</span>（原生吃 NPU）；
-  跨平台验证用 <span class="g">llama.cpp + GGUF</span>。
+<span class="g">例：耗时 80% 在量化可加速的 NPU 算子，若把它加速 4 倍</span>
+  加速比 = 1 / (0.2 + 0.8/4) = 1 / 0.4 = <span class="g">2.5×</span>
+  → 就算把 NPU 部分优化到极限，整体最多 2.5 倍，别指望 5 倍
 
-<span class="k">③ KV Cache</span>
-  3B 模型 8K 上下文 KV Cache 约<span class="g">几百 MB</span>；
-  3576 内存够，但要注意<span class="r">争带宽</span>。
+<span class="k">结论：先优化占比最大的那部分，收益最大。</span></div>
+    <div class="callout"><strong>实践要点：</strong>先测 baseline 和 Amdahl 上限，确认瓶颈占比，再决定投入——<span class="key">不做没有上界的优化</span>。</div>
 
-<span class="k">④ 架构决策</span>
-  端侧跑 <span class="g">1.5B~3B int4</span> 做意图识别和简单对话，
-  复杂推理走<span class="g">云端</span>，断网降级<span class="g">本地 1.5B</span>。
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：三旋钮实测矩阵（核心实操）</h3>
+    <p>三大旋钮：<b>量化配置</b>、<b>NPU 核心数</b>、<b>batch size</b>。做法：固定其他，一次动一个，填进矩阵。</p>
+    <div class="board"><span class="k">旋钮一：量化配置</span>
+w4a16  最省内存、最快，精度略降   ← 端侧默认起点
+w8a16  精度更好，慢约 15~30%
+w8a8   最稳，LLM 上未必最快
 
-<span class="k">⑤ 成本权衡</span>
-  RK3576 比 3588 便宜，带宽低些但够用，
-  适合<span class="g">中端端侧 AI 产品</span>。</div>
-    <div class="callout"><b>一句话结论：</b>这 5 句是面试的「基本盘」——<b>内存估算、框架选型、KV Cache、架构决策、成本权衡</b>，每句都要能在 3 秒内说出口并接得住追问。</div>
+<span class="k">旋钮二：NPU 核心数 num_npu_core</span>
+<span class="r">3576 单核，固定 1（没得调）</span>；
+3588 三核，实测 1→2 核近线性、2→3 核收益递减（带宽抢用）。
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：项目讲解稿模板（5 分钟口播）</h3>
-    <p>面试让你「讲讲你的项目」时，用这条 5 分钟线，别自由发挥。</p>
-    <div class="board"><span class="k">项目讲解稿模板（5 分钟）</span>
-
-① 30s  背景  ：产品是什么 + 约束（离线/隐私/成本/功耗）
-② 60s  架构  ：分层图（应用 / 编排 / 推理 / 硬件）+ 端云分工
-③ 60s  关键决策：3 条 ADR（量化 / 框架 / 端云降级）——讲"为什么不选另一个"
-④ 60s  数据  ：四件套实测 + BOM + 续航
-⑤ 30s  结果与反思：达成什么；如果重来会改什么（体现复盘能力）
-
-<span class="g">节奏：结论先行 → 再给推理 → 留一个坑给面试官问。</span>
-<span class="r">禁忌：从头讲历史、念 PPT、堆术语不解释。</span></div>
-    <div class="callout"><b>一句话结论：</b>讲解稿 = <b>结论先行 + 三段 ADR + 硬数据 + 一句反思</b>；5 分钟内让面试官记住「这是个能落地、会权衡的架构师」。</div>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：模拟面试流程</h3>
-    <p>自己练不出来，必须「有人问、有反馈」。按下面流程跑至少一轮完整模拟。</p>
-    <div class="board"><span class="k">模拟面试流程（60 分钟）</span>
-
-第一轮 自我介绍   ：2 分钟，练「15 年 → 端侧 AI 架构师」的桥接句
-第二轮 项目追问   ：5 句核心话术逐条被问，要求脱口出 + 接得住追问
-第三轮 架构设计   ：随机给需求，10 分钟出一页纸方案（用第 13 章模板）
-第四轮 反问问面试 ：准备 3 个高质量反问（技术栈/团队/产品形态）
-
-<span class="k">反馈表：</span>每题记「秒答 / 卡顿 / 答不出」，卡住的当场补进话术本。
-<span class="g">目标：一轮下来，「卡顿」项清零。</span></div>
-    <div class="callout"><b>一句话结论：</b>模拟面试的价值在<b>暴露卡点</b>；把每个卡点补进话术本，直到能连续答完三轮不卡。</div>
-
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：面试问答准备（量产 / 架构师向高频）</h3>
-    <p>前面 5 句话术是「技术点」；量产和架构师面会往「<b>取舍、稳定性、成本</b>」三个方向深挖。这三类问题不能只背结论，要能讲出<span class="key">为什么</span>。</p>
-    <div class="board"><span class="k">面试问答准备（三组高频，背结论 + 补推理）</span>
-
-<span class="k">(a) 选型 trade-off</span>
-Q：为什么选 3B 不选 1.5B？
-A：看任务难度。1.5B 够「意图识别 + 简单多轮」，更省内存带宽
-   （int4 ≈1GB、产品 7~11 tok/s、NPU 独占 12~16）；3B 多轮 / 工具调用更稳，
-   但 int4 ≈2GB、带宽翻倍，产品只有 <span class="r">3.5~5.5 tok/s</span>。
-   要「稍复杂对话 + function calling 准确率」→ 3B；
-   只要「唤醒 + 意图」→ 1.5B 性价比更高。
-
-Q：3B 会内存溢出吗？怎么防？
-A：3B int4 权重 2GB + KV(4K) 0.3GB + 运行时 0.5GB ≈ <span class="g">2.8GB</span>；
-   4GB 设备再叠 CV/RAG 就紧张，8GB 安全。
-   风险：KV 随上下文线性涨（8K 翻倍）+ 并发叠加 → OOM。
-   对策：限 max_context、KV 量化 / 分页、并发前预检可用内存、留 1GB 水位。
-
-Q：降级边界怎么定？
-A：写死阈值，不靠感觉——可用内存 &lt; 阈值 → 缩上下文 →
-   再不行 <span class="g">3B → 1.5B</span> → 最后只保 唤醒 + ASR + 本地工具。
-
-<span class="k">(b) 稳定性</span>
-Q：长跑内存泄漏怎么发现 / 处理？
-A：24h / 72h 压测看 RSS 曲线是否单调上升。
-   常见泄漏源：KV Cache 未复用 / 未释放、中间张量、句柄 / 日志、RAG 索引常驻增长。
-   对策：KV 复用与定期释放、内存水位告警、watchdog + 推理进程隔离重启。
-
-Q：NPU 异常复位怎么办？
-A：加推理超时检测（&gt; 阈值判卡死）→ 释放 RKNN context →
-   重新 init → 重试 N 次 → 仍失败降级到 CPU 或转云；
-   配合看门狗监控 NPU 状态寄存器并记录日志定位。
-
-<span class="k">(c) 成本</span>
-Q：DDR 怎么选？带宽和成本怎么权衡？
-A：容量（4/6/8GB）× 位宽（32/64bit）× 速率（→ 带宽）共同决定成本与 tok/s。
-   带宽升 → 推理快 → BOM 涨。
-   只跑 1.5B：<span class="g">LPDDR4X 4GB</span> 足够、最省；
-   要 3B / 多模型并发：上 <span class="g">LPDDR4X/5 8GB</span>，带宽是瓶颈、值得花。
-
-Q：BOM 里内存占多少？
-A：本地语音助手里 DDR ≈ <span class="g">$6 / $42 ≈ 14%</span>，
-   是仅次主控的第二大件、也是最灵敏的成本杠杆。</div>
-    <div class="callout"><b>一句话结论：</b>三类问题一条主线——<b>选型看任务、稳定性靠压测与降级、成本盯 DDR 与带宽</b>；每个答案都要能补一句「为什么不选另一个」。</div>
-
-    <h3><span class="tag-lesson">讲解</span>7. 板书填空：DDR 选型矩阵（填完展开答案）</h3>
-    <p>给你三块内存，判断各能跑什么模型、适合什么产品（容量 / 带宽越大越贵）。</p>
+<span class="k">旋钮三：batch size（并发数）</span>
+单路 bandwidth-bound，多路可"摊薄"权重读取：
+  batch=1  → 6.0 t/s，带宽利用率 75.0%
+  batch=4  → <span class="g">7.6 t/s（合计）</span>，利用率 <span class="g">95%</span>
+  batch=8  → 7.9 t/s（合计），利用率 98%，但单路 TTFT 变差
+<span class="k">batching 提吞吐、不降延迟——适合多用户服务端场景。</span></div>
+    <p><b>练习（板书填空）：</b>把 batch 提升后的带宽利用率算出来，再展开答案。</p>
     <table class="tight">
-      <thead><tr><th>选型</th><th>容量 / 类型</th><th>3B int4 可行？（填）</th><th>适合产品（填）</th></tr></thead>
+      <thead><tr><th>batch</th><th>合计 tok/s</th><th>模型(GB)</th><th>有效带宽(GB/s)</th><th>利用率(填)</th></tr></thead>
       <tbody>
-        <tr><td>A</td><td>4GB LPDDR4X</td><td class="fill">?</td><td class="fill">?</td></tr>
-        <tr><td>B</td><td>8GB LPDDR4X</td><td class="fill">?</td><td class="fill">?</td></tr>
-        <tr><td>C</td><td>8GB LPDDR5（带宽更高）</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>1</td><td>6.0</td><td>2.0</td><td>12.0</td><td class="fill">?</td></tr>
+        <tr><td>2</td><td>7.0</td><td>2.0</td><td>14.0</td><td class="fill">?</td></tr>
+        <tr><td>4</td><td>7.6</td><td>2.0</td><td>15.2</td><td class="fill">?</td></tr>
+        <tr><td>8</td><td>7.9</td><td>2.0</td><td>15.8</td><td class="fill">?</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案（先自己填！）</summary>
-      <div class="board">A 4GB LPDDR4X：3B 勉强（≈2.8GB），叠 CV/RAG 易 OOM
-  → 适合<span class="g">纯 1.5B 语音助手</span>，成本最低
-B 8GB LPDDR4X：3B + 轻并发安全
-  → 适合<span class="g">3B 语音助手 / 中端边缘盒子</span>
-C 8GB LPDDR5 ：同容量带宽更高，3B tok/s 更好
-  → 适合<span class="g">3B + 多模型并发</span>的产品，BOM 更高
-
-<span class="k">结论：</span>先定「模型规模 + 是否并发」，再反推内存容量与带宽；
-1.5B 不必上 8GB，3B / 并发才值得加钱买带宽。</div>
+      <p>利用率 = 有效带宽 ÷ 16：1→<b>75.0%</b>，2→<b>87.5%</b>，4→<b>95.0%</b>，8→<b>98.8%</b>。<br>
+      规律：batch 越大越接近带宽上限，但收益递减；到 8 路只多 0.3 t/s，成本（内存×8、TTFT 变差）不划算——这就是「甜点」在哪的判断。</p>
     </details>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：CPU + NPU 混合调度</h3>
+    <p>NPU 不是万能的：有些算子 NPU 不支持或支持差（如某些动态 shape、特殊激活、非标准 attention）。这些会<b>回退（fallback）到 CPU</b>，一旦掉 CPU 就会拖慢整体。</p>
+    <div class="board"><span class="k">混合调度三原则</span>
+
+① 能塞 NPU 的就塞 NPU   —— 主体矩阵乘全部 NPU 化
+② 掉 CPU 的算子要盯住   —— 看 build 日志的 "not supported"
+③ 减少 NPU↔CPU 数据搬运 —— 搬运 = 额外带宽 + 时延
+
+<span class="k">判断是否掉 CPU：</span>
+  跑推理时 top 看主进程 CPU% —— 若 CPU 长期 100%+
+  且 NPU 利用率低 → 多半有算子掉 CPU
+
+<span class="g">典型分工：
+  Prefill 大矩阵乘  → NPU（算力密集）
+  sampling/采样     → CPU（轻量、控制逻辑）
+  tokenizer         → CPU</span>
+<span class="k">目标：让 NPU 干重活、CPU 干调度，别让 CPU 抢带宽。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：投机解码（speculative decoding）</h3>
+    <p>思路：用<b>小模型（draft）</b>先猜几个 token，再用<b>大模型（target）</b>一次验证。猜对了就白赚——因为大模型一次前向能确认多个 token，分摊了权重读取，<b>正好打带宽瓶颈</b>。</p>
+    <div class="board"><span class="k">参数：</span>γ = 每轮猜几个；α = 猜中率(acceptance rate)；r = 小/大模型耗时比
+
+<span class="k">手算（α=0.8, γ=4, r=0.1）</span>
+每轮平均猜中数 = α(1−α^γ)/(1−α)
+              = 0.8 × (1 − 0.8⁴) / 0.2
+              = 0.8 × (1 − 0.4096) / 0.2
+              = 0.8 × 0.5904 / 0.2 = <span class="g">2.3616</span>
+每轮总产出 = 猜中 + 1（大模型兜底）= 1 + 2.3616 = <span class="g">3.36 token</span>
+每轮耗时   = γ·r + 1 = 4×0.1 + 1 = 1.4（相对大模型单次前向）
+
+加速比 = 3.36 / 1.4 = <span class="g">≈ 2.4×</span>
+
+<span class="k">结论：猜中率 α 越高、小模型越便宜(r 越小)，加速比越大。
+α 太低或小模型太重 → 反而变慢，要果断关掉。</span>
+
+<span class="k">llama.cpp 支持：</span>--model big.gguf --model-draft small.gguf
+（-md 指定草稿模型；--draft-max 控制 γ）</div>
+    <div class="callout"><strong>为什么端侧特别值：</strong>decode 是带宽瓶颈，投机解码让一次权重读取服务多个 token，<span class="key">本质是提升带宽利用率</span>——和第 4 章那把尺子对上了。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：找最优组合（配置矩阵 + 帕累托）</h3>
+    <div class="board"><span class="k">实验矩阵（示例，一次动一个变量）</span>
+#  quant  core  batch  TTFT    decode  内存   带宽利用
+1  w4a16   1     1      1200ms  6.0 t/s 2.1GB  75.0%
+2  w8a16   1     1      1300ms  5.0 t/s 2.4GB  62.5%
+3  w4a16   1     4      1500ms  7.6 t/s 2.9GB  95.0%
+4  w4a16   1     8      1700ms  7.9 t/s 3.6GB  98.8%
+5  w4a16+投机 1  1      900ms   7.2 t/s 2.5GB  90.0%
+
+<span class="k">选型原则：按目标选，不是越大越好</span>
+  要低延迟单路对话     → 选 5（投机解码）：TTFT 低、tok/s 高
+  要多用户高吞吐       → 选 3（batch=4）：最平衡
+  要极致精度           → 选 2（w8a16）：慢但准
+  <span class="g">在"满足延迟目标"的候选里，挑内存最小的那个</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：给延迟目标反推配置</h3>
+    <div class="board"><span class="k">任务：3B int4，目标 decode ≥ 6 tok/s（NPU 独占），内存 ≤ 4GB</span>
+
+① 理论天花板（NPU 独占）：16 ÷ 2.0 = 8.0 t/s  → 目标 6 可达，需高利用率
+② 目标利用率：6 × 2.0 ÷ 16 = <span class="g">75%</span>
+③ 单路(w4a16) 6.0 t/s = 75%，刚好达标；产品场景会掉到 3.5~5.5
+④ 手段：
+   - batch=4 → 7.6 t/s（95%）✅ 内存 2.9GB（≤4GB）；单路 TTFT 变差
+   - 投机解码 → 7.2 t/s（90%），单路低延迟优先
+   - batching + 投机 组合 → 冲 95%+
+⑤ 结论：<span class="g">先保单路达 6 tok/s，再用 batch 或投机解码冲利用率</span>
+
+<span class="k">给定延迟目标时的调优路径：</span>
+先算理论天花板确认目标可达 → 再算需要的带宽利用率 →
+若单路不够，就上 batch（提吞吐）或投机解码（摊薄权重读取）→
+在满足目标的方案里挑内存最小、最稳的那个。</div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：精度评估闭环（量化后第一件事）</h3>
+    <p>完成转换 / 量化后，<b>第一件事不是压性能，而是评精度</b>。速度再快，答案错了就是废品。评估要先定指标、再定流程、最后定上线门槛——一步都不能省。</p>
+    <div class="board"><span class="k">按任务选指标（选错指标 = 白评）</span>
+
+<span class="g">LLM / 语言模型</span>   → PPL（困惑度，越低越好）
+                       + 抽样人肉问答（有没有事实错误）
+<span class="g">检测 / 分割</span>       → mAP（IoU 阈值下的平均精度）
+                       + mIoU（分割）
+<span class="g">分类</span>            → Top-1 / Top-5 准确率
+<span class="g">回归 / 关键点 / 深度</span> → RMSE / MAE（越小越好）
+
+<span class="k">一句话：语言看 PPL，检测看 mAP，回归看 RMSE/MAE。</span>
+别用「感觉变笨了」判断——那是感觉，不是指标。</div>
+
+    <div class="board"><span class="k">评估流程（固定验证集是关键）</span>
+① 固定验证集：量化前就切好一份<b>不参与校准</b>的测试集，
+   之后每次量化都用同一份——可比才有意义。
+② 跑原始模型：先测 FP / 原始精度 baseline。
+③ 跑量化模型：同验证集、同指标、同脚本。
+④ 前后对比：算 Δ（绝对差 + 相对涨幅）。
+⑤ 判定：对照门槛决定「上线 / 调优 / 回退」。
+
+<span class="k">门槛参考</span>
+  PPL 涨幅 &lt;5% / mAP 掉点 &lt;1pt / RMSE 涨幅 &lt;5% → 可上线
+  超门槛 → 先补校准集（板书⑩），不行再上 QAT（板书⑩）</div>
+    <div class="callout"><strong>纪律：</strong><span class="key">校准集和验证集必须分开。</span>拿校准集去评精度 = 自己给自己出题还提前看答案，涨幅必然好看，线上必崩。</div>
+
+    <h3><span class="tag-lesson">讲解</span>9. 板书⑨：量化误差分析（找出塌掉的那一层）</h3>
+    <p>精度不达标时，别急着换方案——先<b>定位误差出自哪一层</b>。量化误差是逐层累积的，找到「罪魁层」，往往只改一个配置就能救。</p>
+    <div class="board"><span class="k">两种定位粒度</span>
+
+<span class="g">逐层（per-layer）</span>
+  逐层把量化张量与原始张量比对：
+    · 相对误差 = ‖W_q − W‖ / ‖W‖
+    · 余弦相似度 = cos(W_q, W)
+  找误差突然变大的那一层 / 那一段（常是 attention 输出、
+  FFN 第二个矩阵、LayerNorm 附近）。
+
+<span class="g">逐通道（per-channel）</span>
+  对每层再按输出通道拆，找「离群通道」：
+    · 某通道 scale 被 outlier 撑大 → 同层其他通道全被压平
+    · 这正是第 2 章 outlier 陷阱的「逐层放大版」
+
+<span class="k">判读</span>
+  · 单层相对误差 &gt; 10% → 该层敏感，优先保精度；
+  · 误差集中在个别通道 → 该层需要 group-wise 或提高位宽。</div>
+    <div class="board"><span class="k">误差定位后的三板斧</span>
+① 该层单独保精度：敏感层抬到 w8a16 / 保持 fp16；
+② 缩小 group_size：让 outlier 关进更小的组（回顾第 2 章）；
+③ 换 quantized_algorithm：normal → mmse / kl_divergence，
+   让标定更贴合分布。</div>
+
+    <h3><span class="tag-lesson">讲解</span>10. 板书⑩：校准集工程 + PTQ/QAT 验证</h3>
+    <p>精度问题的根治手段只有两个：<b>校准集做对</b>，或 <b>PTQ 不够就上 QAT</b>。先榨干校准集，再决定要不要动 QAT——QAT 成本高得多。</p>
+    <div class="board"><span class="k">校准集工程（覆盖真实分布）</span>
+
+  · 分布对齐：用线上真实输入，不用随机数（第 4 章的校准集三条军规）。
+  · 分层覆盖：长度（短/中/长）、任务（问答/翻译/代码）、
+    边界样本（超长、含数字、含专有名词）都要有。
+  · 规模：LLM 100~500 条；太少统计不稳，太多收益递减。
+  · 一致性：校准集与上线输入同源、同预处理管线，
+    否则「校准的世界」和「运行的世界」是两回事。
+  · 可复现：固定随机种子与采样脚本，存 calib/prompts.txt。</div>
+
+    <div class="board"><span class="k">PTQ vs QAT</span>
+<span class="g">PTQ（训练后量化）</span>——首选
+  不训练，只校准；快、成本低。
+  覆盖 80% 场景；w4a16 / w8a8 通常够用。
+<span class="g">QAT（量化感知训练）</span>——PTQ 不行才上
+  训练时模拟量化误差，让模型「学会」在量化下工作；
+  精度最接近原始，但要重训 + 数据 + 算力。
+  适合：PTQ 后仍超门槛、且该模型值得投入。</div>
+
+    <div class="board"><span class="k">验证闭环（PTQ / QAT 都要走）</span>
+  校准集 → 量化 → <b>固定验证集评测</b> → 对比 baseline →
+    达标 → 上线
+    不达标 → 换校准集重来 → 仍不达标 → 上 QAT → 再评测
+  <span class="k">每一版量化都留一份评测记录，可追溯到「哪一版达标」。</span></div>
+    <div class="callout"><strong>顺序别乱：</strong>先 PTQ + 好校准集（性价比最高），实在过不了门槛再上 QAT。<span class="key">一上来就 QAT = 用最贵的办法解决最便宜的问题。</span></div>
   </div>
 
   <h2>练习（交作业）</h2>
-  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+  <p class="lead">讲义看懂后动手跑配置矩阵。做完贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>简历项目条目（STAR，核心产出）</h3></div>
+    <div class="head"><span class="num">1</span><h3>性能指标采集脚本</h3></div>
     <dl>
-      <dt>目标</dt><dd>用板书②模板，把 RK3576 端侧 AI 项目写成一条 ≤5 行的 STAR 条目。</dd>
-      <dt>要掌握</dt><dd>问题/方案/数据/结果四段齐全；每行动词开头、带数字。</dd>
-      <dt>实操步骤</dt><dd>写 <code>resume-project.md</code>：STAR 四段 + 岗位关键词自然嵌入（端侧 AI 架构师 / 边缘 AI 架构师 / AI 系统架构师）。数据段填真实或标注「待补」的指标（TTFT/tok/s/内存/BOM/续航）。</dd>
-      <dt>检验标准</dt><dd>陌生人读 30 秒能说出「他做了什么、结果多好」；每个数字都能被追问并答得出。</dd>
+      <dt>目标</dt><dd>写一个脚本，一次跑出 TTFT / decode / 内存 / NPU / 带宽利用率五项。</dd>
+      <dt>要掌握</dt><dd>五项指标的取法（<code>free</code>、<code>/sys/kernel/debug/rknpu/load</code>、计时首 token）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>bench.sh</code>：跑一次推理，用 <code>date +%s.%N</code> 计 TTFT，统计 decode tok/s，抓内存与 NPU load，输出 <code>baseline.txt</code>。</dd>
+      <dt>检验标准</dt><dd>脚本一条命令出五项数字，重跑误差在合理范围。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>5 句核心话术本</h3></div>
+    <div class="head"><span class="num">2</span><h3>基线 + Amdahl 上限计算</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书③的 5 句话术扩展成「结论 + 一句推理 + 一个可延伸的点」。</dd>
-      <dt>要掌握</dt><dd>内存估算 / 框架选型 / KV Cache / 架构决策 / 成本权衡 的完整回答逻辑。</dd>
-      <dt>实操步骤</dt><dd>写 <code>core-answers.md</code>：5 个问题各写标准答案（先背的那句）+ 补充推理（如带宽推算过程）+ 可能的追问与应对。</dd>
-      <dt>检验标准</dt><dd>每条 3 秒内说出结论，并能展开 30 秒讲清推理。</dd>
+      <dt>目标</dt><dd>建基线表，并用 Amdahl 算出理论加速上限。</dd>
+      <dt>要掌握</dt><dd>Amdahl 公式；如何估「可优化部分占比 p」。</dd>
+      <dt>实操步骤</dt><dd>把 baseline 数字填表；假设 NPU 部分占 80%、能加速 4 倍，手算上限写入 <code>amdahl.md</code>。</dd>
+      <dt>检验标准</dt><dd>能说出「整体最多几倍」并解释为什么不是叠加。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>自我介绍稿（2 分钟）</h3></div>
+    <div class="head"><span class="num">3</span><h3>CPU+NPU 分工排查</h3></div>
     <dl>
-      <dt>目标</dt><dd>写一段 2 分钟自我介绍，完成「15 年经验 → 端侧 AI 架构师」的桥接。</dd>
-      <dt>要掌握</dt><dd>桥接逻辑：硬件功底 → 端侧 AI 落地稀缺能力；弱化算法、强化架构。</dd>
-      <dt>实操步骤</dt><dd>写 <code>self-intro.md</code>：结构 = 现状定位 + 15 年经验提炼 + 端侧 AI 项目 + 求职意向（三类岗位关键词）。掐表控制在 2 分钟。</dd>
-      <dt>检验标准</dt><dd>读一遍，听者能立刻记住「懂硬件的 AI 架构师」这个人设。</dd>
+      <dt>目标</dt><dd>找出哪些算子在 CPU 上跑（fallback）。</dd>
+      <dt>要掌握</dt><dd>怎么从 build 日志 / top 判断掉 CPU；为什么搬运要避免。</dd>
+      <dt>实操步骤</dt><dd>跑推理，<code>top</code> 记录主进程 CPU%；翻 build 日志找 "not supported"；写 <code>cpu_npu_split.md</code> 列出候选 fallback 算子。</dd>
+      <dt>检验标准</dt><dd>能指出至少 1 个疑似掉 CPU 的算子，并说清它对带宽/时延的影响。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>项目讲解稿（5 分钟口播，核心产出）</h3></div>
+    <div class="head"><span class="num">1</span><h3>配置矩阵实测（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>按板书④模板，写一份 5 分钟项目讲解稿，并掐表彩排。</dd>
-      <dt>要掌握</dt><dd>结论先行；三段 ADR；硬数据；一句反思。</dd>
-      <dt>实操步骤</dt><dd>写 <code>project-pitch.md</code>：五段结构（背景/架构/关键决策/数据/结果反思），每段标时长；照稿口播 ≥2 遍，确保 5 分钟内、无口头禅。</dd>
-      <dt>检验标准</dt><dd>不看稿能讲出 80%；面试官追问任意一段都能展开。</dd>
+      <dt>目标</dt><dd>跑通板书③⑥的矩阵：量化 × batch（× 投机），填满性能表。</dd>
+      <dt>要掌握</dt><dd>「一次只动一个变量」；batch 对吞吐/带宽利用率的影响。</dd>
+      <dt>实操步骤</dt><dd>至少跑 5 组配置，用 <code>bench.sh</code> 采集，写入 <code>perf_matrix.md</code>（含 TTFT/decode/内存/带宽利用率列）。</dd>
+      <dt>检验标准</dt><dd>表里能看出「batch 越大利用率越高、收益递减」的趋势。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>模拟面试 + 反馈表</h3></div>
+    <div class="head"><span class="num">2</span><h3>投机解码验证</h3></div>
     <dl>
-      <dt>目标</dt><dd>约人（或自测录音）跑一轮 60 分钟模拟面试，记录卡点。</dd>
-      <dt>要掌握</dt><dd>五句核心话术脱口；随机需求出方案；高质量反问。</dd>
-      <dt>实操步骤</dt><dd>写 <code>mock-interview.md</code>：四轮记录 + 反馈表（秒答/卡顿/答不出）；把「卡顿 / 答不出」项补进 <code>core-answers.md</code>，重跑到卡点清零。</dd>
-      <dt>检验标准</dt><dd>第二轮模拟中，五句核心话术全部「秒答」，无卡顿。</dd>
+      <dt>目标</dt><dd>用 llama.cpp 草稿模型跑一次投机解码，测实际加速比。</dd>
+      <dt>要掌握</dt><dd>γ/α/r 三参数；加速比手算公式；α 低时为何要关。</dd>
+      <dt>实操步骤</dt><dd>用 <code>llama-cli --model big --model-draft small</code> 对比开关前后 tok/s，记录 α 与实测加速比，写入 <code>spec_decode.md</code>。</dd>
+      <dt>检验标准</dt><dd>能对比手算与实测加速比，并给出「是否值得开」的结论。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>投递简历终稿 + 求职清单</h3></div>
+    <div class="head"><span class="num">3</span><h3>《性能调优报告（含最优配置）》（本章核心产出）</h3></div>
     <dl>
-      <dt>目标</dt><dd>整合成一份可投递的简历（PDF）+ 一份目标岗位清单。</dd>
-      <dt>要掌握</dt><dd>简历结构：一句话人设 + 技能关键词 + STAR 项目 + 15 年经历压缩。</dd>
-      <dt>实操步骤</dt><dd>写 <code>resume-final.md</code>（再导出 PDF）：①一句话人设 ②技能关键词区 ③STAR 项目（本节任务 1）④15 年经历压缩成 3~5 行 ⑤教育/证书。另写 <code>job-targets.md</code>：10 个目标岗位 + 匹配点 + 打招呼话术。</dd>
-      <dt>检验标准</dt><dd>简历一页或两页内；HR 扫 30 秒能命中三类岗位关键词。</dd>
+      <dt>目标</dt><dd>综合矩阵与实验，给出最优配置与理由——一页纸。</dd>
+      <dt>要掌握</dt><dd>把指标 + Amdahl + 矩阵 + 投机解码串成一个决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>perf_tuning_report.md</code>（一页）：①基线 ②Amdahl 上界 ③配置矩阵 ④最优配置（含延迟/内存/带宽利用率）⑤从目标反推的调优路径。</dd>
+      <dt>检验标准</dt><dd>给定一个延迟目标，拿报告能立刻选出配置——架构决策标准。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">4</span><h3>面试问答答题卡（选型 / 稳定性 / 成本）</h3></div>
+    <div class="head"><span class="num">4</span><h3>精度评估脚本模板（新增）</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书⑥的三组高频问题整理成你的答题卡：每题「结论 + 推理 + 反问」。</dd>
-      <dt>要掌握</dt><dd>选型 trade-off（3B vs 1.5B / 内存溢出 / 降级边界）；稳定性（长跑泄漏 / NPU 复位）；成本（DDR 选型 / 带宽权衡 / BOM 占比）。</dd>
-      <dt>实操步骤</dt><dd>写 <code>qa-card.md</code>：三组共 7 题，每题写「一句话结论 + 30 秒推理 + 可能的追问与应对」，并标出答案里的硬数字（2GB / 2.8GB / 3.5~5.5 tok/s / $6 / $42 / 1GB 水位）。掐表练到每题 30 秒讲完。</dd>
-      <dt>检验标准</dt><dd>随机抽一题能立刻答出结论并展开推理；被追问「为什么不选另一个」不卡。</dd>
+      <dt>目标</dt><dd>写一个可复用的评估脚本模板：LLM 算 PPL，或检测算 mAP。</dd>
+      <dt>要掌握</dt><dd>固定验证集的做法；PPL / mAP / RMSE 的取法；量化前后对比与门槛判定。</dd>
+      <dt>实操步骤</dt><dd>① 切一份不参与校准的验证集 <code>eval/</code>；② 写 <code>eval_ppl.py</code>（读验证集逐 token 累加 logp，<code>PPL=exp(-mean(logp))</code>）或 <code>eval_map.py</code>（跑检测框、按 IoU 计算 AP 后求均值）；③ 同一脚本跑原始模型与量化模型，输出 <code>eval_report.md</code>：baseline / 量化 / Δ / 是否达标。</dd>
+      <dt>检验标准</dt><dd>改配置不用改脚本就能重测；报告里能指着数字说清「涨/跌多少、为什么、是否上线」。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>resume-project.md</code> —— 简历项目条目（STAR，核心产出）。</li>
-    <li><code>core-answers.md</code> —— 5 句核心话术本（含推理与追问应对）。</li>
-    <li><code>self-intro.md</code> —— 2 分钟自我介绍稿。</li>
-    <li><code>project-pitch.md</code> —— 5 分钟项目讲解稿。</li>
-    <li><code>mock-interview.md</code> —— 模拟面试记录 + 反馈表。</li>
-    <li><code>resume-final.md</code> —— 可投递简历终稿（导出 PDF）。</li>
-    <li><code>job-targets.md</code> —— 目标岗位清单 + 打招呼话术。</li>
-    <li><code>qa-card.md</code> —— 面试问答答题卡（选型 / 稳定性 / 成本）。</li>
+    <li><code>bench.sh</code> + <code>baseline.txt</code> —— 五项性能指标采集脚本与基线。</li>
+    <li><code>amdahl.md</code> —— 基线表 + Amdahl 加速上限手算。</li>
+    <li><code>cpu_npu_split.md</code> —— CPU/NPU 分工排查记录。</li>
+    <li><code>perf_matrix.md</code> —— 配置矩阵实测表（量化 × batch）。</li>
+    <li><code>spec_decode.md</code> —— 投机解码验证（手算 vs 实测加速比）。</li>
+    <li><code>perf_tuning_report.md</code> —— 性能调优报告（含最优配置，核心产出）。</li>
+    <li><code>eval_ppl.py</code> / <code>eval_map.py</code> + <code>eval_report.md</code> —— 精度评估脚本模板与前后对比。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>5 句核心话术能脱口而出（3 秒内），且能各展开 30 秒。</li>
-    <li>简历项目条目是 STAR 四段、每段带数字、≤5 行。</li>
-    <li>2 分钟自我介绍能完成「15 年 → 端侧 AI 架构师」的桥接。</li>
-    <li>5 分钟项目讲解稿能不看稿讲出 80%。</li>
-    <li>三轮模拟面试，「卡顿 / 答不出」项清零。</li>
-    <li>能答清选型（3B vs 1.5B）、稳定性（长跑泄漏 / NPU 复位）、成本（DDR / 带宽 / BOM）三类高频问题。</li>
+    <li>说清 TTFT 与 decode tok/s 的瓶颈为何不同（prefill 算力密集、decode 带宽密集）。</li>
+    <li>会用 Amdahl 算整体加速上限，并解释「为什么不是叠加」。</li>
+    <li>会算 batch 提升后的带宽利用率，判断收益是否划算。</li>
+    <li>能用公式手算投机解码加速比（α=0.8, γ=4, r=0.1 → ≈2.4×）。</li>
+    <li>给一个延迟目标，能反推出该动 batch 还是投机解码。</li>
+    <li>能按任务选对精度指标（LLM 用 PPL、检测用 mAP、回归用 RMSE/MAE），并用固定验证集做前后对比。</li>
+    <li>能定位量化误差最大的层，并说出「PTQ 不够就上 QAT」的判定顺序。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「我是懂硬件的 AI 架构师。15 年嵌入式让我比纯算法背景的人更懂硬件边界、内存、功耗和量产，而这正是端侧 AI 落地最缺的。我的代表作是一个跑在 RK3576 上的端侧 AI 语音助手：端侧用 1.5B~3B int4 做意图识别和简单对话，复杂推理走云端，断网降级到本地 1.5B。技术上，3B int4 约 2GB、RK3576 带宽是 LPDDR5-4800 的 19GB/s 峰值（NPU 独占 12~16、产品 7~11），产品场景 3B int4 只有 3.5~5.5 tok/s，瓶颈在带宽；框架上 3576 用 RKNN、跨平台验证用 llama.cpp + GGUF；KV Cache 在 8K 上下文约几百 MB，够用但要防争带宽。项目落地时我按 STAR 拆：离线可用、隐私不出端、BOM 约 $42、平均功耗 2.5W 做到 8 小时续航。我应聘端侧 AI 架构师、边缘 AI 架构师、AI 系统架构师这类岗位，因为我做的就是把模型真正落到产品上的架构决策。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>求职准备到位——简历能过筛、话术能脱口、讲解稿能讲 5 分钟，具备端侧 AI 架构师岗位的完整表达能力。</p>
+    <span class="tag">要点回顾</span>
+    <ul class="clean">
+      <li>性能调优先建指标：<b>TTFT、decode tok/s、内存、NPU 利用率、带宽利用率</b>五项，再测 baseline 并用 Amdahl 算理论上界，确认瓶颈占比后再决定投入。</li>
+      <li>TTFT 是算力瓶颈（prefill 算完整个 prompt），decode tok/s 是带宽瓶颈（每 token 读一遍全部权重）——两者要分开看。</li>
+      <li>三大旋钮各管一件事：量化配置在 w4a16 / w8a16 间权衡精度与速度；batch size 提吞吐与带宽利用率（多用户服务端优先）；NPU 核心数在 3576 上固定为 1，没得调。</li>
+      <li>CPU+NPU 混合调度让 NPU 干矩阵乘、CPU 干采样与 tokenizer，减少搬运；判断算子是否掉 CPU，看 build 日志的 <code>not supported</code> 与 <code>top</code> 的 CPU 占用。</li>
+      <li>投机解码用小模型猜、大模型验证，让一次权重读取服务多个 token；α=0.8、γ=4、r=0.1 时手算加速比约 <b>2.4×</b>，α 太低或小模型太重反而变慢。</li>
+      <li>给延迟目标的调优路径：先算理论天花板确认可达 → 再算需要的带宽利用率 → 单路不够就上 batch 或投机解码 → 在达标方案里挑内存最小、最稳的。</li>
+      <li>精度评估先定指标（语言看 PPL、检测看 mAP、分割看 mIoU、回归看 RMSE/MAE），用<b>独立于校准集的固定验证集</b>做前后对比，按门槛判定上线/调优/回退。</li>
+      <li>精度不达标先定位误差层：逐层/逐通道比相对误差与余弦相似度，再决定该层保精度、缩小 group_size 还是换 quantized_algorithm。</li>
+      <li>根治顺序：先把校准集做对（覆盖真实分布），PTQ 仍超门槛再上 QAT——一上来就 QAT 是用最贵的办法解决最便宜的问题。</li>
+    </ul>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li><strong>数字要背熟：</strong>3B int4 ≈ 2GB、带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）、3B int4 产品 3.5~5.5 tok/s（NPU 独占 6~8）——被追问时直接报，别含糊。</li>
-      <li><strong>选型对比要会说：</strong>RK3576 vs RK3588 的取舍（便宜、带宽低些但够用、适合中端），体现你的成本与能力权衡意识。</li>
-      <li><strong>项目要能演示：</strong>面试若要求，能当场跑第 12 章的 demo（对话 + 工具 + RAG + 断网降级）。</li>
-      <li><strong>面向三类岗位微调措辞：</strong>端侧 AI 架构师重"落地"，边缘 AI 架构师重"部署与运维"，AI 系统架构师重"系统分层与端云协同"。</li>
+      <li>3576 是<strong>单核 NPU</strong>，<code>num_npu_core</code> 固定 1，调核心数没意义；这一点要说清，别照搬 3588 的经验。</li>
+      <li>带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s），batch 与投机解码是<strong>提升带宽利用率的正路</strong>；超过 ~95% 利用率后收益递减。</li>
+      <li>NPU 利用率看 <code>/sys/kernel/debug/rknpu/load</code>；若 CPU 长期 ≥100% 而 NPU 低，说明有算子掉 CPU（fallback），要回第 4 章查 build 日志。</li>
+      <li>内存有限，batch 翻倍内存也翻倍——3B int4 batch=8 约 3.6GB，别再叠加其它服务。</li>
     </ul>
   </div>
 
-  <div class="footer">听懂讲义 → 填简历/讲解稿模板 → 交作业 → 自测 · 5 句核心话术脱口 = 毕业 🎓</div>
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
 </div>
 </body>
 </html>

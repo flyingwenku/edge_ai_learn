@@ -3,189 +3,203 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 6 章：FFN、MoE 与架构趋势（讲义 + 作业）</title>
+<title>第 6 章：LLM① Transformer 结构与参数量</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html">第 4 章</a>
-    <a href="ch05.html">第 5 章</a>
-    <a href="ch06.html" class="active">第 6 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html" class="active">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 6 章：FFN、MoE 与架构趋势</h1>
-  <p class="lead"><strong>章节目标：</strong>搞懂「<b>FFN 存知识、MoE 是云端的省算力游戏、端侧另有答案</b>」——拿到一个端侧场景，能当场说出该选什么架构方向、为什么 MoE 不合适。</p>
+  <h1>第 6 章：LLM① Transformer 结构与参数量</h1>
+  <p class="lead"><strong>章节目标：</strong>打开 <code>config.json</code> 就能把参数量算出来——<b>拿到 Qwen2.5-3B 的配置文件，5 分钟内手算出 3.09B，并说清每一份权重从哪来</b>。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch06-arch-trends</span>
+    <span class="chip">产出目录：ch06-llm-struct</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点是 MoE 为什么在端侧"省算力但不省时间"。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量手算 / 空表自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写 MoE 笔记、架构趋势笔记、选型表。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把每个矩阵的参数量算法看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量空表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写计算器、出验证报告。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 4 章你搞懂了注意力。但注意力量只占参数的一小部分——<b>真正"装参数、装知识"的是 FFN</b>。这一章你搞清 FFN 和 MoE，再看清整个架构大方向（Transformer / SSM / 混合），最后拿到一张端侧主流模型清单。<span class="key">面试高频题：给一个端侧场景，你选什么架构、用什么模型？</span></p>
+    <p>前面的章节都在「用」模型，这一章要「看穿」模型。工程里经常需要拿一个 <code>config.json</code> 判断「这模型多少参数、内存多少」——能当场手算，才算真正看懂结构。定位是<b>架构师不是研究员</b>：公式只讲物理含义，不推导，全部落到可手算的数字。</p>
+    <div class="callout"><strong>一句话记住：</strong>参数量 = 所有「有数值可训练」的矩阵元素总数；看懂 config 就能算，不需要读论文。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：FFN——Transformer 的"知识仓库"</h3>
-    <p>每个 Transformer 层有两个子块：注意力 + FFN。注意力负责"搬运"，FFN 负责"记忆"。</p>
-    <div class="board"><span class="k">FFN = Feed-Forward Network（前馈网络）</span>
-结构：d → 4d → d   （两层线性 + 一个激活函数）
-  中间隐藏层宽度通常是输入的 4 倍
-  （现代模型用 SwiGLU，实际约 8/3 倍，这里按 4d 讲，便于手算）
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：Transformer 一层长什么样</h3>
+    <p>不管多花哨的模型，一个解码层就是<b>两个子块 + 两条残差</b>。先把结构记牢。</p>
+    <div class="board"><span class="k">一个 Transformer 解码层：</span>
 
-<span class="k">参数量公式（两层矩阵）</span>
-  W1: d × 4d
-  W2: 4d × d
-  合计 = 2 × 4d² = <span class="g">8d²</span>
+  ┌─ ① 注意力块 ─────────────────────────
+  │   LayerNorm → Q/K/V/O 四个投影 → 残差相加
+  └────────────────────────────────────
 
-<span class="k">手算：d = 2048 的单层 FFN</span>
-  8 × 2048² = 8 × 4,194,304 = <span class="g">33.6M</span> 参数/层
-  36 层 → 33.6M × 36 = <span class="g">约 1.21B</span>
+  ┌─ ② FFN 前馈块 ───────────────────────
+  │   LayerNorm → 上投影 → 激活 → 下投影 → 残差相加
+  └────────────────────────────────────
 
-<span class="k">对比同模型的注意力层（GQA）</span>
-  Q: d×d = 4.19M
-  K,V: d×(2×128) = 0.52M 各
-  O: d×d = 4.19M
-  合计 ≈ 9.4M/层 → 36 层 ≈ 0.34B</div>
-    <div class="board"><span class="k">结论：FFN 参数 ≈ 注意力的 3~7 倍</span>
-  3B 这类小模型里，<span class="r">约 2/3 的参数在 FFN</span>。
+<span class="k">两个配角（参数极少，先记住作用）：</span>
+  残差 residual：把输入原样加回来，防止深层网络梯度消失
+  LayerNorm  ：逐 token 归一化，每层 2 个，参数量 ≈ 2×hidden
 
-<span class="k">FFN 到底在干什么：知识存储</span>
-  研究共识（ROME、知识编辑等工作）：
-  · 注意力 = "token 之间搬运/聚合信息"（路由）
-  · FFN     = "把知识写进权重里"（记忆 / 查表）
-  所以：
-  模型"知道多少"  ← 主要由 <span class="g">FFN</span> 决定
-  模型"会不会用上下文" ← 主要由 <span class="g">注意力</span> 决定
+<span class="k">参数大户只有两处：</span>
+  注意力里的 <span class="g">Q/K/V/O 投影</span>　＋　FFN 里的 <span class="g">上/下投影矩阵</span></div>
 
-<span class="k">直觉：FFN 像一个巨大的 key-value 记忆库，</span>
-每个神经元近似"匹配某种特征 → 输出某条知识"。
-模型越大越"博学"，主要就是 FFN 堆得多。</div>
-    <div class="callout">一句话：<b>注意力管"看关系"，FFN 管"记知识"</b>。所以量化时 FFN 权重占大头，也是 KV Cache 之外最大的内存来源。</div>
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：每个权重矩阵的参数量算法</h3>
+    <p>一个权重矩阵的参数量 = <b>输入维 × 输出维</b>。就这么简单，剩下的是套结构。</p>
+    <div class="formula">矩阵参数量 = 输入维度 × 输出维度</div>
+    <div class="board"><span class="k">先定义符号（背下来）：</span>
+  h = hidden_size          隐藏维（模型主宽度）
+  L = num_hidden_layers    层数
+  I = intermediate_size    FFN 中间维
+  V = vocab_size           词表大小
+  a = num_attention_heads  Q 头数
+  k = num_key_value_heads  KV 头数
+  d = head_dim = h / a     每个头的维度
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：MoE——稀疏激活原理 + 手算</h3>
-    <div class="board"><span class="k">MoE = Mixture of Experts（混合专家）</span>
-核心想法：把 1 个 FFN 换成 N 个"专家 FFN"，
-每个 token 只走其中 top-k 个（其余专家不参与计算）。
+<span class="k">每层注意力（四个投影）：</span>
+  Q 投影: h × (a·d) = h×h     → <span class="g">h²</span>
+  K 投影: h × (k·d)            → <span class="g">h·k·d</span>
+  V 投影: h × (k·d)            → <span class="g">h·k·d</span>
+  O 投影: (a·d) × h = h×h     → <span class="g">h²</span>
+  合计 ≈ <span class="k">2h² + 2h·k·d</span>　（GQA 时 k 小，K/V 项就小）
 
-  · 总参数量   = N × 8d²        （所有专家都要<span class="r">存进内存</span>！）
-  · 激活参数量 = k × 8d²        （每个 token 实际算的）
+<span class="k">每层 FFN（SwiGLU，共 3 个矩阵）：</span>
+  gate: h × I   up: h × I   down: I × h
+  合计 = <span class="k">3·h·I</span>
 
-<span class="k">关键区别（面试点）</span>
-  计算量由"激活参数"决定 → 稀疏 → 省算力
-  内存占用由"总参数量"决定 → 很大 → <span class="r">不省内存</span>
+<span class="k">每层小计 ≈ 2h² + 2h·k·d + 3h·I</span>（忽略 LayerNorm，占比 &lt;0.01%）</div>
+    <div class="callout"><strong>注意点：</strong>GQA 让 K/V 的输入维变成 <code>k·d</code> 而不是 <code>h</code>，所以 K/V 矩阵比 Q/O 小很多——这是省参数的关键。</div>
 
-<span class="k">举例：Mixtral 8×7B</span>
-  8 个专家，top-2 路由
-  总参数 ≈ 47B，激活 ≈ 13B
-  → 算力只花 13B（便宜），但要<span class="r">存 47B</span>（贵）
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：打开 Qwen2.5-3B config.json 手算</h3>
+    <p>现在把真实数字代进去。先把关键字段抄出来，再一层层算。</p>
+    <div class="board"><span class="k">Qwen2.5-3B config.json 关键字段：</span>
+  hidden_size            = <span class="g">2048</span>
+  num_hidden_layers      = <span class="g">36</span>
+  intermediate_size      = <span class="g">11008</span>
+  vocab_size             = <span class="g">151936</span>
+  num_attention_heads    = <span class="g">16</span>
+  num_key_value_heads    = <span class="g">2</span>
+  tie_word_embeddings    = <span class="g">true</span>
 
-<span class="k">另一端：DeepSeek-V3</span>
-  总 671B / 激活 37B
-  → 推理算力极省，但内存得按 671B 级别准备
+  推导：head_dim d = h / a = 2048 / 16 = <span class="g">128</span>
 
-<span class="k">一句话：MoE 用"更大的总内存"换"更小的单次算力"。</span></div>
-    <div class="callout"><b>MoE 的本质取舍：</b>它把"算力"和"内存"解耦了——用稀疏激活省算力，代价是总参数量（内存）反而更大。<b>谁的内存便宜、算力贵，谁就用 MoE → 那是云端，不是端侧。</b></div>
+<span class="k">代入每层公式 2h² + 2h·k·d + 3h·I：</span>
+  2h²    = 2 × 2048²        = 2 × 4,194,304  = <span class="g">8,388,608</span>
+  2h·k·d = 2 × 2048 × 2 × 128 = 2 × 524,288  = <span class="g">1,048,576</span>
+  3h·I   = 3 × 2048 × 11008 = 3 × 22,544,384 = <span class="g">67,633,152</span>
+  每层 ≈ 8,388,608 + 1,048,576 + 67,633,152
+       = <span class="g">77,070,336 ≈ 77.07 M</span>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：为什么端侧少用 MoE</h3>
-    <p>这是本章最重要的判断，四个硬伤，逐个讲：</p>
-    <div class="board"><span class="k">为什么端侧基本不用 MoE？四个硬伤</span>
+<span class="k">36 层合计：</span>
+  77.07 M × 36 = <span class="g">2,774.5 M ≈ 2.77 B</span>
 
-① 内存装不下（最直接）
-   Mixtral 47B，即便压到 int4 也 ≈ 24 GB
-   RK3576 内存上限 16 GB → <span class="r">装不下</span>。
-   端侧要的是"总参数小"，MoE 天生总参数大。
+<span class="k">加 Embedding（V × h）：</span>
+  151936 × 2048 = <span class="g">311.2 M</span>
+  （tie=true → 只算一次，输出层复用）
 
-② batch=1 时 MoE 不省时间（最关键！）
-   decode 阶段是<span class="g">带宽瓶颈</span>：每生成 1 个 token，要把权重读一遍。
-   MoE 只激活 k 个专家 → 少算，但权重<r>还是得从内存读</r>（而且读得更碎）。
-   省算力 ≠ 省带宽 → 单用户场景几乎没收益。
-   只有大 batch（云端、多用户）才把 MoE 的稀疏优势吃满。
+<span class="k">总计 ≈ 2.77 B + 0.31 B = 3.086 B ≈ 3.09 B</span> ✅
+  官方 3.09B — 对上了！</div>
+    <div class="callout"><strong>看穿模型：</strong>FFN 占了大头（每层约 67.6M，占总参数约 79%）——所以优化模型体积，FFN 才是主战场。</div>
 
-③ 调度开销
-   路由 + 动态 shape + 专家分散 → NPU/框架对小算子、动态分支不友好。
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：Embedding 到底算不算？权重共享是什么</h3>
+    <p>这是最容易讲混的细节，讲清楚就能显专业。</p>
+    <div class="board"><span class="k">Embedding 计不计入参数量？</span>
+  它是真实存在的权重 V × h（151936 × 2048 = 311 M），
+  <span class="g">当然算进「总参数量」</span>。
+  但有些端侧报告只关心「推理时反复读的 transformer 权重」，
+  会把 embedding 单列 —— <span class="k">说清口径就行，别被绕晕</span>。
 
-④ 随机访存
-   路由后读的是"分散在不同地址"的专家权重 → 带宽利用率更低，
-   对 3576 这种带宽本就紧张的板子雪上加霜。
+<span class="k">输出层 lm_head 与权重共享（tie embeddings）：</span>
+  模型最后要一个 V × h 的矩阵把隐藏态映射到词表分数。
+  小模型常让 lm_head <span class="g">直接复用 embedding 矩阵</span>（tie）。
+  Qwen2.5 config 里 <span class="g">tie_word_embeddings = true</span> → 只算一次。
+  若为 false，则要 <span class="r">额外 + 一份 V×h</span>（多 311 M）。
 
-<span class="k">一句话：MoE 是"云端多用户"的省算力方案；</span>
-端侧单用户、带宽受限 → 用密集小模型 + GQA 更实在。</div>
-    <div class="callout"><b>最容易背错的一点：</b>"MoE 省算力"没错，但在端侧单用户推理里，<b>瓶颈是带宽不是算力</b>，而 MoE 一点都不省带宽（总权重还是那么多，读的还是分散的）。<b>所以 MoE 对端侧 decode 几乎没有加速收益。</b></div>
+<span class="k">LayerNorm 参数：</span>
+  每层 2 个 × 各 2×h（weight+bias）→ 本模型每层 8192，
+  36 层 ≈ 0.29 M，占总量 &lt;0.01%，<span class="k">手算可直接忽略</span>。</div>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：Transformer vs SSM(Mamba) vs 混合</h3>
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：参数量 → 内存（接回第 1、2 章）</h3>
+    <p>算出参数量只是开始，架构师要立刻换算成内存。乘位宽、除 8。</p>
+    <div class="board"><span class="k">参数量 → 权重内存 = 参数量 × 每参数字节数</span>
+  全 fp16：3.086 B × 2 B = <span class="g">6.17 GB</span>
+  int8   ：3.086 B × 1 B = <span class="g">3.09 GB</span>
+  int4   ：3.086 B × 0.5 B = <span class="g">1.54 GB</span>
+            + scale 开销（约 3%） → 实际 <span class="g">≈ 1.6 GB</span>
+
+<span class="k">这就是第 1 章「3B int4 ≈ 2GB」的来源：</span>
+  参数 1.54 GB + 量化开销 + 运行时缓冲 → 约 2 GB（保守口径）。
+
+<span class="k">再接第 8 章：</span>
+  权重 1.6 GB + KV Cache（8K ≈ 288 MB） → 端侧常驻内存模型。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：5 分钟手算口诀</h3>
+    <div class="board"><span class="k">五步走（背下来，现场就能算）：</span>
+
+  1) 抄 6 个数：h, L, I, V, a, k
+  2) 算 head_dim  d = h / a
+  3) 每层 = 2h² + 2h·k·d + 3h·I
+  4) 总权重 = 每层 × L
+  5) 加 embedding：tie 则 +V·h 一次，否则 +2×(V·h)
+
+<span class="k">Qwen2.5-3B 复算：</span>
+  d = 2048/16 = 128
+  每层 ≈ 77.07 M → ×36 = 2.77 B → +0.31 B = <span class="g">≈ 3.09 B</span>
+
+<span class="k">不同口径要报清楚：</span>「transformer 权重 2.77B，含 embedding 3.09B」。</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书填空：参数量拆解空表</h3>
+    <p>填出 Qwen2.5-3B 每层的三项（用 h=2048, k=2, d=128, I=11008），再展开答案。</p>
     <table class="tight">
-      <thead><tr><th>范式</th><th>计算复杂度</th><th>推理内存</th><th>长文本</th><th>召回/复制</th><th>NPU 成熟度</th></tr></thead>
+      <thead><tr><th>项目</th><th>公式</th><th>参数量</th></tr></thead>
       <tbody>
-        <tr><td><b>Transformer</b></td><td>O(n²)</td><td>随 n 增长（KV Cache）</td><td>一般</td><td><b>强</b></td><td>高</td></tr>
-        <tr><td><b>SSM / Mamba</b></td><td>O(n)</td><td>常数（无 KV）</td><td>好</td><td>弱</td><td>低</td></tr>
-        <tr><td><b>混合架构</b></td><td>O(n)~O(n²)</td><td>小</td><td>好</td><td>强（有注意力层）</td><td>中</td></tr>
-      </tbody>
-    </table>
-    <div class="board"><span class="k">SSM / Mamba 是什么（一句话）</span>
-  用"状态空间模型"逐 token 递推：h_t = A·h_{t-1} + B·x_t
-  像 RNN 一样，只维护一个<span class="g">固定大小的状态</span> → 内存不随上下文增长。
-  代价：状态"挤"不下太多历史 → 精确回忆/复制能力弱于注意力。
-
-<span class="k">混合架构：两头都要</span>
-  大部分层用 SSM（省内存、长文本好），少量层插注意力（保住召回）。
-  代表：Jamba、Zamba、NVIDIA Hymba、Qwen3-Next、MiniCPM 的部分版本。
-
-<span class="k">端侧意义</span>
-  SSM 的"常数内存"对内存吃紧的板子很有吸引力（终于不怕长上下文爆内存）。
-  但 NPU 对 SSM 的递推 scan 支持还不成熟 →
-  <span class="r">目前落地仍以 Transformer + GQA 为主</span>，SSM 作为观察方向。</div>
-    <div class="callout"><b>架构师结论：</b>端侧现在选 <b>Transformer + GQA</b>（生态成熟、NPU 支持好）；<b>Mixed/SSM</b> 作为 2026 之后的长上下文储备，关注别踩坑（算子支持）。</div>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：端侧主流模型盘点</h3>
-    <table class="tight">
-      <thead><tr><th>模型</th><th>常见规模</th><th>特点</th><th>端侧适配</th><th>许可</th></tr></thead>
-      <tbody>
-        <tr><td><b>Qwen2.5</b></td><td>0.5 / 1.5 / 3 / 7B</td><td>中文强、生态全、GQA + RoPE</td><td><b>好</b>（RKNN 有官方示例）</td><td>Apache-2.0</td></tr>
-        <tr><td><b>MiniCPM</b></td><td>2.4B / 4B</td><td>小尺寸强、端侧导向、多模态版</td><td><b>好</b></td><td>开源（部分需授权）</td></tr>
-        <tr><td><b>Phi-3.5-mini</b></td><td>3.8B</td><td>微软、小模型推理能力突出</td><td>中</td><td>MIT</td></tr>
-        <tr><td><b>Gemma-2</b></td><td>2B / 9B</td><td>Google、质量高、GQA</td><td>中</td><td>Gemma 许可</td></tr>
-      </tbody>
-    </table>
-    <div class="board"><span class="k">端侧选型口诀（按任务挑规模）</span>
-
-  意图识别 / 分类 / 短语槽位   → <span class="g">0.5B ~ 1.5B</span>（int8 即可）
-  简单对话 / 摘要 / RAG 生成    → <span class="g">1.5B ~ 3B</span>（int8 或 int4）
-  复杂推理 / 代码              → 大概率走云端，端侧只兜底
-
-<span class="k">首选 Qwen2.5-1.5B/3B</span>：中文好、GQA、RKNN 官方示例齐全，
-落地风险最低（这是"能用现成的就别自己造"的工程选择）。</div>
-    <div class="callout">记忆锚点：<b>端侧选型 = 任务复杂度 → 规模 → 量化 → 生态支持</b>。前两步看需求，后两步看板子，最后一步看"有没有现成的 RKNN 示例"。</div>
-
-    <p><b>板书填空 · FFN 参数量，先自己填再展开：</b>设 d = 3072，层数 L = 28。</p>
-    <table class="tight">
-      <thead><tr><th>项目</th><th>公式</th><th>单层参数量</th><th>全模型</th></tr></thead>
-      <tbody>
-        <tr><td>单层 FFN</td><td class="fill">8d² = ?</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+        <tr><td>注意力 Q/O（2h²）</td><td>2 × h²</td><td class="fill">?</td></tr>
+        <tr><td>注意力 K/V（2h·k·d）</td><td>2 × h × k × d</td><td class="fill">?</td></tr>
+        <tr><td>FFN（3h·I）</td><td>3 × h × I</td><td class="fill">?</td></tr>
+        <tr><td>每层合计</td><td>三项相加</td><td class="fill">?</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
-      <p>8d² = 8 × 3072² = 8 × 9,437,184 = <b>75.5M</b> 参数/层；× 28 层 ≈ <b>2.11B</b>。</p>
-      <p>也就是说：一个"3B 级"模型，光 FFN 就可能占 2B 以上——这正是"FFN 是知识仓库"的数字证据。</p>
+      <div class="board">Q/O：2 × 2048² = <span class="g">8,388,608</span>
+K/V：2 × 2048 × 2 × 128 = <span class="g">1,048,576</span>
+FFN：3 × 2048 × 11008 = <span class="g">67,633,152</span>
+每层合计 = 8,388,608 + 1,048,576 + 67,633,152
+        = <span class="g">77,070,336 ≈ 77.07 M</span>
+
+<span class="k">× 36 层 = 2.77 B；+ embedding 0.31 B = 3.09 B</span>
+FFN 占比 ≈ 67.63 / 77.07 ≈ <span class="g">88%</span>（每层内）。</div>
     </details>
   </div>
 
@@ -194,95 +208,93 @@
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>FFN 参数量手算笔记</h3></div>
+    <div class="head"><span class="num">1</span><h3>逐矩阵参数量手算表</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书①整理成笔记：FFN 结构、参数量公式、在总参数中的占比。</dd>
-      <dt>要掌握</dt><dd>8d² 公式；FFN 为什么是"知识存储"；FFN vs 注意力的参数对比。</dd>
-      <dt>实操步骤</dt><dd>写 <code>ffn_params.md</code>：① d→4d→d 结构与 8d² 推导（一句）；② 用 d=2048/L=36 手算单层与全模型；③ 一句话解释"为什么模型越大越博学"。</dd>
-      <dt>检验标准</dt><dd>能当场算出任意 d、任意层数的 FFN 参数量，并说出它占总参数约 2/3。</dd>
+      <dt>目标</dt><dd>把板书②的公式整理成一张「每个权重矩阵 → 参数量」的对照表。</dd>
+      <dt>要掌握</dt><dd>Q/K/V/O 四个投影、FFN 三个矩阵、Embedding 的算法与符号定义。</dd>
+      <dt>实操步骤</dt><dd>写 <code>param_math.md</code>：矩阵清单表（名称 / 形状 / 参数量公式 / 说明），并把 Qwen2.5-3B 的数字代入填满。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能默写「每层 = 2h² + 2h·k·d + 3h·I」并解释每一项。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>MoE 笔记</h3></div>
+    <div class="head"><span class="num">2</span><h3>参数量计算器（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>写清 MoE 的原理、参数量拆解、以及端侧不适用的四个理由。</dd>
-      <dt>要掌握</dt><dd>总参数 vs 激活参数；稀疏激活；batch=1 时为什么不省时间。</dd>
-      <dt>实操步骤</dt><dd>写 <code>moe_notes.md</code>：① 用 Mixtral 8×7B 和 DeepSeek-V3 举例算总/激活参数；② 列四个端侧硬伤；③ 一句话结论"MoE 是云端方案"。</dd>
-      <dt>检验标准</dt><dd>能讲清"MoE 省算力但不省带宽"，并说明端侧单用户为什么没收益。</dd>
+      <dt>目标</dt><dd>写一个读 <code>config.json</code> 就算总参数量的脚本。</dd>
+      <dt>要掌握</dt><dd>从 config 字段推导 head_dim；区分「transformer 权重」与「含 embedding」两个口径；处理 tie_word_embeddings。</dd>
+      <dt>实操步骤</dt><dd>写 <code>param_calc.py</code>：函数 <code>count_params(cfg)</code>，读入 Qwen2.5-3B config，分层打印（每层注意力 / FFN / 总计 / embedding），并与手算表对照。</dd>
+      <dt>检验标准</dt><dd>脚本输出总参数量 ≈ 3.09 B，与官方一致。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>架构趋势笔记</h3></div>
+    <div class="head"><span class="num">3</span><h3>Qwen2.5-3B 手算验证</h3></div>
     <dl>
-      <dt>目标</dt><dd>梳理 Transformer / SSM(Mamba) / 混合三条路线。</dd>
-      <dt>要掌握</dt><dd>三者复杂度、内存、长文本、召回、NPU 成熟度差异。</dd>
-      <dt>实操步骤</dt><dd>写 <code>arch_trends.md</code>：① 三范式对比表；② SSM 的一句话原理（h_t = A·h_{t-1} + B·x_t）；③ 混合架构举例；④ 端侧该怎么选。</dd>
-      <dt>检验标准</dt><dd>能说出"SSM 常数内存很香，但 NPU 支持不成熟，端侧暂时还是 Transformer+GQA"。</dd>
+      <dt>目标</dt><dd>用纸笔完整复算一遍 3.09 B，作为对照基准。</dd>
+      <dt>要掌握</dt><dd>手算与脚本结果的一致性；为什么忽略 LayerNorm。</dd>
+      <dt>实操步骤</dt><dd>写 <code>qwen3b_calc.md</code>：逐步手算过程（抄字段 → 算 d → 每层 → ×36 → +embedding），最后与脚本输出并排对照。</dd>
+      <dt>检验标准</dt><dd>手算与脚本结果误差 &lt; 1%，能解释剩下的 0.3 M 是 LayerNorm。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>架构对比表 + 端侧判断</h3></div>
+    <div class="head"><span class="num">1</span><h3>拆一层看结构图</h3></div>
     <dl>
-      <dt>目标</dt><dd>把上午的趋势笔记变成一张能直接用于决策的对比表。</dd>
-      <dt>要掌握</dt><dd>用"场景 → 架构"的映射做判断，而不是罗列名词。</dd>
-      <dt>实操步骤</dt><dd>写 <code>arch_compare.md</code>：6 列对比表（Transformer / SSM / 混合）+ 每个给一句"端侧适用性"结论。</dd>
-      <dt>检验标准</dt><dd>别人拿这张表，能直接决定"这个项目用 Transformer+GQA"。</dd>
+      <dt>目标</dt><dd>把一个解码层的张量流画清楚：输入 → LayerNorm → Q/K/V/O → 残差 → LayerNorm → FFN → 残差。</dd>
+      <dt>要掌握</dt><dd>每步张量形状的变化；参数量集中在哪几处。</dd>
+      <dt>实操步骤</dt><dd>写 <code>layer_breakdown.md</code>：文字框图/箭头图，标注每步形状（如 [hidden] → [a·d]）与对应矩阵参数量。</dd>
+      <dt>检验标准</dt><dd>能对着图讲 3 分钟，说清「参数量为什么 88% 在 FFN」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>端侧主流模型盘点表</h3></div>
+    <div class="head"><span class="num">2</span><h3>《参数量验证报告》（一页）</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书⑤扩成你自己的模型清单。</dd>
-      <dt>要掌握</dt><dd>各模型规模、特点、端侧适配、许可；不同任务该挑多大。</dd>
-      <dt>实操步骤</dt><dd>写 <code>model_inventory.md</code>：模型清单表（可加 Roboflow 之外你关注的模型）+ "任务复杂度 → 规模"的推荐口诀。</dd>
-      <dt>检验标准</dt><dd>给你一个端侧任务，你能 30 秒报出"用哪个模型、多大、什么量化"。</dd>
+      <dt>目标</dt><dd>综合本章产出，写一份可交付的验证报告——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把「config 字段 + 手算 + 脚本 + 内存换算」串成结论。</dd>
+      <dt>实操步骤</dt><dd>写 <code>param_verify.md</code>（一页）：①模型与 config 字段 ②手算结论（2.77B / 3.09B 两个口径）③脚本验证 ④内存换算（fp16/int8/int4）⑤风险（tie、口径歧义）。</dd>
+      <dt>检验标准</dt><dd>别人拿这页，不用问你就能复现 3.09B 并换算出内存。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>场景架构推荐（一页）+ 秒答</h3></div>
+    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
     <dl>
-      <dt>目标</dt><dd>综合本章，给一个真实端侧场景写推荐架构——本章核心产出。</dd>
-      <dt>要掌握</dt><dd>把架构方向、模型、量化、理由串成一段决策。</dd>
-      <dt>实操步骤</dt><dd>写 <code>arch_recommend.md</code>（一页）：场景设定（如"离线智能音箱，1.5B 意图识别 + 简单对话"）→ 架构（Transformer+GQA）→ 模型（Qwen2.5-1.5B/3B）→ 量化（RKNN int8/int4）→ 为什么不用 MoE / SSM → 风险。</dd>
-      <dt>检验标准</dt><dd>30 秒内把理由讲完，且每条都有数据或机制支撑。</dd>
+      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
+      <dt>实操步骤</dt><dd>自问自答：每层参数量公式是什么？Qwen2.5-3B 多少参数？embedding 算不算？tie 是什么？3.09B fp16/int8/int4 各多少 GB？</dd>
+      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>ffn_params.md</code> —— FFN 结构与参数量手算笔记。</li>
-    <li><code>moe_notes.md</code> —— MoE 原理 + 端侧四硬伤笔记（核心产出）。</li>
-    <li><code>arch_trends.md</code> —— Transformer / SSM / 混合趋势笔记（核心产出）。</li>
-    <li><code>arch_compare.md</code> —— 架构对比表与端侧判断。</li>
-    <li><code>model_inventory.md</code> —— 端侧主流模型盘点表。</li>
-    <li><code>arch_recommend.md</code> —— 场景架构推荐（一页，核心产出）。</li>
+    <li><code>param_math.md</code> —— 逐矩阵参数量手算表（公式 + Qwen2.5-3B 代入）。</li>
+    <li><code>param_calc.py</code> —— 参数量计算器（读 config.json，分层输出）。</li>
+    <li><code>qwen3b_calc.md</code> —— Qwen2.5-3B 手算过程与脚本对照。</li>
+    <li><code>layer_breakdown.md</code> —— 单层结构图（张量流 + 参数量分布）。</li>
+    <li><code>param_verify.md</code> —— 参数量验证报告（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>说出 FFN 参数量公式 8d²，并知道它约占总参数 2/3（知识存储）。</li>
-    <li>说清 MoE 的总参数 vs 激活参数，以及"省算力不省内存/带宽"。</li>
-    <li>说清端侧不用 MoE 的四个理由（内存、batch=1 不省时间、调度、随机访存）。</li>
-    <li>对比 Transformer / SSM / 混合，并给出端侧选择。</li>
-    <li>给一个端侧场景，能推荐架构方向 + 模型 + 量化。</li>
+    <li>5 分钟内手算出 Qwen2.5-3B ≈ 3.09B（含 embedding）。</li>
+    <li>能背出每层公式 <code>2h² + 2h·k·d + 3h·I</code> 并解释每项。</li>
+    <li>能说清 GQA 为什么让 K/V 矩阵变小、embedding 是否计入、tie 的含义。</li>
+    <li>能立刻把参数量换算成内存：3.09B fp16 ≈ 6.17GB、int8 ≈ 3.09GB、int4 ≈ 1.54GB。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「Transformer 层里参数大头是 FFN，结构是 d→4d→d，参数量 8d²，占整个模型约三分之二，它的作用是知识存储——注意力负责搬运信息、FFN 负责把知识写进权重。MoE 是把单个 FFN 换成多个专家、每个 token 只激活 top-k，比如 Mixtral 总参数 47B、激活 13B。但 MoE 在端侧基本不用：一是总参数量大、内存装不下；二是 decode 阶段瓶颈是带宽不是算力，MoE 只省算力、不省带宽，单用户 batch=1 几乎没收益，只有云端大 batch 才划算；三是路由和动态 shape 对 NPU 不友好，还会带来随机访存。架构趋势上，现在有 Transformer、SSM/Mamba 和混合三条路线，SSM 是常数内存、长文本好但精确召回弱、NPU 支持也不成熟；所以端侧我目前选 Transformer + GQA，模型优先用 Qwen2.5-1.5B/3B，生态和 RKNN 支持最稳。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能判断架构方向与模型选型、讲清 MoE 的端侧取舍——架构趋势能力。</p>
+    <span class="tag">要点回顾</span>
+    <p>参数量 = 所有「有数值可训练」的矩阵元素总数。每层参数为 2h² + 2h·k·d + 3h·I，再乘层数，最后加上 embedding 的 V×h。</p>
+    <p>以 Qwen2.5-3B 为例：hidden 2048、36 层、intermediate 11008、词表 151936、Q 头 16、KV 头 2，head_dim 128，每层约 77.07M，36 层约 2.77B；因 tie_word_embeddings=true，embedding 只算一次约 0.31B，总计约 3.09B，与官方一致。</p>
+    <p style="margin:0">FFN 占参数量近八成，是压缩与量化的主战场；报参数量时务必说清口径（是否含 embedding、是否含 lm_head），这是工程严谨度的体现。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 内存上限 16GB，<strong>MoE 模型（如 Mixtral 47B）根本装不下</strong>，架构评审时直接排除。</li>
-      <li>端侧 decode 是<strong>带宽瓶颈</strong>，MoE 的稀疏优势在 batch=1 场景吃不到，别被"省算力"忽悠。</li>
-      <li>选模型优先看<strong>是否 GQA + 是否有 RKNN 官方示例</strong>（Qwen2.5 / MiniCPM 最省心）。</li>
-      <li>SSM/混合架构作为长上下文储备观察，但落地前先确认 NPU 算子支持，别踩"跑不起来"的坑。</li>
+      <li>3.09B int4 ≈ 1.6 GB，加上 KV Cache 与运行时缓冲，3576 的 <strong>16 GB LPDDR5</strong> 余量充足。</li>
+      <li>FFN 占参数近八成，是<strong>量化与压缩的主战场</strong>；注意 FFN 权重对精度更敏感。</li>
+      <li>若 config 里 <strong>tie_word_embeddings = true</strong>，别把输出层重复计一次，否则参数量会算大。</li>
+      <li>回报参数量时<strong>务必说清口径</strong>（是否含 embedding、是否含 lm_head），这是专业度的体现。</li>
     </ul>
   </div>
 

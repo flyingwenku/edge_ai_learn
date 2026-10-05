@@ -3,189 +3,236 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 3 章：Transformer 结构与参数量（讲义 + 作业）</title>
+<title>第 3 章：推理流程与框架拆解</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html" class="active">第 3 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html" class="active">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 3 章：Transformer 结构与参数量</h1>
-  <p class="lead"><strong>章节目标：</strong>打开 <code>config.json</code> 就能把参数量算出来——<b>拿到 Qwen2.5-3B 的配置文件，5 分钟内手算出 3.09B，并说清每一份权重从哪来</b>。</p>
+  <h1>第 3 章：推理流程与框架拆解</h1>
+  <p class="lead"><strong>章节目标：</strong>把「模型文件」到「出一句话」中间的每一段路拆开——<b>拿到「RK3576 + 3B」，能立刻报出用哪个框架、为什么，并画出推理全流程图</b>。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch03-params</span>
+    <span class="chip">下午 4h · 4 个任务</span>
+    <span class="chip">产出目录：ch03-inference</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把每个矩阵的参数量算法看懂，不懂就问我。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的参数量空表自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写计算器、出验证报告。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把六个框架的定位、ONNX 中间层和推理流程看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的空表 / 流程空位自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真机跑 llama.cpp、用 netron 看 ONNX、出选型报告。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>前两章都在「用」模型，这一章要「看穿」模型。面试官常丢给你一个 <code>config.json</code> 问「这模型多少参数、内存多少」——你要是能当场手算，身价立刻不一样。定位是<b>架构师不是研究员</b>：公式只讲物理含义，不推导，全部落到可手算的数字。</p>
-    <div class="callout"><strong>一句话记住：</strong>参数量 = 所有「有数值可训练」的矩阵元素总数；看懂 config 就能算，不需要读论文。</div>
+    <p>第 1~2 章你搞定了「模型多大、怎么量化」。但一个 <code>.gguf</code> 或 <code>.rknn</code> 文件，怎么变成屏幕上滚动的字？中间是<b>推理框架</b>在干活。这一章就把「框架是谁」「模型怎么转过去（ONNX 中间层）」「流程怎么走」「时间花在哪」讲透——这是把模型真正跑起来的第一道关。</p>
+    <div class="callout"><strong>一句话记住：</strong>框架选错，模型再好也跑不动；流程看不懂，就定位不了卡顿。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：Transformer 一层长什么样</h3>
-    <p>不管多花哨的模型，一个解码层就是<b>两个子块 + 两条残差</b>。先把结构记牢。</p>
-    <div class="board"><span class="k">一个 Transformer 解码层：</span>
-
-  ┌─ ① 注意力块 ─────────────────────────
-  │   LayerNorm → Q/K/V/O 四个投影 → 残差相加
-  └────────────────────────────────────
-
-  ┌─ ② FFN 前馈块 ───────────────────────
-  │   LayerNorm → 上投影 → 激活 → 下投影 → 残差相加
-  └────────────────────────────────────
-
-<span class="k">两个配角（参数极少，先记住作用）：</span>
-  残差 residual：把输入原样加回来，防止深层网络梯度消失
-  LayerNorm  ：逐 token 归一化，每层 2 个，参数量 ≈ 2×hidden
-
-<span class="k">参数大户只有两处：</span>
-  注意力里的 <span class="g">Q/K/V/O 投影</span>　＋　FFN 里的 <span class="g">上/下投影矩阵</span></div>
-
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：每个权重矩阵的参数量算法</h3>
-    <p>一个权重矩阵的参数量 = <b>输入维 × 输出维</b>。就这么简单，剩下的是套结构。</p>
-    <div class="formula">矩阵参数量 = 输入维度 × 输出维度</div>
-    <div class="board"><span class="k">先定义符号（背下来）：</span>
-  h = hidden_size          隐藏维（模型主宽度）
-  L = num_hidden_layers    层数
-  I = intermediate_size    FFN 中间维
-  V = vocab_size           词表大小
-  a = num_attention_heads  Q 头数
-  k = num_key_value_heads  KV 头数
-  d = head_dim = h / a     每个头的维度
-
-<span class="k">每层注意力（四个投影）：</span>
-  Q 投影: h × (a·d) = h×h     → <span class="g">h²</span>
-  K 投影: h × (k·d)            → <span class="g">h·k·d</span>
-  V 投影: h × (k·d)            → <span class="g">h·k·d</span>
-  O 投影: (a·d) × h = h×h     → <span class="g">h²</span>
-  合计 ≈ <span class="k">2h² + 2h·k·d</span>　（GQA 时 k 小，K/V 项就小）
-
-<span class="k">每层 FFN（SwiGLU，共 3 个矩阵）：</span>
-  gate: h × I   up: h × I   down: I × h
-  合计 = <span class="k">3·h·I</span>
-
-<span class="k">每层小计 ≈ 2h² + 2h·k·d + 3h·I</span>（忽略 LayerNorm，占比 &lt;0.01%）</div>
-    <div class="callout"><strong>注意点：</strong>GQA 让 K/V 的输入维变成 <code>k·d</code> 而不是 <code>h</code>，所以 K/V 矩阵比 Q/O 小很多——这是省参数的关键。</div>
-
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：打开 Qwen2.5-3B config.json 手算</h3>
-    <p>现在把真实数字代进去。先把关键字段抄出来，再一层层算。</p>
-    <div class="board"><span class="k">Qwen2.5-3B config.json 关键字段：</span>
-  hidden_size            = <span class="g">2048</span>
-  num_hidden_layers      = <span class="g">36</span>
-  intermediate_size      = <span class="g">11008</span>
-  vocab_size             = <span class="g">151936</span>
-  num_attention_heads    = <span class="g">16</span>
-  num_key_value_heads    = <span class="g">2</span>
-  tie_word_embeddings    = <span class="g">true</span>
-
-  推导：head_dim d = h / a = 2048 / 16 = <span class="g">128</span>
-
-<span class="k">代入每层公式 2h² + 2h·k·d + 3h·I：</span>
-  2h²    = 2 × 2048²        = 2 × 4,194,304  = <span class="g">8,388,608</span>
-  2h·k·d = 2 × 2048 × 2 × 128 = 2 × 524,288  = <span class="g">1,048,576</span>
-  3h·I   = 3 × 2048 × 11008 = 3 × 22,544,384 = <span class="g">67,633,152</span>
-  每层 ≈ 8,388,608 + 1,048,576 + 67,633,152
-       = <span class="g">77,070,336 ≈ 77.07 M</span>
-
-<span class="k">36 层合计：</span>
-  77.07 M × 36 = <span class="g">2,774.5 M ≈ 2.77 B</span>
-
-<span class="k">加 Embedding（V × h）：</span>
-  151936 × 2048 = <span class="g">311.2 M</span>
-  （tie=true → 只算一次，输出层复用）
-
-<span class="k">总计 ≈ 2.77 B + 0.31 B = 3.086 B ≈ 3.09 B</span> ✅
-  官方 3.09B — 对上了！</div>
-    <div class="callout"><strong>看穿模型：</strong>FFN 占了大头（每层约 67.6M，占总参数约 79%）——所以优化模型体积，FFN 才是主战场。</div>
-
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：Embedding 到底算不算？权重共享是什么</h3>
-    <p>这是最容易被问倒的细节，讲清楚就能显专业。</p>
-    <div class="board"><span class="k">Embedding 计不计入参数量？</span>
-  它是真实存在的权重 V × h（151936 × 2048 = 311 M），
-  <span class="g">当然算进「总参数量」</span>。
-  但有些端侧报告只关心「推理时反复读的 transformer 权重」，
-  会把 embedding 单列 —— <span class="k">说清口径就行，别被绕晕</span>。
-
-<span class="k">输出层 lm_head 与权重共享（tie embeddings）：</span>
-  模型最后要一个 V × h 的矩阵把隐藏态映射到词表分数。
-  小模型常让 lm_head <span class="g">直接复用 embedding 矩阵</span>（tie）。
-  Qwen2.5 config 里 <span class="g">tie_word_embeddings = true</span> → 只算一次。
-  若为 false，则要 <span class="r">额外 + 一份 V×h</span>（多 311 M）。
-
-<span class="k">LayerNorm 参数：</span>
-  每层 2 个 × 各 2×h（weight+bias）→ 本模型每层 8192，
-  36 层 ≈ 0.29 M，占总量 &lt;0.01%，<span class="k">手算可直接忽略</span>。</div>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：参数量 → 内存（接回第 1、2 章）</h3>
-    <p>算出参数量只是开始，架构师要立刻换算成内存。乘位宽、除 8。</p>
-    <div class="board"><span class="k">参数量 → 权重内存 = 参数量 × 每参数字节数</span>
-  全 fp16：3.086 B × 2 B = <span class="g">6.17 GB</span>
-  int8   ：3.086 B × 1 B = <span class="g">3.09 GB</span>
-  int4   ：3.086 B × 0.5 B = <span class="g">1.54 GB</span>
-            + scale 开销（约 3%） → 实际 <span class="g">≈ 1.6 GB</span>
-
-<span class="k">这就是第 1 章「3B int4 ≈ 2GB」的来源：</span>
-  参数 1.54 GB + 量化开销 + 运行时缓冲 → 约 2 GB（保守口径）。
-
-<span class="k">再接第 5 章：</span>
-  权重 1.6 GB + KV Cache（8K ≈ 288 MB） → 端侧常驻内存模型。</div>
-
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：5 分钟手算口诀</h3>
-    <div class="board"><span class="k">五步走（背下来，面试现场就能算）：</span>
-
-  1) 抄 6 个数：h, L, I, V, a, k
-  2) 算 head_dim  d = h / a
-  3) 每层 = 2h² + 2h·k·d + 3h·I
-  4) 总权重 = 每层 × L
-  5) 加 embedding：tie 则 +V·h 一次，否则 +2×(V·h)
-
-<span class="k">Qwen2.5-3B 复算：</span>
-  d = 2048/16 = 128
-  每层 ≈ 77.07 M → ×36 = 2.77 B → +0.31 B = <span class="g">≈ 3.09 B</span>
-
-<span class="k">不同口径要报清楚：</span>「transformer 权重 2.77B，含 embedding 3.09B」。</div>
-
-    <h3><span class="tag-lesson">讲解</span>7. 板书填空：参数量拆解空表</h3>
-    <p>填出 Qwen2.5-3B 每层的三项（用 h=2048, k=2, d=128, I=11008），再展开答案。</p>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：六个框架，先按「谁写的、给谁用」归位</h3>
+    <p>别背参数，先分阵营。所有推理框架只分两类：<b>通用跨平台</b> 和 <b>芯片官方</b>。</p>
     <table class="tight">
-      <thead><tr><th>项目</th><th>公式</th><th>参数量</th></tr></thead>
+      <thead><tr><th>框架</th><th>阵营 / 出身</th><th>吃谁的算力</th><th>量化</th><th>端侧适配</th><th>典型产物</th></tr></thead>
       <tbody>
-        <tr><td>注意力 Q/O（2h²）</td><td>2 × h²</td><td class="fill">?</td></tr>
-        <tr><td>注意力 K/V（2h·k·d）</td><td>2 × h × k × d</td><td class="fill">?</td></tr>
-        <tr><td>FFN（3h·I）</td><td>3 × h × I</td><td class="fill">?</td></tr>
-        <tr><td>每层合计</td><td>三项相加</td><td class="fill">?</td></tr>
+        <tr><td><b>llama.cpp</b></td><td>社区，C++ 轻量引擎</td><td>CPU（+部分 GPU）</td><td>GGUF（Q4_K_M 等）</td><td>跨平台验证之王</td><td><code>.gguf</code></td></tr>
+        <tr><td><b>MNN</b></td><td>阿里，轻量引擎</td><td>手机 CPU/GPU</td><td>自有 int8/int4</td><td>移动端部署强</td><td><code>.mnn</code></td></tr>
+        <tr><td><b>TFLite</b></td><td>Google，Android 生态</td><td>Android CPU/NPU delegate</td><td>int8 为主</td><td>安卓离线模型</td><td><code>.tflite</code></td></tr>
+        <tr><td><b>ONNX Runtime</b></td><td>微软，通用运行时</td><td>多后端 EP（CPU/GPU/NPU）</td><td>依赖 EP</td><td>通用中间格式最强</td><td><code>.onnx</code></td></tr>
+        <tr><td><b>RKNN</b></td><td><b>瑞芯微官方</b></td><td><b>RK NPU 原生</b></td><td>int8 / per-channel PTQ</td><td><b>3576 官方支持</b></td><td><code>.rknn</code></td></tr>
+        <tr><td><b>QNN</b></td><td>高通官方</td><td>骁龙 Hexagon NPU</td><td>int8/int16</td><td>只吃高通芯片</td><td><code>.cpp/.bin</code></td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">判断口诀（背下来）：</span>
+
+  芯片官方工具（RKNN / QNN） = <span class="g">能吃满自家 NPU，性能最好</span>
+                              但 <span class="r">只认自家芯片</span>
+  通用框架（llama.cpp / ONNX / MNN / TFLite）
+                             = <span class="g">换平台方便</span>
+                              但 <span class="r">对专用 NPU 只吃个皮毛</span>
+
+<span class="k">一句话：落地认官方，验证认通用。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：为什么 RK3576 一定用 RKNN</h3>
+    <p>RKNN 不是「一个软件」，而是瑞芯微的一整套工具链。搞清三件套，你就知道数据是怎么流的。</p>
+    <div class="board"><span class="k">RKNN 三件套：</span>
+  1) rknn-toolkit2  → 在 PC 上把 onnx 转成 <span class="g">.rknn</span>（内含量化）
+  2) librknnrt      → 板端 <span class="g">运行时库</span>，真正调 NPU
+  3) rknn_server    → 板端服务（PC 联调时用）
+
+<span class="k">支持芯片：</span>RK3576 / RK3588 / RK3566 / RK3562 …（3576 在列 ✅）
+<span class="k">量化口径：</span>int8 为主，per-channel PTQ，<span class="r">必须给校准集</span>
+
+<span class="k">选型边界：</span>
+  芯片是 RK 系 → <span class="g">RKNN</span>（唯一正解）
+  芯片不是 RK  → <span class="r">RKNN 用不了</span>，回头找通用框架或厂商工具
+</div>
+    <div class="callout"><strong>结论句：</strong>「只要目标板是 RK3576，模型最终一定编成 <code>.rknn</code> 走 NPU，别无他路。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：ONNX 基础（转换链路的中间层）</h3>
+    <p>上一节那句「在 PC 上把 onnx 转成 .rknn」，这个 onnx 到底是什么？它是端侧落地链路上<b>绕不开的中间层</b>。</p>
+    <div class="board"><span class="k">为什么需要 ONNX？</span>
+  训练框架各家不同：PyTorch / TensorFlow / Paddle……
+  部署引擎也各家不同：RKNN / QNN / TensorRT / OpenVINO……
+  如果两两直连，要写 N×M 个转换器 → 组合爆炸。
+  ONNX 站出来当「<span class="g">通用中间格式</span>」：
+    PyTorch ──导出──▶ <span class="g">ONNX</span> ──转换──▶ RKNN(.rknn) / QNN / …
+  一次导出、多方消费 → 把 N×M 收敛成 N+M。
+
+<span class="k">端侧链路（本课主线）：</span>
+  PyTorch 权重 ──export──▶ <span class="g">ONNX(.onnx)</span> ──rknn-toolkit2──▶ .rknn ──▶ RK NPU</div>
+    <div class="board"><span class="k">ONNX 的两个核心概念：</span>
+
+  ① 图（Graph）
+     ONNX 把模型存成一张「<span class="g">计算图</span>」：
+     node（算子）+ tensor（张量）+ initializer（权重常量）。
+     · 算子 = Add / MatMul / Softmax / Conv / Reshape …
+     · 张量 = 数据流，带名字和 shape（常有动态维，如 batch/seq 用 '?'）
+
+  ② opset（算子集版本）
+     opset 是「<span class="g">该用哪个版本的算子定义</span>」的版本号。
+     · opset 太低 → 老算子表达不了新模型（如 RoPE、SwiGLU）
+     · opset 太高 → 目标工具链还不认识 → <span class="r">转换报错</span>
+     · 经验：导出时选目标工具链<span class="g">支持范围内的 opset</span>（RKNN 常停在中等版本）
+
+<span class="k">一句话：opset 是 ONNX 与下游工具链之间的"接口版本"。</span></div>
+    <div class="board"><span class="k">为什么转换报错，多半是 ONNX 算子不兼容？</span>
+  PyTorch 里一个简单操作，导出后可能是自定义 / 融合 / 高版本算子：
+    · 用了 RKNN/TFLite 不支持的算子 → <span class="r">Unsupported operator</span>
+    · 动态 shape 推断不出来 → shape 报错
+    · opset 与目标工具链不匹配 → 版本报错
+  排查顺序（背下来）：
+    ① 看报错里点名的<span class="g">算子名</span> → 是不是在目标工具链支持列表里
+    ② 用 <span class="g">netron</span> 打开 onnx，肉眼找可疑算子（自定义/高版本）
+    ③ 回 PyTorch 侧改写：换等价算子、去掉不支持的 op、固定 shape、调 opset
+  结论：<span class="k">端侧模型转换的坑，八成都出在 ONNX 这一层。</span></div>
+    <div class="board"><span class="k">用 netron 看模型（实操工具）</span>
+  netron = 开源的模型可视化工具，双击 .onnx / .rknn 就能看图。
+  能看：算子名字、连接关系、每层 shape、权重张量大小。
+  用途：确认导出对不对、找不兼容算子、核对输入输出名字/shape。
+  （它是 PC 上的工具，不用装到板子上。）</div>
+    <div class="callout"><strong>技术要点：</strong>「PyTorch 到 RKNN 中间要过 ONNX 这一层——它是跨框架的通用交换格式；转换报错大多不是模型写错，而是 ONNX 算子/opset 与目标工具链不兼容，我会用 netron 定位到具体算子再回 PyTorch 改写。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：推理全流程拆解</h3>
+    <p>从文本到文本，一共六步。每一章后面都会拆其中一段，这里先建全局地图。</p>
+    <div class="board"><span class="k">推理流程（从文本到文本）：</span>
+
+  tokenize     文本 → token id      （BPE / SentencePiece 分词器）
+     ↓
+  embedding    id  → 向量 [hidden]  （查表，一次搞定）
+     ↓
+  N × Transformer 层:
+        LayerNorm → <span class="g">Attention</span> → 残差
+        LayerNorm → <span class="g">FFN</span>       → 残差
+     ↓
+  logits       最后位置的向量 → [vocab] 维分数
+     ↓
+  sampling     greedy/top-k/top-p/temperature → 选出 <span class="g">1 个 id</span>
+     ↓
+  detokenize   id → 文本          （拼回可读字符串）
+
+<span class="k">架构师关注点：</span>tokenize/detokenize 是 CPU 小开销，
+真正吃时间的是 <span class="g">N × Transformer 层</span> 和 <span class="g">sampling</span>。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：prefill 与 decode —— 两阶段性质完全不同</h3>
+    <p>很多人以为「生成」是一件事，其实是<b>两个物理过程</b>。这是本章最重要的一张板书。</p>
+    <div class="board"><span class="k">【Prefill 预填充】</span>
+  输入：整段 prompt（比如 512 个 token），<span class="g">一次性并行</span>处理
+  算子：矩阵 × 矩阵（matmul）→ <span class="g">算力密集</span>（compute-bound）
+  目的：把这 512 个 token 的 K/V 全部算好，存进 KV Cache
+  指标：tokens/s，衡量「吃 prompt 快不快」
+
+<span class="k">【Decode 解码】</span>
+  输入：每次只喂 <span class="g">1 个</span> 新 token
+  算子：矩阵 × 向量（matvec）→ <span class="r">带宽密集</span>（memory-bound）
+  目的：算下一个 token，把新 K/V 追加进 Cache
+  指标：tokens/s，衡量「吐字快不快」
+
+<span class="r">同一个模型，prefill 吞吐常是 decode 的 5~10 倍。</span>
+原因：matmul 每读一次权重能算一大片；matvec 每步都要把 2GB 权重全读一遍。</div>
+    <div class="callout"><strong>技术要点：</strong>「首字延迟看 prefill，出字速度看 decode」——这句话能把两个阶段的性质一次说清。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：用 llama.cpp verbose 看每步耗时</h3>
+    <p>光讲理论不行，得会<b>看数据</b>。llama.cpp 加 <code>-v</code>（verbose）就会打印分段耗时。</p>
+    <div class="board"><span class="k">命令：</span>
+  llama-cli -m qwen2.5-3b-Q4_K_M.gguf -p "你好" -n 128 -v
+
+<span class="k">看这几行：</span>
+  load time          = 加载模型耗时（磁盘 IO + 解量化）
+  prompt eval time   = <span class="g">prefill</span> 耗时 / token 数
+  eval time          = <span class="g">decode</span> 耗时 / token 数
+  total time         = 端到端总耗时
+
+<span class="k">手算示范：</span>
+  prompt eval 512 tok / 12.0 s → 512 / 12.0 = <span class="g">42.7 tok/s</span>（prefill）
+  eval        128 tok / 25.6 s → 128 / 25.6 = <span class="g">5.0 tok/s</span>（decode）
+  load        2.1 s
+
+<span class="k">判读：</span>
+  decode 5 tok/s 就是用户看到的出字速度（3B int4 产品场景 3.5~5.5 量级）；<span class="r">这才是优化重点</span>。
+  prefill 慢 → 首字延迟高（长 prompt 场景要专门优化）。</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：选型决策（背下来）</h3>
+    <div class="board"><span class="k">场景 → 框架</span>
+
+  RK3576 生产落地      → <span class="g">RKNN</span>（.rknn，吃 NPU，性能最好）
+  跨平台 / 快速验证    → <span class="g">llama.cpp + GGUF Q4_K_M</span>（CPU 就能跑）
+  Android 原生 App     → MNN / TFLite
+  高通平台（如手机）   → <span class="g">QNN</span>
+
+<span class="k">选型结论（RK3576 + 3B）：</span>
+「生产用 RKNN，官方 NPU 支持最好、能吃到 6 TOPS；
+ 开发和验证阶段用 llama.cpp 跑 GGUF Q4_K_M，方便跨平台对比。
+ 两者产物不通用，最终要转 .rknn。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书填空：框架速查表</h3>
+    <p>先自己填，再展开答案。空格处填「阵营」和「吃谁的算力」。</p>
+    <table class="tight">
+      <thead><tr><th>框架</th><th>阵营</th><th>吃谁的算力</th><th>端侧地位</th></tr></thead>
+      <tbody>
+        <tr><td>llama.cpp</td><td class="fill">?</td><td class="fill">?</td><td>跨平台验证</td></tr>
+        <tr><td>RKNN</td><td class="fill">?</td><td class="fill">?</td><td>3576 落地</td></tr>
+        <tr><td>QNN</td><td class="fill">?</td><td class="fill">?</td><td>高通平台</td></tr>
+        <tr><td>ONNX Runtime</td><td class="fill">?</td><td class="fill">?</td><td>通用中间格式</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
-      <div class="board">Q/O：2 × 2048² = <span class="g">8,388,608</span>
-K/V：2 × 2048 × 2 × 128 = <span class="g">1,048,576</span>
-FFN：3 × 2048 × 11008 = <span class="g">67,633,152</span>
-每层合计 = 8,388,608 + 1,048,576 + 67,633,152
-        = <span class="g">77,070,336 ≈ 77.07 M</span>
-
-<span class="k">× 36 层 = 2.77 B；+ embedding 0.31 B = 3.09 B</span>
-FFN 占比 ≈ 67.63 / 77.07 ≈ <span class="g">88%</span>（每层内）。</div>
+      <table class="tight">
+        <thead><tr><th>框架</th><th>阵营</th><th>吃谁的算力</th><th>端侧地位</th></tr></thead>
+        <tbody>
+          <tr><td>llama.cpp</td><td>通用跨平台</td><td>CPU 为主</td><td>跨平台验证</td></tr>
+          <tr><td>RKNN</td><td>芯片官方（瑞芯微）</td><td>RK NPU 原生</td><td>3576 落地</td></tr>
+          <tr><td>QNN</td><td>芯片官方（高通）</td><td>骁龙 Hexagon NPU</td><td>高通平台</td></tr>
+          <tr><td>ONNX Runtime</td><td>通用跨平台</td><td>多后端 EP</td><td>通用中间格式</td></tr>
+        </tbody>
+      </table>
     </details>
   </div>
 
@@ -194,92 +241,105 @@ FFN 占比 ≈ 67.63 / 77.07 ≈ <span class="g">88%</span>（每层内）。</d
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>逐矩阵参数量手算表</h3></div>
+    <div class="head"><span class="num">1</span><h3>六框架对比表</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书②的公式整理成一张「每个权重矩阵 → 参数量」的对照表。</dd>
-      <dt>要掌握</dt><dd>Q/K/V/O 四个投影、FFN 三个矩阵、Embedding 的算法与符号定义。</dd>
-      <dt>实操步骤</dt><dd>写 <code>param_math.md</code>：矩阵清单表（名称 / 形状 / 参数量公式 / 说明），并把 Qwen2.5-3B 的数字代入填满。</dd>
-      <dt>检验标准</dt><dd>合上讲义，能默写「每层 = 2h² + 2h·k·d + 3h·I」并解释每一项。</dd>
+      <dt>目标</dt><dd>把板书①扩成你的框架矩阵：llama.cpp / MNN / TFLite / ONNX Runtime / RKNN / QNN 六列对比。</dd>
+      <dt>要掌握</dt><dd>「阵营 / 吃谁算力 / 量化方式 / 端侧适配 / 产物格式」五个维度的差别。</dd>
+      <dt>实操步骤</dt><dd>写 <code>framework_matrix.md</code>：6 行 × 5 列表格 + 一句话「哪两个是芯片官方工具、为什么它们性能最好」。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能说出「落地认官方（RKNN/QNN），验证认通用（llama.cpp/ONNX）」。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>参数量计算器（核心实操）</h3></div>
+    <div class="head"><span class="num">2</span><h3>真机跑 llama.cpp，抓 prefill/decode 数据（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>写一个读 <code>config.json</code> 就算总参数量的脚本。</dd>
-      <dt>要掌握</dt><dd>从 config 字段推导 head_dim；区分「transformer 权重」与「含 embedding」两个口径；处理 tie_word_embeddings。</dd>
-      <dt>实操步骤</dt><dd>写 <code>param_calc.py</code>：函数 <code>count_params(cfg)</code>，读入 Qwen2.5-3B config，分层打印（每层注意力 / FFN / 总计 / embedding），并与手算表对照。</dd>
-      <dt>检验标准</dt><dd>脚本输出总参数量 ≈ 3.09 B，与官方一致。</dd>
+      <dt>目标</dt><dd>亲手跑一个 GGUF 模型，用 verbose 看到 prefill 与 decode 的真实速度差。</dd>
+      <dt>要掌握</dt><dd>llama.cpp 的编译/安装、<code>-v</code> 输出含义、tok/s 的手算换算。</dd>
+      <dt>实操步骤</dt><dd>① 装好 llama.cpp；② 下一个 3B 级 GGUF（Q4_K_M）；③ 用 <code>-p</code> 给一段长 prompt、<code>-n 128 -v</code> 跑；④ 抓 prompt eval / eval / load 三段耗时，手算 tok/s，记进 <code>llama_perf.md</code>（附原始日志）。</dd>
+      <dt>检验标准</dt><dd>能指出「decode tok/s 明显低于 prefill tok/s」，并解释原因是 matvec 带宽密集。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>Qwen2.5-3B 手算验证</h3></div>
+    <div class="head"><span class="num">3</span><h3>画推理流程图</h3></div>
     <dl>
-      <dt>目标</dt><dd>用纸笔完整复算一遍 3.09 B，作为对照基准。</dd>
-      <dt>要掌握</dt><dd>手算与脚本结果的一致性；为什么忽略 LayerNorm。</dd>
-      <dt>实操步骤</dt><dd>写 <code>qwen3b_calc.md</code>：逐步手算过程（抄字段 → 算 d → 每层 → ×36 → +embedding），最后与脚本输出并排对照。</dd>
-      <dt>检验标准</dt><dd>手算与脚本结果误差 &lt; 1%，能解释剩下的 0.3 M 是 LayerNorm。</dd>
+      <dt>目标</dt><dd>把 tokenize → embedding → attention+FFN → logits → sampling → detokenize 画成一张图。</dd>
+      <dt>要掌握</dt><dd>六步的顺序、每步的输入/输出张量形状、哪些步骤在 CPU、哪些吃 NPU。</dd>
+      <dt>实操步骤</dt><dd>写 <code>inference_flow.md</code>：用文字框图/箭头把流程画全，标注每步耗时占比与执行单元。</dd>
+      <dt>检验标准</dt><dd>能对着图独立讲清「prefill 在哪、decode 在哪、KV Cache 何时写入」。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>拆一层看结构图</h3></div>
+    <div class="head"><span class="num">1</span><h3>RKNN 工具链调研报告</h3></div>
     <dl>
-      <dt>目标</dt><dd>把一个解码层的张量流画清楚：输入 → LayerNorm → Q/K/V/O → 残差 → LayerNorm → FFN → 残差。</dd>
-      <dt>要掌握</dt><dd>每步张量形状的变化；参数量集中在哪几处。</dd>
-      <dt>实操步骤</dt><dd>写 <code>layer_breakdown.md</code>：文字框图/箭头图，标注每步形状（如 [hidden] → [a·d]）与对应矩阵参数量。</dd>
-      <dt>检验标准</dt><dd>能对着图讲 3 分钟，说清「参数量为什么 88% 在 FFN」。</dd>
+      <dt>目标</dt><dd>搞清 RKNN 三件套（rknn-toolkit2 / librknnrt / rknn_server）各自职责。</dd>
+      <dt>要掌握</dt><dd>PC 端转换 → 板端运行的完整链路；支持芯片列表；量化为何要给校准集。</dd>
+      <dt>实操步骤</dt><dd>写 <code>rknn_notes.md</code>：三件套职能表 + 「onnx → .rknn → NPU 推理」链路图；查瑞芯微文档补充支持芯片与实际命令。</dd>
+      <dt>检验标准</dt><dd>能解释「为什么 RKNN 产物只能跑在 RK 芯片上」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>《参数量验证报告》（一页）</h3></div>
+    <div class="head"><span class="num">2</span><h3>用 netron 打开一个 ONNX 看算子（实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>综合本章产出，写一份可交付的验证报告——本章核心产出。</dd>
-      <dt>要掌握</dt><dd>把「config 字段 + 手算 + 脚本 + 内存换算」串成结论。</dd>
-      <dt>实操步骤</dt><dd>写 <code>param_verify.md</code>（一页）：①模型与 config 字段 ②手算结论（2.77B / 3.09B 两个口径）③脚本验证 ④内存换算（fp16/int8/int4）⑤风险（tie、口径歧义）。</dd>
-      <dt>检验标准</dt><dd>别人拿这页，不用问你就能复现 3.09B 并换算出内存。</dd>
+      <dt>目标</dt><dd>亲手导出一个 ONNX 并用 netron 打开，看清它的计算图与算子——把板书③落到手上。</dd>
+      <dt>要掌握</dt><dd>ONNX 图结构（node / tensor / initializer）、opset 概念、如何用 netron 定位算子。</dd>
+      <dt>实操步骤</dt><dd>写 <code>onnx_notes.md</code>：① 任选一个小模型（如一个小 MLP，或 Qwen 的一个 Transformer block）用 PyTorch <code>torch.onnx.export</code> 导出 <code>.onnx</code>；② 用 netron 打开，列出 top 5 高频算子（如 MatMul / Softmax / Add / Reshape），记录输入输出的名字与 shape；③ 记下导出用的 opset 版本，说明 opset 选低 / 选高分别会出什么问题。</dd>
+      <dt>检验标准</dt><dd>能对着 netron 的图讲清「这个模型由哪些算子组成、哪个算子在 RKNN 上可能不兼容、该怎么改」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
+    <div class="head"><span class="num">3</span><h3>《RK3576 + 3B 框架选型报告》（一页）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>综合上面产出，给一个明确结论——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把「框架对比 + ONNX 链路 + RKNN 链路 + 流程耗时」串成一个决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>framework_selection.md</code>（一页）：①场景 ②候选框架 ③取舍理由 ④最终结论（生产 RKNN；验证 llama.cpp+GGUF Q4_K_M）⑤风险（RKNN 需校准集、ONNX 算子兼容性、跨平台产物不通用）。</dd>
+      <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做——架构文档的标准。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>要点自测（快问快答）</h3></div>
     <dl>
       <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
-      <dt>实操步骤</dt><dd>自问自答：每层参数量公式是什么？Qwen2.5-3B 多少参数？embedding 算不算？tie 是什么？3.09B fp16/int8/int4 各多少 GB？</dd>
-      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
+      <dt>实操步骤</dt><dd>自问自答：RK3576 用哪个框架？RKNN 三件套是什么？为什么需要 ONNX、opset 是什么？转换报错怎么排查？prefill 和 decode 区别？为什么 decode 慢？llama.cpp 怎么看分段耗时？</dd>
+      <dt>检验标准</dt><dd>每题都能立刻、不翻资料答出。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>param_math.md</code> —— 逐矩阵参数量手算表（公式 + Qwen2.5-3B 代入）。</li>
-    <li><code>param_calc.py</code> —— 参数量计算器（读 config.json，分层输出）。</li>
-    <li><code>qwen3b_calc.md</code> —— Qwen2.5-3B 手算过程与脚本对照。</li>
-    <li><code>layer_breakdown.md</code> —— 单层结构图（张量流 + 参数量分布）。</li>
-    <li><code>param_verify.md</code> —— 参数量验证报告（一页，核心产出）。</li>
+    <li><code>framework_matrix.md</code> —— 六框架对比表（阵营/算力/量化/适配/产物）。</li>
+    <li><code>inference_flow.md</code> —— 推理全流程图（六步 + 张量形状 + 执行单元）。</li>
+    <li><code>llama_perf.md</code> —— llama.cpp verbose 实测数据 + tok/s 手算（附原始日志）。</li>
+    <li><code>rknn_notes.md</code> —— RKNN 三件套调研 + 转换链路。</li>
+    <li><code>onnx_notes.md</code> —— 导出 ONNX + netron 算子分析笔记（链路中间层）。</li>
+    <li><code>framework_selection.md</code> —— RK3576 + 3B 框架选型报告（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>5 分钟内手算出 Qwen2.5-3B ≈ 3.09B（含 embedding）。</li>
-    <li>能背出每层公式 <code>2h² + 2h·k·d + 3h·I</code> 并解释每项。</li>
-    <li>能说清 GQA 为什么让 K/V 矩阵变小、embedding 是否计入、tie 的含义。</li>
-    <li>能立刻把参数量换算成内存：3.09B fp16 ≈ 6.17GB、int8 ≈ 3.09GB、int4 ≈ 1.54GB。</li>
+    <li>给「RK3576 + 3B」能立刻说出「生产用 RKNN（吃 NPU），验证用 llama.cpp + GGUF Q4_K_M」。</li>
+    <li>能背出推理六步：tokenize → embedding → attention+FFN → logits → sampling → detokenize。</li>
+    <li>能讲清 prefill（matmul、算力密集）与 decode（matvec、带宽密集）的区别。</li>
+    <li>会用 llama.cpp <code>-v</code> 读出 prompt eval / eval 耗时并手算 tok/s。</li>
+    <li>能说清 ONNX 的作用（跨框架通用中间格式）与 opset 概念，会用 netron 看算子、定位转换报错。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「给我一个模型的 config.json，我就能算出参数量。每层的参数是 2 倍 hidden 的平方，加 2 乘 hidden 乘 KV 头数乘 head_dim，加 3 乘 hidden 乘 intermediate，后面再乘层数，最后加上 embedding 的 vocab 乘 hidden。以 Qwen2.5-3B 为例，hidden 2048、36 层、intermediate 11008、词表 15 万、Q 头 16、KV 头 2，head_dim 128，每层约 77M，36 层约 2.77B，embedding 约 0.31B，因为 tie_word_embeddings 是 true 只算一次，总共约 3.09B，和官方一致。FFN 占了参数量的将近八成，所以如果要压模型体积，重点在 FFN。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能看懂 config、能现场手算参数量与内存——模型结构与参数分析能力。</p>
+    <span class="tag">技术口径</span>
+    <p>推理框架分两类：芯片官方工具与通用框架。RK3576 的 NPU 属瑞芯微自研，生产落地走 RKNN——onnx 经 rknn-toolkit2 转成 .rknn，板端由 librknnrt 直接驱动 NPU，才能拿到 6 TOPS 的算力。开发与跨平台验证阶段用 llama.cpp 跑 GGUF Q4_K_M，CPU 即可运行、便于对比，但它吃不到 NPU，最终产物仍要转回 RKNN。</p>
+    <p>PyTorch 到 RKNN 必须经过 ONNX：它是跨框架的通用交换格式，链路是 PyTorch → ONNX → .rknn。转换报错十有八九不是模型写错，而是 ONNX 算子或 opset 跟目标工具链不兼容；用 netron 打开计算图即可定位到具体算子，再回 PyTorch 侧改写。</p>
+    <p style="margin:0">推理流程上，prefill 是把整段 prompt 并行算、矩阵乘矩阵、偏算力；decode 是逐 token 生成、矩阵乘向量、受内存带宽限制。所以首字延迟看 prefill、出字速度看 decode。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3.09B int4 ≈ 1.6 GB，加上 KV Cache 与运行时缓冲，3576 的 <strong>16 GB LPDDR5</strong> 余量充足。</li>
-      <li>FFN 占参数近八成，是<strong>量化与压缩的主战场</strong>；注意 FFN 权重对精度更敏感。</li>
-      <li>若 config 里 <strong>tie_word_embeddings = true</strong>，别把输出层重复计一次，否则参数量会算大。</li>
-      <li>回报参数量时<strong>务必说清口径</strong>（是否含 embedding、是否含 lm_head），这是专业度的体现。</li>
+      <li>3576 的 NPU 算力约 <strong>6 TOPS（int8）</strong>，只有走 <strong>RKNN</strong> 才吃得到；用 llama.cpp 只跑 CPU，吃不到 NPU。</li>
+      <li>模型落地链路是 <strong>PyTorch → ONNX → .rknn</strong>：ONNX 这层的算子/opset 兼容性直接决定转换成败。</li>
+      <li>RKNN 转换必须给<strong>校准集</strong>，第 4 章会用真实数据做校准。</li>
+      <li>端侧首字延迟主要卡在 <strong>prefill</strong>，长 prompt 场景要专门优化（如分块、批处理）。</li>
+      <li>decode 阶段是<strong>带宽瓶颈</strong>（第 8 章展开），3576 带宽三档（LPDDR5-4800 32-bit 理论峰值 ≈19 / NPU 独占 12~16 / 产品 7~11 GB/s）是硬约束。</li>
     </ul>
   </div>
 

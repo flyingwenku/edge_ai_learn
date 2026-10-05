@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>端侧 AI 架构师 · 14 章冲刺计划</title>
+<title>端侧 AI 架构 · 学习站</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html" class="active">总览</a>
     <a href="ch01.html">1</a>
@@ -25,73 +25,73 @@
     <a href="ch12.html">12</a>
     <a href="ch13.html">13</a>
     <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
-  <h1>14 章冲刺 · 端侧 AI 架构师</h1>
-  <p class="lead">目标：14 章内成为能面试「端侧 AI 架构师」岗位的人。定位不是算法工程师，而是<strong>能算内存、选方案、判瓶颈、做决策</strong>的系统架构师。</p>
+  <h1>端侧 AI 架构 · 学习站</h1>
+  <p class="lead">一套面向 <strong>端侧（边缘）AI 系统架构</strong>的课程。结构是「<strong>通用底座 → 领域插件 → 系统与架构</strong>」：先打跨领域通用的底子，再按任务领域（LLM / CV / 语音 / 传感器）补差异，最后回到系统层做整合与方案设计。目标是把「<strong>算内存、选方案、判瓶颈、跑链路、做验收</strong>」变成可复用的工程能力。</p>
 
-  <div class="grid cols-3" style="margin-top:18px">
+  <h2>平台：RK3576</h2>
+  <div class="grid cols-3" style="margin-top:14px">
     <div class="card"><div class="k">开发板</div><div class="v">RK3576</div></div>
-    <div class="card"><div class="k">NPU 算力</div><div class="v">6 TOPS</div></div>
-    <div class="card"><div class="k">内存带宽(理论/独占/产品)</div><div class="v" style="font-size:15px">19 / 12–16 / 7–11 GB/s</div></div>
+    <div class="card"><div class="k">NPU 算力</div><div class="v">6 TOPS int8</div></div>
+    <div class="card"><div class="k">内存</div><div class="v">最高 16 GB LPDDR5</div></div>
+    <div class="card"><div class="k">内存带宽·峰值</div><div class="v">≈19 GB/s</div></div>
+    <div class="card"><div class="k">带宽·NPU 独占</div><div class="v">12~16 GB/s</div></div>
+    <div class="card"><div class="k">带宽·产品场景</div><div class="v">7~11 GB/s</div></div>
     <div class="card"><div class="k">CPU</div><div class="v">4×A72 + 4×A53</div></div>
-    <div class="card"><div class="k">内存上限</div><div class="v">16 GB LPDDR5-4800</div></div>
-    <div class="card"><div class="k">每日投入</div><div class="v">8~10 h</div></div>
+    <div class="card"><div class="k">内存类型</div><div class="v">LPDDR5-4800 / 32-bit</div></div>
+    <div class="card"><div class="k">量化工具体系</div><div class="v">RKNN / rknn-llm</div></div>
   </div>
 
-  <h2>进度追踪表</h2>
+  <h2>章节目录</h2>
   <table>
-    <thead><tr><th>章节</th><th>主题</th><th>状态</th><th>产出</th><th>备注</th></tr></thead>
+    <thead><tr><th>章</th><th>主题</th><th>模块</th></tr></thead>
     <tbody>
-      <tr><td>1</td><td><a href="ch01.html">量化基础与内存估算</a></td><td><span class="badge st-done">完成</span></td><td><a href="ch01-quant-memory/memory_table.md">内存表</a> · <a href="ch01-quant-memory/quantize.py">量化脚本</a></td><td>2026-10-05 完成 · 秒答 5/5</td></tr>
-      <tr><td>2</td><td><a href="ch02.html">量化粒度与方案对比</a></td><td><span class="badge st-doing">进行中</span></td><td>—</td><td>2026-10-05 开始</td></tr>
-      <tr><td>3</td><td><a href="ch03.html">Transformer 结构与参数量</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>4</td><td><a href="ch04.html">注意力机制与位置编码</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>5</td><td><a href="ch05.html">KV Cache、PagedAttention 与性能瓶颈</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>6</td><td><a href="ch06.html">FFN、MoE 与架构趋势</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>7</td><td><a href="ch07.html">推理框架与流程拆解</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>8</td><td><a href="ch08.html">RK3576 上手</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>9</td><td><a href="ch09.html">模型转换与量化部署</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>10</td><td><a href="ch10.html">性能调优与精度评估</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>11</td><td><a href="ch11.html">项目主体搭建</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>12</td><td><a href="ch12.html">项目收尾与架构文档</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>13</td><td><a href="ch13.html">架构方案演练</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>14</td><td><a href="ch14.html">简历与面试准备</a></td><td><span class="badge st-todo">未开始</span></td><td>—</td><td>讲义已就绪</td></tr>
-      <tr><td>15+</td><td>并行阶段（投简历 + 面试 + 补深度）</td><td><span class="badge st-todo">未开始</span></td><td>—</td><td></td></tr>
+      <tr><td>1</td><td><a href="ch01.html">端侧 AI 概览与资源账本</a></td><td>Ⅰ 通用底座</td></tr>
+      <tr><td>2</td><td><a href="ch02.html">量化基础与方案对比</a></td><td>Ⅰ 通用底座</td></tr>
+      <tr><td>3</td><td><a href="ch03.html">推理流程与框架拆解</a></td><td>Ⅰ 通用底座</td></tr>
+      <tr><td>4</td><td><a href="ch04.html">部署链路与算子</a></td><td>Ⅰ 通用底座</td></tr>
+      <tr><td>5</td><td><a href="ch05.html">领域插件方法论与对照</a></td><td>Ⅱ 领域插件</td></tr>
+      <tr><td>6</td><td><a href="ch06.html">LLM① Transformer 结构与参数量</a></td><td>Ⅱ 领域插件 · LLM</td></tr>
+      <tr><td>7</td><td><a href="ch07.html">LLM② 注意力机制与位置编码</a></td><td>Ⅱ 领域插件 · LLM</td></tr>
+      <tr><td>8</td><td><a href="ch08.html">LLM③ KV Cache、PagedAttention 与带宽瓶颈</a></td><td>Ⅱ 领域插件 · LLM</td></tr>
+      <tr><td>9</td><td><a href="ch09.html">LLM④ FFN、MoE 与架构趋势</a></td><td>Ⅱ 领域插件 · LLM</td></tr>
+      <tr><td>10</td><td><a href="ch10.html">CV 检测全链路与量化敏感点</a></td><td>Ⅱ 领域插件 · CV</td></tr>
+      <tr><td>11</td><td><a href="ch11.html">语音 ASR/KWS 与流式推理</a></td><td>Ⅱ 领域插件 · 语音</td></tr>
+      <tr><td>12</td><td><a href="ch12.html">传感器时序信号识别</a></td><td>Ⅱ 领域插件 · 传感器</td></tr>
+      <tr><td>13</td><td><a href="ch13.html">RK3576 上手与部署实战</a></td><td>Ⅲ 系统与架构</td></tr>
+      <tr><td>14</td><td><a href="ch14.html">性能调优与精度评估</a></td><td>Ⅲ 系统与架构</td></tr>
+      <tr><td>15</td><td><a href="ch15.html">端侧系统架构与方案演练</a></td><td>Ⅲ 系统与架构</td></tr>
+      <tr><td>16</td><td><a href="ch16.html">项目实战：多模态端侧助手</a></td><td>Ⅲ 系统与架构</td></tr>
+      <tr><td>17</td><td><a href="ch17.html">项目收尾、稳定性与架构文档</a></td><td>Ⅲ 系统与架构</td></tr>
     </tbody>
   </table>
 
-  <h2>14 章大纲</h2>
-  <div class="grid cols-3">
-    <div class="card"><div class="k">第 1 章</div><div class="v" style="font-size:15px">量化基础与内存估算</div></div>
-    <div class="card"><div class="k">第 2 章</div><div class="v" style="font-size:15px"><a href="ch02.html" style="color:inherit;text-decoration:none">量化粒度与方案对比</a></div></div>
-    <div class="card"><div class="k">第 3 章</div><div class="v" style="font-size:15px"><a href="ch03.html" style="color:inherit;text-decoration:none">Transformer 结构与参数量</a></div></div>
-    <div class="card"><div class="k">第 4 章</div><div class="v" style="font-size:15px"><a href="ch04.html" style="color:inherit;text-decoration:none">注意力机制与位置编码</a></div></div>
-    <div class="card"><div class="k">第 5 章</div><div class="v" style="font-size:15px"><a href="ch05.html" style="color:inherit;text-decoration:none">KV Cache、PagedAttention 与性能瓶颈</a></div></div>
-    <div class="card"><div class="k">第 6 章</div><div class="v" style="font-size:15px"><a href="ch06.html" style="color:inherit;text-decoration:none">FFN、MoE 与架构趋势</a></div></div>
-    <div class="card"><div class="k">第 7 章</div><div class="v" style="font-size:15px"><a href="ch07.html" style="color:inherit;text-decoration:none">推理框架与流程拆解</a></div></div>
-    <div class="card"><div class="k">第 8 章</div><div class="v" style="font-size:15px"><a href="ch08.html" style="color:inherit;text-decoration:none">RK3576 上手</a></div></div>
-    <div class="card"><div class="k">第 9 章</div><div class="v" style="font-size:15px"><a href="ch09.html" style="color:inherit;text-decoration:none">模型转换与量化部署</a></div></div>
-    <div class="card"><div class="k">第 10 章</div><div class="v" style="font-size:15px"><a href="ch10.html" style="color:inherit;text-decoration:none">性能调优与精度评估</a></div></div>
-    <div class="card"><div class="k">第 11 章</div><div class="v" style="font-size:15px"><a href="ch11.html" style="color:inherit;text-decoration:none">项目主体搭建</a></div></div>
-    <div class="card"><div class="k">第 12 章</div><div class="v" style="font-size:15px"><a href="ch12.html" style="color:inherit;text-decoration:none">项目收尾与架构文档</a></div></div>
-    <div class="card"><div class="k">第 13 章</div><div class="v" style="font-size:15px"><a href="ch13.html" style="color:inherit;text-decoration:none">架构方案演练</a></div></div>
-    <div class="card"><div class="k">第 14 章</div><div class="v" style="font-size:15px"><a href="ch14.html" style="color:inherit;text-decoration:none">简历与面试准备</a></div></div>
-    <div class="card"><div class="k">第 15+ 章</div><div class="v" style="font-size:15px">并行阶段</div></div>
-  </div>
-
-  <h2>面试 5 句核心话术（最终脱口而出）</h2>
+  <h2>通用底座 · 核心速记</h2>
   <div class="grid cols-2">
-    <div class="card"><div class="k">内存估算</div><p>RK3576 是 LPDDR5-4800、32-bit，理论峰值约 19 GB/s；NPU 独占实测 12~16 GB/s；产品里同时开摄像头、NPU、屏幕，带宽被抢到 7~11 GB/s。decode 是带宽瓶颈，tok/s≈带宽÷模型字节。3B int4 约 2GB，产品场景只有 3.5~5.5 tok/s，NPU 独占 6~8；1.5B int4 约 1GB，产品场景 7~11 tok/s，最稳。所以我端侧选 1.5B~3B，7B 只有 2 tok/s 上下，不做实时对话。</p></div>
-    <div class="card"><div class="k">框架选型</div><p>RK3576 用 RKNN，官方 NPU 支持最好；跨平台验证用 llama.cpp + GGUF。</p></div>
-    <div class="card"><div class="k">KV Cache</div><p>3B 模型 8K 上下文的 KV Cache 约几百 MB，3576 内存够但要注意和模型本身争带宽。</p></div>
-    <div class="card"><div class="k">架构决策</div><p>端侧跑 1.5B~3B int4 做意图识别和简单对话，复杂推理走云端，断网降级到本地 1.5B。</p></div>
-    <div class="card"><div class="k">成本权衡</div><p>RK3576 方案比 3588 便宜，带宽低一些但够用，适合中端端侧 AI 产品。</p></div>
+    <div class="card"><div class="k">内存估算</div><p>权重内存 ≈ 参数量 × 每参数字节；int4 真实占用 ≈ 净值 × 1.3。3B int4 ≈ 2GB，7B fp16 ≈ 14GB。</p></div>
+    <div class="card"><div class="k">精度 → 字节</div><p>fp32 = 4B，fp16/bf16 = 2B，int8 = 1B，int4 = 0.5B（两参数打包进 1 字节）。</p></div>
+    <div class="card"><div class="k">带宽 → 吞吐</div><p>decode 是带宽瓶颈：tok/s ≈ 有效带宽 ÷ 模型真实占用。RK3576 产品场景 7~11 GB/s。</p></div>
+    <div class="card"><div class="k">实测 token 速度</div><p>3B int4：产品场景 3.5~5.5 tok/s、NPU 独占 6~8；1.5B int4：产品 7~11 tok/s。</p></div>
+    <div class="card"><div class="k">量化粒度</div><p>int8 用 per-channel；int4 必须 group-wise（group_size=128，scale 开销约 3.1%）。</p></div>
+    <div class="card"><div class="k">KV Cache</div><p>KV ≈ 2 × layers × kv_heads × head_dim × seq_len × bytes；越短上下文越省带宽。</p></div>
+    <div class="card"><div class="k">瓶颈判据</div><p>算术强度 = 计算量 ÷ 访存量，与机器「脊点」比较；LLM decode 几乎总是带宽瓶颈。</p></div>
+    <div class="card"><div class="k">部署链路</div><p>PyTorch → ONNX → 平台工具链（RKNN）→ NPU；算子不支持会回退 CPU 导致性能暴跌。</p></div>
   </div>
 
-  <div class="footer">工作目录：D:\workspace\lobster\edge-ai-architect　·　每章一个 HTML 页面，用浏览器直接打开。</div>
+  <h2>学习流程</h2>
+  <ul class="clean">
+    <li>每章两部分：<strong>课堂讲义（板书）</strong>先讲原理与手算，<strong>练习（交作业）</strong>再动手产出。</li>
+    <li>讲义里的「板书填空」自己先填，再展开答案自查。</li>
+    <li>每章有明确的「当日产出」与「检验标准」，产出要落到文件、数字。</li>
+  </ul>
+
+  <div class="footer">端侧 AI 架构 · 学习站　·　通用底座 → 领域插件 → 系统与架构</div>
 </div>
 </body>
 </html>

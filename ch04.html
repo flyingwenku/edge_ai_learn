@@ -3,330 +3,449 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 4 章：注意力机制与位置编码（讲义 + 作业）</title>
+<title>第 4 章：部署链路与算子</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html" class="active">第 4 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html" class="active">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 4 章：注意力机制与位置编码</h1>
-  <p class="lead"><strong>章节目标：</strong>搞懂「<b>注意力决定怎么搬运信息、GQA 决定端侧跑不跑得动</b>」——拿到任意一个模型 config，能一眼算出它的 KV Cache 大小，并说出该不该换成 GQA。</p>
+  <h1>第 4 章：部署链路与算子</h1>
+  <p class="lead"><strong>章节目标：</strong>把「会算」变成「会落地」——用 <b>rknn-toolkit2</b> 把 3B 模型转成 NPU 能吃的 <code>.rknn</code>，做完校准、量化、精度对比，最后能给出明确判断：<span class="key">「这个量化方案能不能上线？」</span></p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch04-attention</span>
+    <span class="chip">下午 4h · 4 个任务</span>
+    <span class="chip">产出目录：ch04-deploy</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点吃透 Q/K/V 直觉和 GQA 省带宽那笔账。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的手算 / 空表自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写笔记、跑脚本、出对比表。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把整条转换流水线和量化配置看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的配置表 / PPL 手算 / 带宽利用率自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真跑一遍转换与量化，出报告。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 3 章你把 Transformer 拆成了层。这一章啃最硬的那块骨头——<b>注意力（Attention）</b>。架构师不需要会推导公式，但必须能做到两件事：<span class="key">① 用一句人话解释 Q/K/V 在干什么；② 拿到 config 秒算 KV Cache，说清为什么端侧偏爱 GQA。</span>这两条直接对应面试题。</p>
+    <p>第 1~2 章你在纸上算：模型多大、用哪种量化、多少 tok/s。但架构师不能只会算，还得<b>真的把模型塞进 NPU</b>。这一步 90% 的人会翻车——不是报错就是精度崩，原因几乎都出在<b>校准集和量化配置</b>上。</p>
+    <div class="callout"><strong>你要能三件事：</strong>① 说清整条转换流水线每一步在干嘛；② 用一份配置把模型转出来并跑通；③ 量化前后精度差多少、<span class="key">差到什么程度就不能上线</span>。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：Q、K、V 的物理含义</h3>
-    <p>别被字母吓到。把注意力想成一次「<b>查字典</b>」：</p>
-    <div class="board"><span class="k">Q / K / V = 提问 / 索引 / 内容</span>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：整条流水线（HF → ONNX → RKNN → .rknn）</h3>
+    <p>NPU 不认识 PyTorch，只认识瑞芯微自己的 <b>.rknn</b>。所以中间要有「翻译」：先把 PyTorch 换成通用格式 ONNX，再由 rknn-toolkit2 编译成 .rknn。</p>
+    <div class="board"><span class="k">端侧 LLM 转换流水线（四段）</span>
 
-  Q (Query)  = 你要查的"问题"     → 当前 token 在问："谁跟我相关？"
-  K (Key)    = 字典的"索引/标签"   → 每个 token 举牌："我是关于什么的"
-  V (Value)  = 字典的"释义/内容"   → 每个 token 真正携带的信息
+① 原始权重    HuggingFace  /  PyTorch  (.safetensors)
+        │     取到模型 + tokenizer
+        ▼
+② 转换准备    ONNX 导出 / 直接喂 rkllm 的权重转换脚本
+        │     小模型走 onnx → rknn-toolkit2
+        │     LLM 走 rknn-llm（rkllm）一键转换
+        ▼
+③ 量化 + 编译  <span class="g">rknn-toolkit2</span> / rkllm
+        │     <span class="g">build(do_quantization=True, dataset=校准集)</span>
+        ▼
+④ 产物        <span class="k">.rknn</span>  （NPU 直接加载，与硬件绑定）
 
-<span class="k">计算三步（这就是注意力）：</span>
-  ① 拿 Q 去比每一个 K     → 算相似度分数  s = Q·K
-  ② softmax 把分数变成权重 → 权重和为 1，越大越"被关注"
-  ③ 按权重把 V 加权求和    → 输出 = 相关 token 内容的加权平均
+<span class="k">关键：.rknn 是"过编译"的</span>——它针对目标平台（rk3576）
+做过算子映射和量化，换个平台要在新平台重转。
+所以 <span class="r">target_platform 一定要写对</span>。</div>
+    <p>两条路线怎么选：小模型/ViT 走 <b>onnx + rknn-toolkit2</b>；LLM 走 <b>rknn-llm（rkllm）</b>，它内部封装了量化与权重打包，一条命令出 .rkllm。</p>
 
-<span class="k">一句话：Q 决定"看哪里"，K 决定"被谁看到"，V 是"被取走的内容"。</span></div>
-    <div class="callout">记住：注意力 = <b>按相关度，从所有 token 的 V 里"加权取货"</b>。它不是"筛选"，而是"加权平均"——所有 token 都会贡献一点，只是相关的高、不相关的低。</div>
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：量化配置三件套</h3>
+    <p>PTQ（训练后量化）能不能成，就看这三个参数。少一个都跑不起来，配错任何一个精度就崩。</p>
+    <div class="board"><span class="k">三件套 —— 缺一不可</span>
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：注意力公式的直觉 + 手算</h3>
-    <p>公式只有一个（不用推，看它每一步在干嘛）：</p>
-    <div class="formula">Attention(Q, K, V) = softmax( QKᵀ / √d<sub>k</sub> ) · V</div>
-    <div class="board"><span class="k">四步拆解（对着公式看物理含义）</span>
-  ① QKᵀ        → 每个 query 和每个 key 点积 = 相似度矩阵 (n×n)
-  ② /√d_k      → 缩放，防止点积随维度变大而"爆炸"（下面单独讲）
-  ③ softmax    → 每行归一化成权重（该 query 看各 token 的比例）
-  ④ ×V         → 按权重对 V 做加权求和
+① dataset（校准集）     <span class="r">必须给，且要真实</span>
+     作用：让量化器"看"一遍真实输入，统计每个张量的动态范围
+     形态：rknn-toolkit2 用小样本 bin/npy；
+           rkllm 用一段真实 prompt 文本
 
-<span class="k">手算示范：1 个 head，d_k=4，序列长度 n=3</span>
+② quantized_dtype（量化类型）
+     告诉编译器：权重几位、激活几位
+     <span class="g">w8a8</span>  权重 8 / 激活 8   → 最稳，3576 首选
+     <span class="g">w8a16</span> 权重 8 / 激活 16  → 精度更高，慢一些
+     <span class="g">w4a16</span> 权重 4 / 激活 16  → LLM 端侧主流，省内存
 
-  q = [1, 0, 1, 0]
+③ quantized_algorithm（量化算法）
+     normal         最直接（max 定标），快、够用
+     mmse           最小化量化误差，慢一点、精度更好
+     kl_divergence  分布对齐，对激活敏感场景好
 
-  K = [ k1=[1,0,1,0]
-        k2=[0,1,0,1]
-        k3=[1,1,0,0] ]
+<span class="k">一句话：dtype 决定"多省"，algorithm 决定"多准"。</span></div>
+    <div class="board"><span class="k">rkllm 转换配置示例（config.json）</span>
+{
+  "target_platform": "rk3576",
+  "model_path": "Qwen2.5-3B-Instruct",
+  "quantized_dtype": "w4a16",       <span class="g">// 权重 4 位，激活 16 位</span>
+  "quantized_algorithm": "normal",
+  "num_npu_core": 1,
+  "group_size": 128
+}
 
-① 相似度 s = q·k
-   s1 = 1·1 + 0·0 + 1·1 + 0·0 = 2
-   s2 = 1·0 + 0·1 + 1·0 + 0·1 = 0
-   s3 = 1·1 + 0·1 + 1·0 + 0·0 = 1
-   s = [2, 0, 1]
+<span class="k">rknn-toolkit2（小模型）等价写法</span>
+rknn.config(quantized_dtype='w8a8',
+            quantized_algorithm='mmse',
+            optimization_level=3)
+rknn.build(do_quantization=True, dataset='dataset.txt')</div>
 
-② 缩放：/ √d_k = / √4 = / 2
-   s' = [1.0, 0.0, 0.5]
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：校准集怎么做（决定成败）</h3>
+    <p>量化的本质是「给每个张量找一把尺子」。尺子的量程由校准数据决定——<b>你喂什么，它就以为世界长什么样</b>。喂错，线上就崩。</p>
+    <div class="board"><span class="k">校准集三条军规</span>
 
-③ softmax（e^1=2.718, e^0=1, e^0.5=1.649；和 = 5.367）
-   w = [0.507, 0.186, 0.307]      ← 权重和 = 1 ✅
+① 要真实   用产品里真实的输入分布。
+           聊天模型 → 用真实用户问答；别用随机噪声。
+           <span class="r">用随机数据校准 = 上线后精度崩的头号原因</span>
 
-④ 加权 V（设 v1=[1,0], v2=[0,1], v3=[1,1]）
-   out = 0.507·[1,0] + 0.186·[0,1] + 0.307·[1,1]
-       = [0.507+0.307, 0.186+0.307]
-       = <span class="g">[0.814, 0.493]</span>
+② 要够量   LLM：<span class="g">100 ~ 500 条</span>代表性 prompt；
+           视觉小模型：<span class="g">100 ~ 500 张</span>真实图片。
+           太少 → 统计不稳；太多 → 转换慢，收益递减。
 
-<span class="k">物理直觉：输出 = "按相关度加权平均后的 V"。相关度高的 token 占比大。</span></div>
-    <p>再单独把「为什么除以 √d<sub>k</sub>」讲透——这是面试常问的细节：</p>
-    <div class="board"><span class="k">为什么要 /√d_k ？看两种情形</span>
+③ 要覆盖   长度覆盖短/中/长（如 64 / 512 / 2048 tok）；
+           内容覆盖你的真实任务（客服/翻译/代码都要有样本）。
 
-不缩放：s = [2, 0, 1]   → softmax → [0.665, 0.090, 0.245]  （更尖锐）
-  缩放：s'= [1, 0, 0.5] → softmax → [0.507, 0.186, 0.307]  （更平滑）
+<span class="k">dataset.txt 长这样（每行一条样本文件路径）</span>
+calib/sample_000.bin
+calib/sample_001.bin
+...
+（LLM 路线则直接给一个 prompts.txt，每行一句真实问题）</div>
+    <div class="callout"><strong>工程要点：</strong>「校准集不是随便凑几百条，要匹配线上输入分布，长短和任务类型都覆盖，否则 outlier 会把某些层 scale 撑大、整层精度塌。」</div>
 
-原因：维度 d 越大，点积 q·k 的方差越大 → 分数差距被拉大
-     → softmax 趋于 one-hot（[1,0,0,...]）
-     → 梯度趋近 0，模型"学不动"。
-<span class="g">除以 √d_k 把方差压回 1 量级，softmax 保持"温和"。</span>
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：量化前后精度怎么比（PPL + 人肉）</h3>
+    <p>架构师不看「感觉变笨了」，要看<b>数字</b>。语言模型最通用的是<b>困惑度 PPL</b>：模型对下一 token 有多「困惑」，越低越好。</p>
+    <div class="formula">PPL = exp( −(1/N) · Σ ln p(wᵢ) )</div>
+    <p>先看手算，再套到量化对比上：</p>
+    <div class="board"><span class="k">手算：5 个 token 的概率 p = [0.8, 0.6, 0.9, 0.5, 0.7]</span>
 
-<span class="k">一句结论：√d_k 是为了防止 softmax 饱和（防止梯度消失）。</span></div>
-    <div class="callout"><b>架构师记这句就够：</b>Q 查、K 被查、V 取货；softmax 是"加权平均"，√d<sub>k</sub> 是"防止权重两极化"。</div>
+ln p = [-0.2231, -0.5108, -0.1054, -0.6931, -0.3567]
+Σ ln p = -1.8891
+平均负对数似然 = 1.8891 / 5 = <span class="g">0.3778</span>
+PPL = exp(0.3778) = <span class="g">1.459</span>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：MHA → MQA → GQA → MLA</h3>
-    <p>这四个是注意力的四种「共享 K/V 的方式」，演进目标只有一个：<b>压缩 KV Cache</b>。</p>
+<span class="k">量化后同位置概率变成 p' = [0.7, 0.5, 0.8, 0.4, 0.6]</span>
+Σ ln p' = -2.7001 → 平均 = 0.5400
+PPL' = exp(0.5400) = <span class="r">1.716</span>
+
+ΔPPL = 1.716 − 1.459 = 0.257  →  相对 <span class="r">+17.6%</span>
+
+<span class="k">经验判据（语言模型）：
+  PPL 涨幅 &lt; 5%    → 放心上线
+  5% ~ 10%         → 抽样人肉看，多半可接受
+  &gt; 10%           → 危险，换 w8a16 或调校准集</span></div>
+    <p><b>人肉对比（PPL 之外的必做项）：</b>固定 20 个真实问题，原始模型和量化模型各答一遍，记录「是否跑题 / 是否重复 / 是否截断 / 是否答对」。表格存档，这是给产品经理看的东西。</p>
+    <div class="board"><span class="k">人肉对比记录表（模板）</span>
+#  | 问题        | 原始质量(1-5) | 量化质量(1-5) | 现象
+---|-------------|--------------|--------------|----------------
+ 1 | 北京天气？    |      5       |      5       | 一致
+ 2 | 算 17×23     |      5       |      3       | 量化后算错
+ 3 | 写首五言诗    |      4       |      4       | 少一句
+...
+<span class="k">统计：平均分差 &gt; 0.5 或出现"事实错误"≥2 条 → 不能上线。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：三个调优旋钮 + 带宽利用率</h3>
+    <p>精度/速度不达标时，按下面顺序调。别瞎改，一次动一个变量。</p>
+    <div class="board"><span class="k">旋钮一览（按性价比排序）</span>
+
+① group_size（int4 专用）  常见 32 / 64 / <span class="g">128</span>
+     小 → 组内更精细、精度更高，但 scale 开销↑
+     128 是默认甜点（回顾第 2 章：开销仅 ~3%）
+
+② 校准数据   换更贴近线上、覆盖更全的样本
+     <span class="g">性价比最高的一招</span>，往往比调算法管用
+
+③ NPU 核心数 num_npu_core
+     3576 是<span class="r">单核 6 TOPS</span>（3588 才三核）；
+     3576 上固定 1，调它没意义；迁 3588 时才有 1/2/3 可选
+
+<span class="k">带宽利用率（判断跑没跑满的关键指标）</span>
+  decode 实测 6 tok/s（NPU 独占场景），模型 int4 3B ≈ 2.0 GB
+  有效带宽 = 6 × 2.0 = 12 GB/s
+  利用率   = 12 / 16 = <span class="g">75%</span>（对 NPU 独占上沿 16 GB/s）
+  <span class="k">→ &lt; 60% 说明没跑满，还有调优空间（batch/算子）</span>
+  <span class="k">→ 产品真实场景可达带宽只有 7~11 GB/s，decode 会降到 3.5~5.5 tok/s</span></div>
+    <div class="callout"><strong>一句话记住：</strong><span class="key">带宽利用率 = tok/s × 模型真实GB ÷ 有效带宽上限</span>（NPU 独占 12~16 / 产品 7~11 GB/s）。它是判断「瓶颈在带宽还是在别处」的尺子，比单纯看 tok/s 有用得多。</div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：上线判断（本章结论）</h3>
+    <div class="board"><span class="k">能不能上线？三关过完才敢点头</span>
+
+① 精度关   PPL 涨幅 &lt;5% 且人肉对比无事实错误
+② 性能关   tok/s 达产品延迟目标（如 &gt; 5 tok/s）
+           且带宽利用率 ≥ 60%（说明已榨干带宽）
+③ 稳定关   连续对话 30 分钟不 OOM、不崩、显存/内存平稳
+
+三关全过 → <span class="g">可以上线</span>
+任一不过 → <span class="r">回退方案：w4a16 → w8a16，或换校准集重转</span>
+
+<span class="k">判断结论（「这个量化方案能不能上线」）：</span>
+「我按三关判：PPL 涨幅、人肉对比、带宽利用率与稳定性。
+3B w4a16 若 PPL 涨幅 &lt;5%、实测 &gt;5 tok/s、利用率 ≥60%、长跑不 OOM、
+人肉无事实错误——就上线；否则退 w8a16 或补校准集重转。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：ONNX 算子排坑（PyTorch → ONNX → RKNN）</h3>
+    <p>量化是「转换」的后半程，前半程是<b>算子能不能转过去</b>。NPU 只认一套固定的算子集，PyTorch 里花哨的写法往往在导出 ONNX 或编译 RKNN 时炸掉。报错看似杂乱，其实就三类。</p>
+    <div class="board"><span class="k">转换链路：PyTorch → ONNX → RKNN（三段都要过）</span>
+
+  PyTorch(.pt/.safetensors)
+        │  torch.onnx.export / zoo 的导出脚本
+        ▼
+  ONNX(.onnx)        ← ① 算子是否都被 ONNX 支持？opset 版本对不对？
+        │  rknn-toolkit2: load_onnx → build
+        ▼
+  RKNN(.rknn)        ← ② 算子是否都被 NPU 支持？shape 是否静态？
+
+<span class="k">三段各有各的坑，报错信息不一样，要对号入座。</span></div>
+
+    <div class="board"><span class="k">三类高频报错 → 定位 → 处理</span>
+
+① 不支持的算子（Unsupported operator: XXX）
+   现象：ONNX 里带了自定义 / 冷门算子（如特殊 GridSample、
+         deform conv、自定义 attention、非标 Reduce）。
+   定位：Netron 打开 .onnx 看节点类型；或看 build 日志的算子名。
+   <span class="g">处理：用等价标准算子重写；或把不支持的算子拆成
+         NPU 支持的基础算子组合（如特殊激活拆成 mul/add/sigmoid）。</span>
+
+② opset 版本不匹配（opset version not supported）
+   现象：导出用了 opset 17+，工具链只吃到 11~13；或算子语义随
+         opset 变化（如 Resize / Slice 的属性名改了）。
+   定位：onnx.load 后读 model.opset_import。
+   <span class="g">处理：导出时显式钉住 torch.onnx.export(opset_version=12)；
+         或用 onnx.version_converter 把模型降到目标 opset。</span>
+
+③ 动态 shape（dynamic shape / -1 dims）
+   现象：batch 或序列长度是 -1，NPU 编译期定不了内存布局。
+   定位：Netron 看输入 / 中间张量的 dim 是不是 -1。
+   <span class="g">处理：导出时固定 shape（dynamic_axes 留空）；LLM 变长序列
+         用固定 max_seq_len 导出，或走 rkllm（内部已处理 KV Cache 布局）。</span>
+
+<span class="k">通用心法：报错先问「是 ONNX 不支持，还是 NPU 不支持」——</span>
+ONNX 阶段报错 → 改导出；RKNN 阶段报错 → 换/拆算子或固定 shape。</div>
+    <div class="callout"><strong>排坑顺序：</strong>先用 <code>onnx.checker</code> 确认 ONNX 本身合法，再上 Netron 数算子，最后才 build。别一上来就 build——报错信息会混在一起，定位成本翻倍。</div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：RKNN 算子支持与回退（量产最常见的坑）</h3>
+    <p>NPU 是专用电路，<b>只实现了一部分算子</b>。编译时工具链会把每个算子映射到 NPU；<b>映射不上的就「回退（fallback）」到 CPU 执行</b>。功能上照样算对——但性能会断崖式下跌，这是 RKNN 项目量产翻车的第一名。</p>
+    <div class="board"><span class="k">为什么会暴跌？——数据搬运才是元凶</span>
+
+  NPU 算 3 层 → 回退 1 层 CPU → 再 NPU 算 5 层 → 又回退 ...
+  每次 NPU ↔ CPU 切换，张量要：
+    ① 从 NPU 内存搬回 CPU 内存
+    ② CPU 算完再搬回 NPU
+  搬运量 = 该张量大小，走的是<b>有限的片外带宽</b>（3576 产品场景仅 7~11 GB/s，NPU 独占 12~16）
+
+  <span class="r">一次特征图搬运 = 几十 MB → 十几毫秒；
+  回退层多起来，decode 速度可以从 6~8 tok/s 掉到 2 tok/s 上下。</span>
+
+<span class="k">更糟的是</span>：回退常常落在「每个 block 都有」的算子上，
+导致 NPU/CPU 反复横跳，搬运开销 ×层数，直接吃掉全部收益。</div>
+
+    <div class="board"><span class="k">怎么查「哪些算子支持」</span>
+  · rknn-toolkit2 文档：算子支持列表（op support list），
+    逐一列明每个算子在各平台的 NPU / CPU 归属；
+  · build 日志：搜 <span class="g">not supported</span> / <span class="g">fallback</span> / <span class="g">cpu</span>，
+    工具链会打印哪些节点被放到 CPU；
+  · rknn_model_zoo 对应模型的 README：官方已标注已知回退点与规避法。</div>
+
+    <div class="board"><span class="k">怎么避免回退（按优先级）</span>
+① 选「已在 zoo 里跑通」的模型结构——别人踩过的坑别再踩。
+② 替换不支持的算子：用 NPU 支持的基础算子等价重写
+   （如 GELU → 近似 tanh 形式；特殊 Norm → 标准 LayerNorm）。
+③ 融合 / 改写结构：把诱发回退的动态分支改成静态等价实现。
+④ 固定 shape：动态 shape 常直接判给 CPU（见板书⑦）。
+⑤ 改量化配置重试：某些算子在 w8a16 下能被 NPU 接纳，w4a16 不行。
+
+<span class="k">验收口径：build 日志里 fallback 条目为 0，
+且 profiling 显示算子几乎全在 NPU 上。</span></div>
+    <div class="callout"><strong>一句话记住：</strong><span class="key">回退不是「能不能跑」的问题，是「跑不跑得动」的问题。</span>功能上给你算对，性能上直接把你打回原型——量产前必须清干净。</div>
+
+    <h3><span class="tag-lesson">讲解</span>9. 板书⑨：NPU/CPU 混合调度与 profiling（把回退揪出来）</h3>
+    <p>完全不回退很难，架构师要做的是<b>把回退控制在可控范围</b>：该上 NPU 的上 NPU，天然属于 CPU 的交给 CPU，且尽量让同一段计算留在同一侧，减少搬运。</p>
+    <div class="board"><span class="k">哪些层适合 NPU / 哪些适合 CPU</span>
+
+<span class="g">放 NPU（算力密集、数据并行）</span>
+  · 大矩阵乘（QKV / FFN / 输出投影）
+  · 卷积 / 常规激活 / 逐元素乘加
+  · LayerNorm（标准形式）
+<span class="g">放 CPU（控制逻辑、轻量、串行依赖）</span>
+  · tokenizer / detokenizer
+  · sampling（top-k / top-p 采样，含随机数）
+  · RoPE 角度计算、KV Cache 索引等零碎控制流
+  · 动态 shape / 数据依赖的分支
+
+<span class="k">原则：让 NPU 干重活，CPU 干调度；</span>
+<span class="r">同一段计算尽量不跨设备——跨一次 = 一次搬运。</span></div>
+
+    <div class="board"><span class="k">用 profiling 看出回退</span>
+  rknn-toolkit2 的 <span class="g">eval_perf / rknn.eval_perf()</span> 会输出：
+    · 每个算子的耗时
+    · 每个算子跑在 <span class="g">NPU 还是 CPU</span>
+    · 总耗时里 NPU / CPU / 搬运各占多少
+
+<span class="k">怎么读这份 profiling</span>
+  · CPU 占比 &gt; 20% 或个别算子耗时异常 → 十有八九是回退；
+  · 某个小算子耗时比大矩阵乘还长 → 它就在 CPU（还带搬运）；
+  · 结合 build 日志的 fallback 列表，一一对应定位。
+
+<span class="k">板端交叉验证</span>
+  · cat /sys/kernel/debug/rknpu/load   → NPU 利用率低 = 没吃饱；
+  · top 看主进程 CPU%                 → CPU 长期 100%+ = 在替 NPU 干活。</div>
+    <div class="callout"><strong>闭环排障：</strong>profiling 定位「哪个算子掉 CPU」→ 回板书⑧ 用等价替换 / 固定 shape 消掉它 → <b>重跑 profiling 确认 CPU 占比下降</b>。改一个、测一次，别一次改一堆。</div>
+
+    <h3><span class="tag-lesson">讲解</span>10. 板书填空：配置三件套与上线三关</h3>
+    <p>先自己填，再展开答案。</p>
     <table class="tight">
-      <thead><tr><th>方案</th><th>KV 份数</th><th>KV Cache</th><th>质量</th><th>NPU/端侧友好</th></tr></thead>
+      <thead><tr><th>项目</th><th>内容</th><th>作用</th></tr></thead>
       <tbody>
-        <tr><td><b>MHA</b> 多头注意力</td><td>= Q 头数（每头独立）</td><td>最大</td><td>最好</td><td>一般（太占带宽）</td></tr>
-        <tr><td><b>MQA</b> 多查询</td><td>1（所有 Q 头共享 1 组）</td><td>最小</td><td>略降</td><td>好</td></tr>
-        <tr><td><b>GQA</b> 分组查询</td><td>G 组（如 2、4、8）</td><td>小</td><td>≈ MHA</td><td><b>最好（端侧甜点）</b></td></tr>
-        <tr><td><b>MLA</b> 潜在注意力</td><td>压成低维 latent 向量</td><td>极小</td><td>≈/优于 MHA</td><td>复杂，NPU 不直接支持</td></tr>
-      </tbody>
-    </table>
-    <div class="board"><span class="k">用人话记住四个演进台阶</span>
-  MHA：32 个 Q 头 → 32 组 K/V（最贵，最准）
-  MQA：32 个 Q 头 → <span class="r">1 组</span> K/V（最省，但质量掉）
-  GQA：32 个 Q 头 → <span class="g">8 组</span> K/V（每组被 4 个 Q 头共享）← 折中
-  MLA：把 K/V 压缩成一个低维向量再还原（DeepSeek 用它，省到极致）
-
-<span class="k">GQA 的核心：多个 Q 头"共用"一组 K/V，KV 份数直接从 heads 降到 G。</span>
-质量损失很小（因为相邻头本来就有冗余），但 KV Cache 直接砍几倍。</div>
-    <div class="callout">记忆锚点：<b>MHA→MQA 是"一刀切共享"，GQA 是"分组共享"</b>。GQA 用很小的质量代价，换回接近 MQA 的内存/带宽收益——这就是它能成为行业默认（Qwen、Llama、Gemma 全用）的原因。</div>
-
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：为什么 RK3576 偏爱 GQA（带宽手算）</h3>
-    <p>这是本章的<b>核心算账</b>。用 Qwen2.5-3B 的真实 config 来算，你可以跟着手写：</p>
-    <div class="board"><span class="k">模型 config（Qwen2.5-3B 近似）</span>
-  hidden d = 2048
-  heads     = 16     （Q 头数）
-  head_dim  = 128
-  layers L  = 36
-  KV 精度   = fp16（2 字节）
-
-<span class="k">每 token 的 KV Cache 公式</span>
-  KV/token = 2（K和V）× kv_heads × head_dim × 2字节 × L
-
-<span class="k">三种方案的 kv_heads</span>
-  MHA：kv_heads = 16
-  GQA：kv_heads = 2
-  MQA：kv_heads = 1</div>
-    <div class="board"><span class="k">手算：每 token KV Cache</span>
-  MHA: 2×16×128×2×36 = 294,912 B ≈ <span class="r">288 KB</span>
-  GQA: 2× 2×128×2×36 =  36,864 B ≈ <span class="g"> 36 KB</span>   → 是 MHA 的 1/8
-  MQA: 2× 1×128×2×36 =  18,432 B ≈  18 KB
-
-<span class="k">换算成 8K 上下文（8192 token）</span>
-  MHA: 288 KB × 8192 ≈ <span class="r">2.42 GB</span>
-  GQA:  36 KB × 8192 ≈ <span class="g">0.30 GB（302 MB）</span>
-  MQA:  18 KB × 8192 ≈ 0.15 GB（151 MB）
-
-<span class="k">再算"每生成 1 个 token 要读多少 KV"（NPU 独占 12~16 GB/s）</span>
-  MHA: 2.42 GB / 12~16 = <span class="r">151~202 ms</span>
-  GQA: 0.30 GB / 12~16 = <span class="g">19~25 ms</span>
-  MQA: 0.15 GB / 12~16 =   9~13 ms
-
-<span class="k">加上权重（3B int4 ≈ 2.0 GB → 2.0/12~16 ≈ 125~167 ms）</span>
-  GQA 总耗时 ≈ 144~192 ms  →  ≈ <span class="g">5.2~6.9 tok/s</span>
-  MHA 总耗时 ≈ 276~369 ms  →  ≈  <span class="r">2.7~3.6 tok/s</span>
-
-<span class="k">结论：8K 上下文下，GQA 相对 MHA 把吞吐拉回约 2 倍。</span>
-<span class="k">产品真实场景带宽只有 7~11 GB/s，这些数字还会再掉一档。</span></div>
-    <div class="callout"><b>RK3576 偏爱 GQA 的真正原因：</b>decode 阶段是<b>带宽瓶颈</b>，每生成一个 token 都要把整段 KV Cache 从内存读一遍。3576 的带宽三档里最大的理论峰值也只有 19 GB/s，产品场景实际只有 7~11 GB/s（NPU 独占 12~16），MHA 的长上下文 KV 会直接把带宽吃光；GQA 把 KV 砍到 1/8，等于给带宽"续命"。<b>GQA 省的不是存储，是每 token 的读取带宽。</b></div>
-
-    <p><b>板书填空 · 请先自己填，再展开答案：</b>下面是一张 KV Cache 手算表（模型同上）。</p>
-    <table class="tight">
-      <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV 耗时(@12~16GB/s)</th></tr></thead>
-      <tbody>
-        <tr><td>MHA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
-        <tr><td>GQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
-        <tr><td>MQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+        <tr><td>三件套①</td><td class="fill">?</td><td>让量化器看真实输入、估每个张量的动态范围</td></tr>
+        <tr><td>三件套②</td><td class="fill">?</td><td>决定权重 / 激活各用几位</td></tr>
+        <tr><td>三件套③</td><td class="fill">?</td><td>决定标定 / 误差最小化的方式</td></tr>
+        <tr><td>上线关①</td><td class="fill">?</td><td>PPL 涨幅 &lt;5% 且人肉对比无事实错误</td></tr>
+        <tr><td>上线关②</td><td class="fill">?</td><td>tok/s 达延迟目标且带宽利用率 ≥60%</td></tr>
+        <tr><td>上线关③</td><td class="fill">?</td><td>连续长跑不 OOM、不崩、内存平稳</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
-      <table class="tight">
-        <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV(@12~16GB/s)</th></tr></thead>
-        <tbody>
-          <tr><td>MHA</td><td>16</td><td>288 KB</td><td>≈ 2.42 GB</td><td>151~202 ms</td></tr>
-          <tr><td>GQA</td><td>2</td><td>36 KB</td><td>≈ 302 MB</td><td>19~25 ms</td></tr>
-          <tr><td>MQA</td><td>1</td><td>18 KB</td><td>≈ 151 MB</td><td>9~13 ms</td></tr>
-        </tbody>
-      </table>
+      <div class="board"><span class="k">配置三件套 + 上线三关</span>
+  三件套① dataset（校准集）—— 决定动态范围估得准不准
+  三件套② quantized_dtype（w8a8 / w8a16 / w4a16）—— 决定"多省"
+  三件套③ quantized_algorithm（normal / mmse / kl_divergence）—— 决定"多准"
+  上线关① 精度关  上线关② 性能关  上线关③ 稳定关
+
+<span class="k">口诀：dtype 定多省，algorithm 定多准；三关全过才上线。</span></div>
     </details>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：位置编码速览（含 RoPE 直觉）</h3>
-    <p>注意力本身是「无序」的——它只算点积，不知道谁在前谁在后。所以必须额外把<b>位置</b>喂进去。</p>
-    <div class="board"><span class="k">三种位置编码速览</span>
-
-① 绝对位置编码（Learned / 正弦）
-   做法：把"位置向量"直接加到 token embedding 上   x = tok_emb + pos_emb
-   优点：直观、简单
-   缺点：长度写死（超过训练长度就"瞎"），外推差
-
-② 相对位置编码（T5 bias / ALiBi）
-   做法：只编码"两个 token 之间的距离"，不管绝对位置
-   优点：天生外推好
-   缺点：实现各异、生态不统一，逐步被 RoPE 取代
-
-③ RoPE 旋转位置编码  ← <span class="g">现在主流（Qwen / Gemma / MiniCPM 全用）</span>
-   做法：不"加"位置，而是把 Q、K 向量按位置<span class="k">旋转一个角度</span></div>
-    <div class="board"><span class="k">RoPE 怎么编码位置（看直觉，不推公式）</span>
-
-把 q、k 的每一对维度看成一个 2D 向量 [x, y]。
-位置 m 的 token，其向量旋转 m·θ；位置 n 旋转 n·θ。
-
-关键性质：
-  旋转后 q_m · 旋转后 k_n = cos( (m-n)·θ ) · |q||k|
-  → 点积只和<span class="g">相对位置 (m-n)</span> 有关！
-
-<span class="k">举例：q = [1,0]</span>
-  位置 0 旋转 0°   → [1, 0]
-  位置 1 旋转 45°  → [0.707, 0.707]
-
-点积随距离变化：
-  m-n = 0 → cos0 = 1.0    （同位置，最相关）
-  m-n 变大 → 点积变小      （离得越远越不相关）
-
-<span class="g">就这么简单：RoPE 用"旋转角度差"来感知"位置差"。没有额外参数，天然带相对位置信息。</span></div>
-    <div class="board"><span class="k">长度外推：为什么 RoPE 能外推、又为什么还要微调</span>
-- RoPE 天然能外推：θ 频率固定，训练 4K 也能"算出" 8K 的角度
-- 但高频维度在长位置"转太快"，模型没见过 → 效果退化
-- 常见外推技巧（只需知道名字和作用）：
-  · 位置插值 (PI)：把 8K 位置压缩回 4K 范围再用
-  · NTK-aware / YaRN：调大 θ 基准（如 10000 → 500000），拉长可用范围
-  · 长上下文微调：继续训练，最稳
-
-<span class="k">架构师结论：选模型先看它的 max_position_embeddings 和是否做过 YaRN/NTK 外推。</span>
-别自己"硬拉"上下文长度——超标会静默变傻。</div>
-    <div class="callout">记住三点：<b>RoPE 用旋转编码相对位置；无额外参数、外推友好；要做长上下文，看模型有没有做 NTK/YaRN 外推。</b></div>
   </div>
 
   <h2>练习（交作业）</h2>
-  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+  <p class="lead">讲义看懂后动手真跑一遍。做完贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>Q/K/V 与注意力手算笔记</h3></div>
+    <div class="head"><span class="num">1</span><h3>转换流水线笔记 + 环境搭建</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书①和②整理成自己的话：能用"查字典"讲清 Q/K/V，并复现那笔手算。</dd>
-      <dt>要掌握</dt><dd>Q 查、K 被查、V 取货；softmax 是加权平均；√d_k 防饱和。</dd>
-      <dt>实操步骤</dt><dd>写 <code>attention_handcalc.md</code>：① 用查字典类比解释 Q/K/V；② 手写 q·k → 缩放 → softmax → 加权 V 的全过程（用板书数字）；③ 用一小段文字解释"为什么 /√d_k"。</dd>
-      <dt>检验标准</dt><dd>合上讲义，能给 15 年嵌入式背景的人一句话讲懂注意力。</dd>
+      <dt>目标</dt><dd>把板书①整理成一张流水线图，并装好 rknn-toolkit2 / rkllm 环境。</dd>
+      <dt>要掌握</dt><dd>HF→ONNX→RKNN→.rknn 每步作用；LLM 走 rkllm、小模型走 toolkit2 的分工。</dd>
+      <dt>实操步骤</dt><dd>写 <code>pipeline.md</code>：四段流水线图 + 每步命令。装环境：<code>pip install rknn-toolkit2 rknn-toolkit-lite2</code>；<code>python -c "from rknn.api import RKNN; print(RKNN())"</code> 验证。</dd>
+      <dt>检验标准</dt><dd>能白板画出四段流程，并说清为什么 .rknn 与平台绑定。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>注意力方案对比表</h3></div>
+    <div class="head"><span class="num">2</span><h3>准备校准集（核心前置）</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书③扩成一张完整对比表：MHA / MQA / GQA / MLA。</dd>
-      <dt>要掌握</dt><dd>四者 KV 份数、KV Cache、质量、端侧友好度的差别与演进动机。</dd>
-      <dt>实操步骤</dt><dd>写 <code>attention_compare.md</code>：5 列对比表 + 一句话"为什么端侧默认 GQA"。</dd>
-      <dt>检验标准</dt><dd>能说清 MQA 和 GQA 的区别（一刀切 vs 分组），以及 GQA 为什么是折中点。</dd>
+      <dt>目标</dt><dd>按板书③做一份真正匹配线上分布的校准集。</dd>
+      <dt>要掌握</dt><dd>校准集三条军规；为什么不能随机数据；dataset.txt 格式。</dd>
+      <dt>实操步骤</dt><dd>收集 <code>200 条</code>真实 prompt（长短各覆盖）写入 <code>calib/prompts.txt</code>；小模型路线另备 <code>calib/*.bin</code> 并生成 <code>dataset.txt</code>。</dd>
+      <dt>检验标准</dt><dd>校准集长度覆盖短/中/长三档，任务类型 ≥3 类，附一句「为什么不随机」。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>位置编码笔记</h3></div>
+    <div class="head"><span class="num">3</span><h3>量化配置三件套对比表</h3></div>
     <dl>
-      <dt>目标</dt><dd>梳理绝对 / 相对 / RoPE 三种位置编码，重点写清 RoPE 的直觉。</dd>
-      <dt>要掌握</dt><dd>RoPE 用旋转编码相对位置；无参数、外推友好；外推技巧 PI/NTK/YaRN。</dd>
-      <dt>实操步骤</dt><dd>写 <code>position_encoding.md</code>：三种方案对比 + RoPE 的"[1,0] 旋转"手算例子 + 外推注意事项。</dd>
-      <dt>检验标准</dt><dd>能不写公式讲清"RoPE 为什么能感知相对位置"。</dd>
+      <dt>目标</dt><dd>把板书②扩成 w8a8 / w8a16 / w4a16 三档对比。</dd>
+      <dt>要掌握</dt><dd>dtype 三层含义；algorithm 三种差异；各自适用场景。</dd>
+      <dt>实操步骤</dt><dd>写 <code>quant_config.md</code>：dtype 对比表（位宽/体积/精度/速度/适用）+ algorithm 三行说明 + 你的默认配置结论。</dd>
+      <dt>检验标准</dt><dd>能说清「dtype 决定多省、algorithm 决定多准」，并给出 3576 默认 w4a16 的理由。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>KV Cache 手算脚本（核心实操）</h3></div>
+    <div class="head"><span class="num">1</span><h3>真跑一次转换 + 量化（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>用代码把板书④的账算出来，做到"输入 config，输出三种方案的 KV 大小与带宽耗时"。</dd>
-      <dt>要掌握</dt><dd>KV Cache 公式；带宽耗时 = KV / 带宽；不同上下文长度的变化趋势。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：输入 <code>d=2048, heads=16, head_dim=128, layers=36, ctx=[1024,4096,8192]</code>，分别按 MHA/GQA(kv=2)/MQA 打印每 token KV、总 KV(MB)、@12~16GB/s 每 token 读取耗时(ms)；再打印"权重2.0GB + KV"的估算 tok/s。复用第 1 章内存估算思路。</dd>
-      <dt>检验标准</dt><dd>脚本跑通，输出能复现板书数字：GQA 8K ≈ 302 MB、每 token 读 KV 约 19~25 ms。</dd>
+      <dt>目标</dt><dd>用 <code>config.json</code> 把 3B 模型转成 <code>.rkllm</code>/.rknn 并成功加载。</dd>
+      <dt>要掌握</dt><dd>do_quantization=True + dataset 的实际调用；build 日志怎么看。</dd>
+      <dt>实操步骤</dt><dd>写 <code>build.sh</code> / <code>build_rknn.py</code>，跑 <code>--target_platform rk3576 --quantized_dtype w4a16</code>；记录 build 日志中的每层量化耗时/告警，存入 <code>build_log.txt</code>。</dd>
+      <dt>检验标准</dt><dd>产出可加载的模型文件，能指着日志说出哪些算子出现了量化告警。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>用真实 config 验证</h3></div>
+    <div class="head"><span class="num">2</span><h3>量化前后精度对比（PPL + 人肉）</h3></div>
     <dl>
-      <dt>目标</dt><dd>拿一个真实模型的 <code>config.json</code>，验证你的脚本和判断。</dd>
-      <dt>要掌握</dt><dd>从 config 里找 <code>num_attention_heads / num_key_value_heads / hidden_size / num_hidden_layers / max_position_embeddings</code>。</dd>
-      <dt>实操步骤</dt><dd>（能上网就下载 Qwen2.5-3B 的 <code>config.json</code>；不能就按讲义给定 config）写 <code>attention_verify.md</code>：贴出关键字段 → 用脚本算 KV Cache → 对比 MHA/GQA 收益 → 一句话"这个模型适不适合 3576"。</dd>
-      <dt>检验标准</dt><dd>能从 config 读出 kv_heads 并算出 KV 大小，而不是背数字。</dd>
+      <dt>目标</dt><dd>用 PPL 和 20 题人肉对比，量化前后各跑一遍。</dd>
+      <dt>要掌握</dt><dd>PPL 公式与手算；PPL 涨幅判据（&lt;5% / 5-10% / &gt;10%）；人肉记录表。</dd>
+      <dt>实操步骤</dt><dd>写 <code>ppl_eval.py</code> 在固定测试集上算 PPL（原始 vs 量化），输出 <code>ppl_compare.md</code>；再填 <code>human_eval.md</code>（20 题，两列打分 + 现象）。</dd>
+      <dt>检验标准</dt><dd>给出 PPL 涨幅百分比 + 人肉平均分差，并套判据下结论。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
+    <div class="head"><span class="num">3</span><h3>《端侧量化部署报告》（本章核心产出）</h3></div>
     <dl>
-      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
-      <dt>实操步骤</dt><dd>自问自答：Q/K/V 各是什么？为什么要 /√d_k？GQA 和 MQA 区别？GQA 为什么省内存？3576 8K 上下文 GQA 的 KV 多大？RoPE 怎么编码位置？</dd>
-      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
+      <dt>目标</dt><dd>综合所有产出，给一个「能不能上线」的明确结论——一页纸。</dd>
+      <dt>要掌握</dt><dd>把流水线 + 配置 + 校准集 + 精度 + 带宽利用率串成一个决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>quant_deploy_report.md</code>（一页）：①模型与配置 ②校准集说明 ③精度对比(PPL/人肉) ④带宽利用率 ⑤上线判断与回退方案。</dd>
+      <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做并复现结论——架构文档标准。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>profiling 找算子回退</h3></div>
+    <dl>
+      <dt>目标</dt><dd>跑一次 rknn/llm profiling，找出掉到 CPU 的算子，并给出规避方案。</dd>
+      <dt>要掌握</dt><dd>build 日志里的 not supported / fallback；eval_perf 输出怎么读；CPU 占比与搬运的关系。</dd>
+      <dt>实操步骤</dt><dd>① build 时保留完整日志，grep <code>not supported|fallback|cpu</code> 存成 <code>fallback_list.txt</code>；② 用 <code>rknn.eval_perf()</code> 或板端 profiling 跑一遍，导出每算子耗时与设备归属；③ 挑出耗时异常的 CPU 算子，写 <code>fallback_report.md</code>：算子名 / 原因 / 等价替换或固定 shape 方案 / 重测后的 CPU 占比。</dd>
+      <dt>检验标准</dt><dd>能列出至少 1 个回退算子，给出可行规避方案，并用重跑数据证明 CPU 占比下降（或 fallback 归零）。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>attention_handcalc.md</code> —— Q/K/V 直觉 + 注意力手算全过程。</li>
-    <li><code>attention_compare.md</code> —— MHA / MQA / GQA / MLA 对比表（核心产出）。</li>
-    <li><code>position_encoding.md</code> —— 位置编码笔记（绝对 / 相对 / RoPE）。</li>
-    <li><code>kv_cache_calc.py</code> —— KV Cache 与带宽手算脚本。</li>
-    <li><code>attention_verify.md</code> —— 用真实 config 验证的结论。</li>
+    <li><code>pipeline.md</code> —— 四段转换流水线图 + 每步命令。</li>
+    <li><code>calib/prompts.txt</code> —— 200 条真实校准 prompt（覆盖长短与任务类型）。</li>
+    <li><code>quant_config.md</code> —— w8a8 / w8a16 / w4a16 三档配置对比与默认结论。</li>
+    <li><code>build.sh</code> / <code>build_rknn.py</code> + <code>build_log.txt</code> —— 真实转换脚本与日志。</li>
+    <li><code>ppl_eval.py</code> + <code>ppl_compare.md</code> + <code>human_eval.md</code> —— 量化前后精度对比。</li>
+    <li><code>quant_deploy_report.md</code> —— 端侧量化部署报告（一页，核心产出）。</li>
+    <li><code>fallback_list.txt</code> + <code>fallback_report.md</code> —— 算子回退定位与规避（profiling）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>用"查字典"讲清 Q/K/V：Q 查、K 被查、V 取货。</li>
-    <li>说出 /√d<sub>k</sub> 的作用：防止 softmax 饱和（梯度消失）。</li>
-    <li>说清 MQA 与 GQA 的区别：一刀切共享 vs 分组共享。</li>
-    <li>给出 GQA 为什么省内存的答案（KV 份数从 heads 降到 G，直接砍 KV Cache 到 1/8 量级）。</li>
-    <li>能从 config 算出 KV Cache，并判断模型适不适合 RK3576。</li>
+    <li>能说清「量化配置三件套」分别是什么、少哪个会怎样。</li>
+    <li>能解释「为什么校准集不能用随机数据」。</li>
+    <li>会用 <span class="key">PPL 涨幅 &lt;5% / 5-10% / &gt;10%</span> 判据给精度下结论。</li>
+    <li>会算带宽利用率（tok/s × 模型GB ÷ 有效带宽上限），并判断是否跑满。</li>
+    <li>给「这个量化方案能不能上线」能按「精度关 / 性能关 / 稳定关」三关作答。</li>
+    <li>能说出 ONNX 三类高频报错（不支持算子 / opset 不匹配 / 动态 shape）的定位与处理。</li>
+    <li>能用 build 日志与 profiling 判断哪些算子回退到 CPU，并说清为什么搬运会拖垮性能。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「注意力本质是加权取值：Q 是提问、K 是被检索的索引、V 是内容，用 QKᵀ 算相似度、softmax 归一化、再对 V 加权求和，除以 √d_k 是为了防止分数随维度变大后 softmax 饱和、梯度消失。端侧最关键的是 KV Cache：MHA 每个 Q 头一组 KV，GQA 是多个头共享一组、把 KV 份数从 16 降到 2，KV Cache 直接砍到约 1/8。我们拿 3B 模型算过，8K 上下文下 MHA 的 KV 约 2.4GB、GQA 只有 300MB，因为 decode 是带宽瓶颈、RK3576 带宽只有 7~11GB/s（产品场景，NPU 独占 12~16），GQA 每生成一个 token 读 KV 从约 200ms 降到约 25ms，端到端吞吐能拉回约两倍，所以端侧一律优先 GQA。位置编码上现在主流是 RoPE，用旋转角度差编码相对位置，没有额外参数、外推友好，长上下文则看模型有没有做 NTK 或 YaRN 外推。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能讲清注意力机制与 KV Cache 的端侧取舍——注意力机制能力。</p>
+    <span class="tag">技术口径</span>
+    <p>端侧量化部署走 rknn-toolkit2 / rkllm：先导出权重，再给一份匹配线上分布的校准集做 PTQ，量化配置三件套是 dataset、quantized_dtype、quantized_algorithm——dtype 决定多省、algorithm 决定多准，3576 上默认 w4a16 + normal，group_size 128。转完做量化前后对比：算 PPL，涨幅控制在 5% 以内，再做一轮 20 题人肉对比确认没有事实错误；性能上看带宽利用率，tok/s 乘模型大小除以有效带宽上限（NPU 独占 12~16 GB/s，产品 7~11），到 60% 以上才算榨干带宽。三关都过才判断可以上线，否则回退 w8a16 或换校准集重转。</p>
+    <p style="margin:0">转换链路的另一半是算子：PyTorch → ONNX → RKNN 三段都可能有坑，ONNX 支持不住就改导出、NPU 支持不住就换/拆算子或固定 shape；算子若映射不到 NPU 会回退到 CPU，跨设备的张量搬运会直接拖垮性能。用 build 日志的 fallback 列表配合 profiling 的算子耗时/设备归属，就能定位回退，再用等价替换或固定 shape 消掉它。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 的瓶颈是<strong>带宽（三档：峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）</strong>，不是算力。注意力层选型的第一标准永远是"KV Cache 省不省带宽"。</li>
-      <li>优先选 <strong>GQA 模型</strong>（Qwen2.5、Gemma、MiniCPM 都是 GQA），MHA 长上下文会明显掉速。</li>
-      <li>MLA 省得更多，但 RKNN/NPU <strong>不直接支持</strong>，端侧落地成本高；目前仍以 GQA 为甜点。</li>
-      <li>做长上下文方案时，先确认模型的 <code>max_position_embeddings</code>，不要盲目拉长——超标会静默"变傻"。</li>
+      <li>RK3576 的 NPU 是 <strong>单核 6 TOPS</strong>，<code>num_npu_core</code> 固定为 1；「试核心数」是 RK3588 三核才有的玩法，3576 上调它没意义。</li>
+      <li>3576 以 <strong>int8 定点加速为主</strong>，<code>w4a16</code> 多为 int8 模拟或部分算子支持——转完务必实测 tok/s 和精度，别想当然。</li>
+      <li>LLM 走 <strong>rknn-llm（rkllm）</strong>一键转换，比手搓 ONNX 稳；小模型/ViT 才用 rknn-toolkit2。</li>
+      <li><code>target_platform</code> 必须写 <code>rk3576</code>；换板子要重转，产物不通用。</li>
+      <li>3576 内存为 <strong>LPDDR5-4800 / 32-bit</strong>，理论峰值带宽 ≈19 GB/s；NPU 独占实测 12~16 GB/s，产品场景（摄像头 + NPU + 屏幕同时抢）只有 7~11 GB/s，算子回退时搬运更吃亏。</li>
     </ul>
   </div>
 

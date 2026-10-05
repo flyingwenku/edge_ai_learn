@@ -3,39 +3,54 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 1 章 · 量化基础与内存估算（讲义 + 作业）</title>
+<title>第 1 章：端侧 AI 概览与资源账本</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> · 公开知识课程</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html" class="active">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
+    <a href="ch01.html" class="active">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 1 章：量化基础与内存估算</h1>
-  <p class="lead"><strong>章节目标：</strong>建立「给一个模型尺寸 + 精度，3 秒算出内存占用和 tok/s 区间」的条件反射——端侧架构师的第一块敲门砖。</p>
+  <h1>第 1 章：端侧 AI 概览与资源账本</h1>
+  <p class="lead"><strong>章节目标：</strong>先建立端侧 AI 的整体图景——它是什么、有哪几类任务、受什么约束；再练成「给一个模型尺寸 + 精度，3 秒算出内存占用和 tok/s 区间」的硬功。这张「资源账本」是后面所有章节共同的地基。</p>
   <div class="pill-row">
-    <span class="chip">状态：已完成</span>
+    <span class="chip">状态：讲义 + 作业</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch01-quant-memory</span>
+    <span class="chip">产出目录：ch01-resource</span>
   </div>
 
   <div class="callout">
-    <strong>本章已结课（2026-10-05）· 秒答 5/5 通过。</strong><br>
-    产出：<code>precision_bytes.md</code>、<code>memory_table.md</code>、<code>memory_table.py</code>、<code>quantize.py</code>。<br>
-    关键实测：<span class="key">int8 最大误差 0.0196 vs int4 0.357（≈18×）</span>——低精度掉精度的硬证据。
+    <strong>本章主线：</strong>端侧 AI 是什么 → 四类任务/模态 → 资源三角 → 端云取舍 → 三个能心算的账本公式：<br>
+    <span class="key">精度 → 字节</span>、<span class="key">参数量 → 内存</span>、<span class="key">带宽 → tok/s</span>。<br>
+    学完你要能在买板子之前就说清：这个模型能不能塞进去、能跑多快、值不值得。
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>先读下面的「课堂讲义（板书）」，把原理看懂。看不懂就问我，别硬扛。</li>
+    <li><strong>第 1 步 听讲解：</strong>先读下面的「课堂讲义（板书）」，把原理看懂。看不懂就记下问题，别硬扛。</li>
     <li><strong>第 2 步 做板书练习：</strong>讲义里的空表自己填，填完展开「答案」自查。</li>
     <li><strong>第 3 步 动手交作业：</strong>往下到「练习（交作业）」，产出脚本和表。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
@@ -43,22 +58,71 @@
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
-    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>一句话：<span class="key">把「模型多大、占多少内存、跑多快」变成你能心算的常识。</span></p>
-    <p>你是架构师，选型时老板/面试官不会给你跑一遍再决定。你需要在<b>买板子之前</b>就说出：这个 3B 模型能不能塞进 3576、能跑多快、值不值得。这节课就是练这个。</p>
+    <h3><span class="tag-lesson">讲解</span>0. 本节学什么</h3>
+    <p>一句话：<span class="key">把「模型多大、占多少内存、跑多快」变成能心算的常识，同时先看清楚端侧 AI 到底在解决什么问题。</span></p>
+    <p>过去很多人是「跑一遍再决定」；但做端侧方案，你需要在<b>买板子之前</b>就说出：这个 3B 模型能不能塞进 RK3576、能跑多快、值不值得。这节课先给你全局图景，再练这张资源账本。</p>
 
-    <h3><span class="tag-lesson">讲解</span>1. 什么是量化（Quantization）</h3>
-    <p>模型里每个「参数」本来用 32 位小数（float32）存。量化就是<b>用更少的位去存它</b>：32 位 → 8 位 → 4 位。</p>
-    <p>类比：一张高清照片（fp32）压成小图（int4），文件小很多、传得快，但细节会糊一点。</p>
-    <div class="board">量化带来的变化：
-  位数 ↓  →  内存 ↓  →  带宽需求 ↓  →  速度 ↑
-                代价：精度 ↓（答得没那么准）
+    <h3><span class="tag-lesson">讲解</span>1. 什么是端侧 AI</h3>
+    <p><b>端侧 AI（Edge AI / On-device AI）</b>：把模型的<b>推理</b>放在本地设备上跑，而不是把数据发到云端服务器算。这里的「设备」可能是手机、单板计算机（如 RK3576）、摄像头、车机、可穿戴、工业网关。</p>
+    <div class="board"><span class="k">为什么要把推理放到端侧？四个动机</span>
+  ① 低延迟：本地毫秒级响应，不受网络抖动影响
+  ② 隐私   ：原始数据（画面/语音）不出设备
+  ③ 离线   ：断网也能用，可靠性高
+  ④ 成本   ：省云侧算力与流量，边际成本≈0
 
-架构师的口诀：<span class="k">「能用低精度，就别用高精度」</span>——
-只要效果掉得可接受，int4 永远优先于 fp16。</div>
+<span class="k">代价：四个硬约束</span>
+  内存小  、带宽低  、算力有限 、功耗有上限
+  → 所以端侧模型必须「小、省、快」，这正是量化与架构的全部由来</div>
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书①：位数 → 字节</h3>
-    <p>只需要一条换算：<span class="key">1 Byte = 8 bit</span>。把「每个参数多少位」除以 8 就是字节数。</p>
+    <h3><span class="tag-lesson">讲解</span>2. 四类任务 / 模态概览</h3>
+    <p>端侧落地常见的四类负载，<b>瓶颈各不相同</b>，不能一套调法打天下。先建立对照，后面章节会逐个展开。</p>
+    <table class="tight">
+      <thead><tr><th>模态</th><th>典型任务</th><th>一次推理的特征</th><th>主要瓶颈</th><th>关键指标</th></tr></thead>
+      <tbody>
+        <tr><td><b>文本 LLM</b></td><td>对话、摘要、意图识别</td><td>自回归逐个 token（decode）</td><td class="fill">内存带宽</td><td>tok/s</td></tr>
+        <tr><td><b>图像 CV</b></td><td>检测、分割、分类</td><td>单次前向、像素量大</td><td class="fill">算力 + 带宽</td><td>mAP / mIoU / FPS</td></tr>
+        <tr><td><b>语音</b></td><td>ASR 识别、KWS 唤醒</td><td>连续音频帧、流式</td><td class="fill">实时性 + 带宽</td><td>WER / 唤醒率 / 延迟</td></tr>
+        <tr><td><b>传感器时序</b></td><td>IMU / 振动 / 手势识别</td><td>小模型、高频推理</td><td class="fill">功耗 + 延迟</td><td>准确率 / 功耗</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">一句话记住每类负载的「命门」</span>
+  LLM    ：慢在 <span class="k">decode 带宽</span>——每吐一个字都要把权重读一遍
+  CV     ：慢在 <span class="k">算力/带宽</span>，且<span class="r">回归头对量化敏感</span>（框会飞）
+  语音   ：难在<span class="k">流式与实时</span>——要边听边出，不能攒完再算
+  时序   ：难在<span class="k">功耗</span>——常驻后台，模型要极小极省</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 资源三角：内存 / 带宽 / 算力</h3>
+    <p>端侧的一切取舍，都绕不开这三样。<b>它们互相制约</b>，你不可能同时把三者都拉满。</p>
+    <div class="board"><span class="k">资源三角</span>
+
+  <span class="g">内存</span>  → 决定「装不装得下」：权重 + KV Cache + 激活 + 框架开销
+  <span class="g">带宽</span>  → 决定「算多快」：decode 每步都要读一遍权重
+  <span class="g">算力</span>  → 决定「能不能算」：TOPS 决定 prefill / 单次前向的耗时
+
+<span class="k">相互制约：</span>
+  精度 ↑   → 内存 ↑（同一模型占用更大）
+  模型 ↑   → 带宽压力 ↑（每步要读更多权重）
+  并发 ↑   → 内存、带宽、算力三者同时吃紧
+
+<span class="k">端侧第一原则：先算内存能不能装下，再看带宽跑多快，最后才谈算力。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 端侧 vs 云端的取舍</h3>
+    <p>端侧不是「什么都自己扛」，而是和云端分工。先把两边的边界画清楚：</p>
+    <table class="tight">
+      <thead><tr><th>维度</th><th>端侧</th><th>云端</th></tr></thead>
+      <tbody>
+        <tr><td>延迟</td><td>低（本地毫秒级）</td><td>受网络影响，波动大</td></tr>
+        <tr><td>隐私</td><td>原始数据不出设备</td><td>数据需上传</td></tr>
+        <tr><td>离线</td><td>可用</td><td>断网即不可用</td></tr>
+        <tr><td>成本</td><td>一次性硬件投入</td><td>按量计费 + 带宽成本</td></tr>
+        <tr><td>可跑模型</td><td>受内存/算力限制（1B~7B 级）</td><td>可跑超大模型</td></tr>
+        <tr><td>更新</td><td>需 OTA / 重刷</td><td>服务端随时更新</td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>分工原则：</strong><span class="key">高频、低延迟、隐私敏感的任务放端侧；需要超大模型/复杂推理的任务回退云端</span>。端侧常用 1.5B~3B 做本地意图识别与简单对话，复杂问题再上行。这条分工线会在后续「系统与架构」部分（第 15、16 章）展开成完整方案。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书①：位数 → 字节（精度的第一笔账）</h3>
+    <p>建立资源账本的第一条换算：<span class="key">1 Byte = 8 bit</span>。把「每个参数多少位」除以 8 就是字节数。</p>
     <div class="board">精度      位数        ÷8          每参数字节
 ─────────────────────────────────────────────
 fp32      32 bit   →   32/8    =   <span class="g">4.0 Byte</span>
@@ -70,9 +134,9 @@ int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关�
 <span class="k">int4 = 0.5 字节</span>：因为 4 位装不下 1 个字节，
 所以硬件把 <span class="g">2 个参数打包进 1 个字节</span>（叫 packed）。
 这就是为什么「4 位」听起来像省了一半，其实是省到 1/8。</div>
-    <div class="callout"><strong>bf16 vs fp16（只记结论，不推公式）：</strong>字节数一样（都是 2B）。fp16 精度细但范围窄、容易溢出；bf16 范围大、更稳，现代大模型/端侧更偏好 <span class="key">bf16</span>。你选型时默认 bf16 就对了。</div>
+    <div class="callout"><strong>bf16 vs fp16（只记结论，不推公式）：</strong>字节数一样（都是 2B）。fp16 精度细但范围窄、容易溢出；bf16 范围大、更稳，现代大模型/端侧更偏好 <span class="key">bf16</span>。选型时默认 bf16 就对了。</div>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书②：内存公式 + 手算示范</h3>
+    <h3><span class="tag-lesson">讲解</span>6. 板书②：内存公式 + 手算示范</h3>
     <div class="formula">权重内存 ≈ 参数量 × 每参数字节</div>
     <p>注意「≈」，因为真实占用总比净值大一点（下面解释）。先看一个完整手算：</p>
     <div class="board"><span class="k">示范：3B 模型放 int4 要多少内存？</span>
@@ -102,13 +166,20 @@ int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关�
     </table>
     <details>
       <summary>点击展开答案（先自己填！）</summary>
-      <p>int4 真实占用（工程取整）：0.5B ≈ 0.3GB，1.5B ≈ 1.0GB，3B ≈ 2.0GB，7B ≈ 4.5GB。<br>
-      tok/s（= 带宽 ÷ 真实GB；NPU 独占 12~16 ／ 产品真实 7~11 GB/s）：<br>
-      0.5B ≈ 40~53 ／ 23~37，1.5B ≈ 12~16 ／ 7~11，3B ≈ 6~8 ／ 3.5~5.5，7B ≈ 2.7~3.6 ／ 1.6~2.4。<br>
-      塞进 16GB（安全预算 8~12GB）：4 行都塞得下；fp32 的 7B（28GB）、3B（12GB）直接出局。</p>
+      <div class="board"><span class="k">int4 真实占用（工程取整）</span>
+  0.5B ≈ 0.3GB   1.5B ≈ 1.0GB   3B ≈ 2.0GB   7B ≈ 4.5GB
+
+<span class="k">tok/s（= 带宽 ÷ 真实GB；NPU 独占 12~16 ／ 产品真实 7~11 GB/s）</span>
+  0.5B ： NPU 独占 ≈ 40~53  ／ 产品 ≈ 23~37
+  1.5B ： NPU 独占 ≈ 12~16  ／ 产品 ≈ 7~11
+  3B   ： NPU 独占 ≈ 6~8    ／ 产品 ≈ 3.5~5.5
+  7B   ： NPU 独占 ≈ 2.7~3.6 ／ 产品 ≈ 1.6~2.4
+
+<span class="k">能否进 16GB（安全预算 8~12GB）：</span>
+  4 行 int4 都塞得下；fp32 的 7B（28GB）、3B（12GB）直接出局。</div>
     </details>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书③：带宽 → tok/s（三档口径）</h3>
+    <h3><span class="tag-lesson">讲解</span>7. 板书③：带宽 → tok/s（三档口径）</h3>
     <p>这是本章的灵魂。大模型<b>生成文字时（decode）</b>，每吐 1 个 token，NPU 都要把整个模型权重从内存里<b>读一遍</b>。所以速度不由算力决定，由<b>内存带宽</b>决定。</p>
     <div class="formula">tok/s ≈ 有效带宽 ÷ 模型真实占用(GB)</div>
     <div class="board"><span class="k">示范（RK3576，LPDDR5-4800、32-bit，带宽三档）</span>
@@ -122,70 +193,52 @@ NPU 独占实测 ≈ 12~16 GB/s（无视频解码/ISP/GPU 渲染）
 
 <span class="k">为什么产品实测只有几 tok/s，远低于理论峰值？</span>
   ① 产品里带宽被摄像头/ISP/屏幕瓜分，有效带宽只剩 7~11 GB/s
-  ② KV Cache 也在抢带宽（第 5 章细讲）
+  ② KV Cache 也在抢带宽（第 8 章细讲）
   ③ kernel 调度、算子切换有开销
   ④ 有些算子没跑到 NPU，掉回 CPU</div>
     <div class="callout"><strong>一句话记住：</strong><span class="key">算力决定「能不能算」，带宽决定「算多快」。</span>LLM 聊天场景默认是带宽瓶颈——这句话后面每章都用得上。</div>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书④：量化数学（下午写脚本用）</h3>
-    <p>对称量化就三步，把它想成「<b>找一把尺子，把所有数对齐到刻度上</b>」：</p>
-    <div class="board">给定一批数字 x，量化到 int8：
-  qmax   = 127                     # 8 位有符号最大整数
-  scale  = max(|x|) / qmax         # 这把尺子的刻度
-  q      = round(x / scale)        # 量化：小数 → 整数
-  x'     = q * scale               # 反量化：整数 → 近似小数
-
-<span class="k">举例</span> x = [-1.2, 0.5, 3.0]
-  max(|x|) = 3.0 → scale = 3.0/127 ≈ 0.0236
-  q = round([-50.8, 21.2, 127]) = [-51, 21, 127]
-  x' = [-1.204, 0.496, 3.0]
-  误差 = [-0.004, -0.004, 0]  ← 很小，因为 8 位刻度够细
-
-<span class="k">换成 int4（qmax=7）：</span>刻度变粗 → 误差明显变大
-  scale = 3.0/7 ≈ 0.4286  →  x' = [-1.29, 0.43, 3.0]
-  int4 误差 ≫ int8 误差  ← 这就是低精度的代价</div>
   </div>
 
   <h2>练习（交作业）</h2>
-  <p class="lead">讲义看懂后，动手产出下面内容。这是你今天的作业，做完贴回来我批改。</p>
+  <p class="lead">讲义看懂后，动手产出下面内容，做完贴回来批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>精度 → 字节占用</h3></div>
+    <div class="head"><span class="num">1</span><h3>端侧 AI 与资源三角笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>把讲义板书①亲手整理成一张对照表。</dd>
-      <dt>要掌握</dt><dd>位数换算；bf16 vs fp16 结论；int4 = 0.5 字节的原因（packed）。</dd>
-      <dt>实操步骤</dt><dd>在 ch01 目录写 <code>precision_bytes.md</code>：5 行（精度 / 位数 / 字节 / 典型用途 / 一句话备注）。</dd>
-      <dt>检验标准</dt><dd>合上讲义，口头说出 5 种精度的字节数，不卡壳。</dd>
+      <dt>目标</dt><dd>把讲义 1~4 节整理成一张「认识地图」，能对外讲清端侧 AI 的全貌。</dd>
+      <dt>要掌握</dt><dd>端侧 AI 的四个动机与四个约束；四类模态各自的瓶颈；资源三角（内存/带宽/算力）的相互制约；端侧与云端的取舍边界。</dd>
+      <dt>实操步骤</dt><dd>写 <code>overview_resource.md</code>：① 端侧 vs 云端对比表 ② 四类模态（任务/瓶颈/指标）表 ③ 资源三角一句话 + 各自决定什么。</dd>
+      <dt>检验标准</dt><dd>能独立讲清「端侧 AI 为什么存在、受什么约束、四类任务分别卡在哪」。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>内存估算表（核心产出）</h3></div>
+    <div class="head"><span class="num">2</span><h3>精度 → 字节占用</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把讲义板书①亲手整理成一张对照表。</dd>
+      <dt>要掌握</dt><dd>位数换算；bf16 vs fp16 结论；int4 = 0.5 字节的原因（packed）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>precision_bytes.md</code>：5 行（精度 / 位数 / 字节 / 典型用途 / 一句话备注）。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能说出 5 种精度的字节数，不卡壳。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>内存估算表（核心产出）</h3></div>
     <dl>
       <dt>目标</dt><dd>把讲义板书②的填空表，扩成完整 16 格（0.5B/1.5B/3B/7B × 4 精度）。</dd>
       <dt>要掌握</dt><dd>净值 vs 真实占用（×1.3）；标出哪几格能进 16GB（安全预算 8~12GB）。</dd>
       <dt>实操步骤</dt><dd>写 <code>memory_table.md</code>：净值 16 格 + int4 真实列 + tok/s（NPU 独占/产品）列 + 「能否部署」判断列。</dd>
-      <dt>检验标准</dt><dd>秒答「3B int4 约 2GB」「7B fp16 = 14GB」「7B fp32 = 28GB 装不下」。</dd>
-    </dl>
-  </div>
-  <div class="task">
-    <div class="head"><span class="num">3</span><h3>RK3576 带宽三档与 tok/s 上限</h3></div>
-    <dl>
-      <dt>目标</dt><dd>用三档带宽（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）算出 1.5B/3B/7B int4 的 tok/s 区间。</dd>
-      <dt>要掌握</dt><dd>tok/s ≈ 带宽 ÷ 真实占用；为什么产品实测远低于理论峰值。</dd>
-      <dt>实操步骤</dt><dd>每档带宽各算一遍（NPU 独占 + 产品两列），写入小表并标出哪一档才是落地数字。</dd>
-      <dt>检验标准</dt><dd>秒答「3B int4：NPU 独占 6~8、产品 3.5~5.5 tok/s」。</dd>
+      <dt>检验标准</dt><dd>能独立讲清「3B int4 约 2GB」「7B fp16 = 14GB」「7B fp32 = 28GB 装不下」。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>Python 手写对称量化器</h3></div>
+    <div class="head"><span class="num">1</span><h3>RK3576 带宽三档与 tok/s 上限</h3></div>
     <dl>
-      <dt>目标</dt><dd>按讲义板书④，从零实现 float → int → float。</dd>
-      <dt>要掌握</dt><dd>scale = max|x| / qmax；对称量化三步；误差来源。</dd>
-      <dt>实操步骤</dt><dd>写 <code>quantize.py</code>：函数 <code>quantize(x,bits)</code> / <code>dequantize(q,scale)</code>；用随机数据跑通，打印最大/平均误差；对比 int8 与 int4。</dd>
-      <dt>检验标准</dt><dd>脚本跑通无报错，能指着输出说「int4 误差明显大于 int8」。</dd>
+      <dt>目标</dt><dd>用三档带宽（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）算出 1.5B/3B/7B int4 的 tok/s 区间。</dd>
+      <dt>要掌握</dt><dd>tok/s ≈ 带宽 ÷ 真实占用；为什么产品实测远低于理论峰值。</dd>
+      <dt>实操步骤</dt><dd>每档带宽各算一遍（NPU 独占 + 产品两列），写入小表并标出哪一档才是落地数字。</dd>
+      <dt>检验标准</dt><dd>能说出「3B int4：NPU 独占 6~8、产品 3.5~5.5 tok/s」，并讲清差距来源。</dd>
     </dl>
   </div>
   <div class="task pm">
@@ -193,52 +246,60 @@ NPU 独占实测 ≈ 12~16 GB/s（无视频解码/ISP/GPU 渲染）
     <dl>
       <dt>目标</dt><dd>把上午的手算变成代码，一键复现。</dd>
       <dt>要掌握</dt><dd>参数化：输入 <code>[参数量, 精度]</code> → 输出表格。</dd>
-      <dt>实操步骤</dt><dd>让脚本输出 <code>memory_table.md</code>（含净值/真实/tok/s 两档），存到 ch01 目录。</dd>
-      <dt>检验标准</dt><dd>目录里有 <code>memory_table.md</code> + <code>quantize.py</code>，重跑结果一致。</dd>
+      <dt>实操步骤</dt><dd>写 <code>memory_table.py</code>，输出 <code>memory_table.md</code>（含净值/真实/tok/s 两档），存到本章产出目录。</dd>
+      <dt>检验标准</dt><dd>产出目录里有 <code>memory_table.md</code> + <code>memory_table.py</code>，重跑结果一致。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
+    <div class="head"><span class="num">3</span><h3>场景选型演练</h3></div>
     <dl>
-      <dt>目标</dt><dd>把关键数字练成肌肉记忆。</dd>
-      <dt>实操步骤</dt><dd>自问自答 5 次：3B int4 内存？7B int4 产品 tok/s？7B fp16 内存？3576 带宽三档？为什么产品低于 NPU 独占？</dd>
-      <dt>检验标准</dt><dd>每题 3 秒内答出，不翻资料。</dd>
+      <dt>目标</dt><dd>给具体端侧场景（如「离线会议纪要转写」「车载疲劳检测」），用资源账本给出模型尺寸 + 精度的建议。</dd>
+      <dt>要掌握</dt><dd>把内存、带宽、功耗约束落到具体模态上。</dd>
+      <dt>实操步骤</dt><dd>写 <code>scenarios.md</code>：选 2 个场景，各给出「模态 / 模型尺寸 / 精度 / 内存占用 / 预期 tok-s 或 FPS / 是否可行 / 依据」。</dd>
+      <dt>检验标准</dt><dd>结论有数字支撑，能独立讲清「为什么这个尺寸可行、更大为什么不行」。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
+    <li><code>overview_resource.md</code> —— 端侧 AI 定义 + 四类模态 + 资源三角 + 端云取舍。</li>
     <li><code>precision_bytes.md</code> —— 精度字节对照表。</li>
     <li><code>memory_table.md</code> —— 16 格内存 + int4 真实列 + tok/s（NPU 独占/产品）列 + 能否部署。</li>
-    <li><code>quantize.py</code> —— 手写对称量化器，跑通并打印误差。</li>
+    <li><code>memory_table.py</code> —— 脚本生成上述内存表，跑通且结果一致。</li>
+    <li><code>scenarios.md</code> —— 2 个端侧场景的选型演练（尺寸 + 精度 + 依据）。</li>
     <li>一句结论：RK3576 上什么尺寸 + 什么精度能跑，NPU 独占与产品场景各多少 tok/s。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>秒答「3B int4 约 2GB」，并说清这是加 overhead 的真实值。</li>
-    <li>秒答「7B int4 产品仅 1.6~2.4 tok/s」，能解释为何不是 19÷3.5≈5.4（真实占用约 4.5GB，且产品带宽被抢到 7~11）。</li>
+    <li>能讲清端侧 AI 的四个动机与四个约束，以及四类模态各自的主要瓶颈。</li>
+    <li>能讲清资源三角（内存/带宽/算力）分别决定什么，以及为什么 decode 是带宽瓶颈。</li>
+    <li>能说出「3B int4 约 2GB」，并讲清这是加上 overhead 后的真实值。</li>
+    <li>能讲清「7B int4 产品仅 1.6~2.4 tok/s」，并解释为何不是 19÷3.5≈5.4（真实占用约 4.5GB，且产品带宽被抢到 7~11）。</li>
     <li>能解释「产品 7~11 GB/s 下 3B int4 只有 3.5~5.5 tok/s 为何低于 NPU 独占的 6~8」——带宽被摄像头/ISP/屏抢、KV Cache、kernel 开销、掉 CPU。</li>
-    <li>量化脚本 int4 误差 &gt; int8 误差。</li>
   </ul>
 
-  <h2>面试话术</h2>
-  <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「端侧选模型第一步是算内存：3B int4 约 2GB，RK3576 是 LPDDR5-4800、32-bit，理论峰值约 19GB/s，NPU 独占 12~16GB/s，产品里同时开摄像头、NPU、屏幕会被抢到 7~11GB/s。decode 是带宽瓶颈，tok/s≈带宽÷模型字节：3B int4 产品场景只有 3.5~5.5 tok/s、NPU 独占 6~8；1.5B int4 约 1GB，产品 7~11 tok/s，最稳。所以我优先 1.5B~3B int4，7B int4 内存够但带宽受限，只有 2 tok/s 上下。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能在选型前就把内存和吞吐算清楚，而不是跑起来才知道。</p>
-  </div>
+  <h2>本节要点回顾</h2>
+  <ul class="clean">
+    <li>端侧 AI 把推理放在本地设备，换来低延迟、隐私、离线、低成本，代价是内存、带宽、算力、功耗四重约束。</li>
+    <li>端侧常见四类负载：文本 LLM（decode 带宽瓶颈）、图像 CV（算力+带宽、回归头对量化敏感）、语音（流式与实时）、传感器时序（小模型、低功耗）。</li>
+    <li>资源三角：内存决定「装不装得下」，带宽决定「算多快」，算力决定「能不能算」；三者相互制约。</li>
+    <li>精度换算：1 字节 = 8 位；int4 = 0.5 字节（两个参数打包进一个字节）。</li>
+    <li>内存账本：权重内存 ≈ 参数量 × 每参数字节；工程真实占用 ≈ 净值 × 1.3。</li>
+    <li>带宽账本（RK3576 / LPDDR5-4800 32-bit）：理论峰值 ≈ 19 GB/s，NPU 独占 12~16 GB/s，产品场景 7~11 GB/s。</li>
+    <li>tok/s ≈ 有效带宽 ÷ 模型真实占用（GB）；LLM 聊天场景默认是带宽瓶颈，不是算力瓶颈。</li>
+  </ul>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
       <li>带宽分三档：<strong>理论峰值 ≈ 19 GB/s</strong>（LPDDR5-4800 × 32-bit），<strong>NPU 独占实测 12~16 GB/s</strong>，<strong>产品真实场景（摄像头 + NPU + 屏幕同开）只剩 7~11 GB/s</strong>。产品落地要看最后一档，「3B int4 只有 3.5~5.5 tok/s」才是真实数字。</li>
       <li>16GB 内存不代表能装大模型——留给系统、KV Cache、多进程的空间要扣掉，实际安全预算约 8~12GB。</li>
-      <li>3576 的 NPU 是 6 TOPS int8；int4 通常靠 int8 模拟或特定算子支持，第 9 章验证，本章先按理论算。</li>
+      <li>3576 的 NPU 是 6 TOPS int8；int4 通常靠 int8 模拟或特定算子支持，第 2 章会讲怎么选量化方案、第 13~14 章部署调优时会验证，本章先按理论算。</li>
     </ul>
   </div>
 
-  <div class="footer">先听懂讲义 → 再填板书练习 → 再交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+  <div class="footer">先听懂讲义 → 再填板书练习 → 再交作业 → 自测 · 卡住就记下具体问题，逐个弄懂</div>
 </div>
 </body>
 </html>

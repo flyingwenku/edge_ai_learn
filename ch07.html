@@ -3,227 +3,249 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 7 章：推理框架与流程拆解（讲义 + 作业）</title>
+<title>第 7 章：LLM② 注意力机制与位置编码</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html">第 4 章</a>
-    <a href="ch05.html">第 5 章</a>
-    <a href="ch06.html">第 6 章</a>
-    <a href="ch07.html" class="active">第 7 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html" class="active">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 7 章：推理框架与流程拆解</h1>
-  <p class="lead"><strong>章节目标：</strong>把「模型文件」到「出一句话」中间的每一段路拆开——<b>拿到「RK3576 + 3B」，能立刻报出用哪个框架、为什么，并画出推理全流程图</b>。</p>
+  <h1>第 7 章：LLM② 注意力机制与位置编码</h1>
+  <p class="lead"><strong>章节目标：</strong>搞懂「<b>注意力决定怎么搬运信息、GQA 决定端侧跑不跑得动</b>」——拿到任意一个模型 config，能一眼算出它的 KV Cache 大小，并说出该不该换成 GQA。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 4 个任务</span>
-    <span class="chip">产出目录：ch07-inference</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch07-llm-attn</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把六个框架的定位、ONNX 中间层和推理流程看懂，不懂就问我。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的空表 / 流程空位自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真机跑 llama.cpp、用 netron 看 ONNX、出选型报告。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，重点吃透 Q/K/V 直觉和 GQA 省带宽那笔账。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的手算 / 空表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写笔记、跑脚本、出对比表。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 1~2 章你搞定了「模型多大、怎么量化」。但一个 <code>.gguf</code> 或 <code>.rknn</code> 文件，怎么变成屏幕上滚动的字？中间是<b>推理框架</b>在干活。这一章就把「框架是谁」「模型怎么转过去（ONNX 中间层）」「流程怎么走」「时间花在哪」讲透——这是面试官问「你怎么落地」时的第一道题。</p>
-    <div class="callout"><strong>一句话记住：</strong>框架选错，模型再好也跑不动；流程看不懂，就定位不了卡顿。</div>
+    <p>第 6 章你把 Transformer 拆成了层。这一章啃最硬的那块骨头——<b>注意力（Attention）</b>。架构师不需要会推导公式，但必须能做到两件事：<span class="key">① 用一句人话解释 Q/K/V 在干什么；② 拿到 config 秒算 KV Cache，说清为什么端侧偏爱 GQA。</span>这两条是端侧 LLM 的基本功。</p>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：六个框架，先按「谁写的、给谁用」归位</h3>
-    <p>别背参数，先分阵营。所有推理框架只分两类：<b>通用跨平台</b> 和 <b>芯片官方</b>。</p>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：Q、K、V 的物理含义</h3>
+    <p>别被字母吓到。把注意力想成一次「<b>查字典</b>」：</p>
+    <div class="board"><span class="k">Q / K / V = 提问 / 索引 / 内容</span>
+
+  Q (Query)  = 你要查的"问题"     → 当前 token 在问："谁跟我相关？"
+  K (Key)    = 字典的"索引/标签"   → 每个 token 举牌："我是关于什么的"
+  V (Value)  = 字典的"释义/内容"   → 每个 token 真正携带的信息
+
+<span class="k">计算三步（这就是注意力）：</span>
+  ① 拿 Q 去比每一个 K     → 算相似度分数  s = Q·K
+  ② softmax 把分数变成权重 → 权重和为 1，越大越"被关注"
+  ③ 按权重把 V 加权求和    → 输出 = 相关 token 内容的加权平均
+
+<span class="k">一句话：Q 决定"看哪里"，K 决定"被谁看到"，V 是"被取走的内容"。</span></div>
+    <div class="callout">记住：注意力 = <b>按相关度，从所有 token 的 V 里"加权取货"</b>。它不是"筛选"，而是"加权平均"——所有 token 都会贡献一点，只是相关的高、不相关的低。</div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：注意力公式的直觉 + 手算</h3>
+    <p>公式只有一个（不用推，看它每一步在干嘛）：</p>
+    <div class="formula">Attention(Q, K, V) = softmax( QKᵀ / √d<sub>k</sub> ) · V</div>
+    <div class="board"><span class="k">四步拆解（对着公式看物理含义）</span>
+  ① QKᵀ        → 每个 query 和每个 key 点积 = 相似度矩阵 (n×n)
+  ② /√d_k      → 缩放，防止点积随维度变大而"爆炸"（下面单独讲）
+  ③ softmax    → 每行归一化成权重（该 query 看各 token 的比例）
+  ④ ×V         → 按权重对 V 做加权求和
+
+<span class="k">手算示范：1 个 head，d_k=4，序列长度 n=3</span>
+
+  q = [1, 0, 1, 0]
+
+  K = [ k1=[1,0,1,0]
+        k2=[0,1,0,1]
+        k3=[1,1,0,0] ]
+
+① 相似度 s = q·k
+   s1 = 1·1 + 0·0 + 1·1 + 0·0 = 2
+   s2 = 1·0 + 0·1 + 1·0 + 0·1 = 0
+   s3 = 1·1 + 0·1 + 1·0 + 0·0 = 1
+   s = [2, 0, 1]
+
+② 缩放：/ √d_k = / √4 = / 2
+   s' = [1.0, 0.0, 0.5]
+
+③ softmax（e^1=2.718, e^0=1, e^0.5=1.649；和 = 5.367）
+   w = [0.507, 0.186, 0.307]      ← 权重和 = 1 ✅
+
+④ 加权 V（设 v1=[1,0], v2=[0,1], v3=[1,1]）
+   out = 0.507·[1,0] + 0.186·[0,1] + 0.307·[1,1]
+       = [0.507+0.307, 0.186+0.307]
+       = <span class="g">[0.814, 0.493]</span>
+
+<span class="k">物理直觉：输出 = "按相关度加权平均后的 V"。相关度高的 token 占比大。</span></div>
+    <p>再单独把「为什么除以 √d<sub>k</sub>」讲透——这是最容易被忽略的细节：</p>
+    <div class="board"><span class="k">为什么要 /√d_k ？看两种情形</span>
+
+不缩放：s = [2, 0, 1]   → softmax → [0.665, 0.090, 0.245]  （更尖锐）
+  缩放：s'= [1, 0, 0.5] → softmax → [0.507, 0.186, 0.307]  （更平滑）
+
+原因：维度 d 越大，点积 q·k 的方差越大 → 分数差距被拉大
+     → softmax 趋于 one-hot（[1,0,0,...]）
+     → 梯度趋近 0，模型"学不动"。
+<span class="g">除以 √d_k 把方差压回 1 量级，softmax 保持"温和"。</span>
+
+<span class="k">一句结论：√d_k 是为了防止 softmax 饱和（防止梯度消失）。</span></div>
+    <div class="callout"><b>架构师记这句就够：</b>Q 查、K 被查、V 取货；softmax 是"加权平均"，√d<sub>k</sub> 是"防止权重两极化"。</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：MHA → MQA → GQA → MLA</h3>
+    <p>这四个是注意力的四种「共享 K/V 的方式」，演进目标只有一个：<b>压缩 KV Cache</b>。</p>
     <table class="tight">
-      <thead><tr><th>框架</th><th>阵营 / 出身</th><th>吃谁的算力</th><th>量化</th><th>端侧适配</th><th>典型产物</th></tr></thead>
+      <thead><tr><th>方案</th><th>KV 份数</th><th>KV Cache</th><th>质量</th><th>NPU/端侧友好</th></tr></thead>
       <tbody>
-        <tr><td><b>llama.cpp</b></td><td>社区，C++ 轻量引擎</td><td>CPU（+部分 GPU）</td><td>GGUF（Q4_K_M 等）</td><td>跨平台验证之王</td><td><code>.gguf</code></td></tr>
-        <tr><td><b>MNN</b></td><td>阿里，轻量引擎</td><td>手机 CPU/GPU</td><td>自有 int8/int4</td><td>移动端部署强</td><td><code>.mnn</code></td></tr>
-        <tr><td><b>TFLite</b></td><td>Google，Android 生态</td><td>Android CPU/NPU delegate</td><td>int8 为主</td><td>安卓离线模型</td><td><code>.tflite</code></td></tr>
-        <tr><td><b>ONNX Runtime</b></td><td>微软，通用运行时</td><td>多后端 EP（CPU/GPU/NPU）</td><td>依赖 EP</td><td>通用中间格式最强</td><td><code>.onnx</code></td></tr>
-        <tr><td><b>RKNN</b></td><td><b>瑞芯微官方</b></td><td><b>RK NPU 原生</b></td><td>int8 / per-channel PTQ</td><td><b>3576 官方支持</b></td><td><code>.rknn</code></td></tr>
-        <tr><td><b>QNN</b></td><td>高通官方</td><td>骁龙 Hexagon NPU</td><td>int8/int16</td><td>只吃高通芯片</td><td><code>.cpp/.bin</code></td></tr>
+        <tr><td><b>MHA</b> 多头注意力</td><td>= Q 头数（每头独立）</td><td>最大</td><td>最好</td><td>一般（太占带宽）</td></tr>
+        <tr><td><b>MQA</b> 多查询</td><td>1（所有 Q 头共享 1 组）</td><td>最小</td><td>略降</td><td>好</td></tr>
+        <tr><td><b>GQA</b> 分组查询</td><td>G 组（如 2、4、8）</td><td>小</td><td>≈ MHA</td><td><b>最好（端侧甜点）</b></td></tr>
+        <tr><td><b>MLA</b> 潜在注意力</td><td>压成低维 latent 向量</td><td>极小</td><td>≈/优于 MHA</td><td>复杂，NPU 不直接支持</td></tr>
       </tbody>
     </table>
-    <div class="board"><span class="k">判断口诀（背下来）：</span>
+    <div class="board"><span class="k">用人话记住四个演进台阶</span>
+  MHA：32 个 Q 头 → 32 组 K/V（最贵，最准）
+  MQA：32 个 Q 头 → <span class="r">1 组</span> K/V（最省，但质量掉）
+  GQA：32 个 Q 头 → <span class="g">8 组</span> K/V（每组被 4 个 Q 头共享）← 折中
+  MLA：把 K/V 压缩成一个低维向量再还原（DeepSeek 用它，省到极致）
 
-  芯片官方工具（RKNN / QNN） = <span class="g">能吃满自家 NPU，性能最好</span>
-                              但 <span class="r">只认自家芯片</span>
-  通用框架（llama.cpp / ONNX / MNN / TFLite）
-                             = <span class="g">换平台方便</span>
-                              但 <span class="r">对专用 NPU 只吃个皮毛</span>
+<span class="k">GQA 的核心：多个 Q 头"共用"一组 K/V，KV 份数直接从 heads 降到 G。</span>
+质量损失很小（因为相邻头本来就有冗余），但 KV Cache 直接砍几倍。</div>
+    <div class="callout">记忆锚点：<b>MHA→MQA 是"一刀切共享"，GQA 是"分组共享"</b>。GQA 用很小的质量代价，换回接近 MQA 的内存/带宽收益——这就是它能成为行业默认（Qwen、Llama、Gemma 全用）的原因。</div>
 
-<span class="k">一句话：落地认官方，验证认通用。</span></div>
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：为什么 RK3576 偏爱 GQA（带宽手算）</h3>
+    <p>这是本章的<b>核心算账</b>。用 Qwen2.5-3B 的真实 config 来算，你可以跟着手写：</p>
+    <div class="board"><span class="k">模型 config（Qwen2.5-3B 近似）</span>
+  hidden d = 2048
+  heads     = 16     （Q 头数）
+  head_dim  = 128
+  layers L  = 36
+  KV 精度   = fp16（2 字节）
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：为什么 RK3576 一定用 RKNN</h3>
-    <p>RKNN 不是「一个软件」，而是瑞芯微的一整套工具链。搞清三件套，你就知道数据是怎么流的。</p>
-    <div class="board"><span class="k">RKNN 三件套：</span>
-  1) rknn-toolkit2  → 在 PC 上把 onnx 转成 <span class="g">.rknn</span>（内含量化）
-  2) librknnrt      → 板端 <span class="g">运行时库</span>，真正调 NPU
-  3) rknn_server    → 板端服务（PC 联调时用）
+<span class="k">每 token 的 KV Cache 公式</span>
+  KV/token = 2（K和V）× kv_heads × head_dim × 2字节 × L
 
-<span class="k">支持芯片：</span>RK3576 / RK3588 / RK3566 / RK3562 …（3576 在列 ✅）
-<span class="k">量化口径：</span>int8 为主，per-channel PTQ，<span class="r">必须给校准集</span>
+<span class="k">三种方案的 kv_heads</span>
+  MHA：kv_heads = 16
+  GQA：kv_heads = 2
+  MQA：kv_heads = 1</div>
+    <div class="board"><span class="k">手算：每 token KV Cache</span>
+  MHA: 2×16×128×2×36 = 294,912 B ≈ <span class="r">288 KB</span>
+  GQA: 2× 2×128×2×36 =  36,864 B ≈ <span class="g"> 36 KB</span>   → 是 MHA 的 1/8
+  MQA: 2× 1×128×2×36 =  18,432 B ≈  18 KB
 
-<span class="k">选型边界：</span>
-  芯片是 RK 系 → <span class="g">RKNN</span>（唯一正解）
-  芯片不是 RK  → <span class="r">RKNN 用不了</span>，回头找通用框架或厂商工具
-</div>
-    <div class="callout"><strong>结论句：</strong>「只要目标板是 RK3576，模型最终一定编成 <code>.rknn</code> 走 NPU，别无他路。」</div>
+<span class="k">换算成 8K 上下文（8192 token）</span>
+  MHA: 288 KB × 8192 ≈ <span class="r">2.42 GB</span>
+  GQA:  36 KB × 8192 ≈ <span class="g">0.30 GB（302 MB）</span>
+  MQA:  18 KB × 8192 ≈ 0.15 GB（151 MB）
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：ONNX 基础（转换链路的中间层）</h3>
-    <p>上一节那句「在 PC 上把 onnx 转成 .rknn」，这个 onnx 到底是什么？它是端侧落地链路上<b>绕不开的中间层</b>。</p>
-    <div class="board"><span class="k">为什么需要 ONNX？</span>
-  训练框架各家不同：PyTorch / TensorFlow / Paddle……
-  部署引擎也各家不同：RKNN / QNN / TensorRT / OpenVINO……
-  如果两两直连，要写 N×M 个转换器 → 组合爆炸。
-  ONNX 站出来当「<span class="g">通用中间格式</span>」：
-    PyTorch ──导出──▶ <span class="g">ONNX</span> ──转换──▶ RKNN(.rknn) / QNN / …
-  一次导出、多方消费 → 把 N×M 收敛成 N+M。
+<span class="k">再算"每生成 1 个 token 要读多少 KV"（NPU 独占 12~16 GB/s）</span>
+  MHA: 2.42 GB / 12~16 = <span class="r">151~202 ms</span>
+  GQA: 0.30 GB / 12~16 = <span class="g">19~25 ms</span>
+  MQA: 0.15 GB / 12~16 =   9~13 ms
 
-<span class="k">端侧链路（本课主线）：</span>
-  PyTorch 权重 ──export──▶ <span class="g">ONNX(.onnx)</span> ──rknn-toolkit2──▶ .rknn ──▶ RK NPU</div>
-    <div class="board"><span class="k">ONNX 的两个核心概念：</span>
+<span class="k">加上权重（3B int4 ≈ 2.0 GB → 2.0/12~16 ≈ 125~167 ms）</span>
+  GQA 总耗时 ≈ 144~192 ms  →  ≈ <span class="g">5.2~6.9 tok/s</span>
+  MHA 总耗时 ≈ 276~369 ms  →  ≈  <span class="r">2.7~3.6 tok/s</span>
 
-  ① 图（Graph）
-     ONNX 把模型存成一张「<span class="g">计算图</span>」：
-     node（算子）+ tensor（张量）+ initializer（权重常量）。
-     · 算子 = Add / MatMul / Softmax / Conv / Reshape …
-     · 张量 = 数据流，带名字和 shape（常有动态维，如 batch/seq 用 '?'）
+<span class="k">结论：8K 上下文下，GQA 相对 MHA 把吞吐拉回约 2 倍。</span>
+<span class="k">产品真实场景带宽只有 7~11 GB/s，这些数字还会再掉一档。</span></div>
+    <div class="callout"><b>RK3576 偏爱 GQA 的真正原因：</b>decode 阶段是<b>带宽瓶颈</b>，每生成一个 token 都要把整段 KV Cache 从内存读一遍。3576 是 LPDDR5-4800，带宽三档里理论峰值约 19 GB/s，NPU 独占 12~16 GB/s，产品场景实际只有 7~11 GB/s；MHA 的长上下文 KV 会直接把带宽吃光，GQA 把 KV 砍到 1/8，等于给带宽"续命"。<b>GQA 省的不是存储，是每 token 的读取带宽。</b></div>
 
-  ② opset（算子集版本）
-     opset 是「<span class="g">该用哪个版本的算子定义</span>」的版本号。
-     · opset 太低 → 老算子表达不了新模型（如 RoPE、SwiGLU）
-     · opset 太高 → 目标工具链还不认识 → <span class="r">转换报错</span>
-     · 经验：导出时选目标工具链<span class="g">支持范围内的 opset</span>（RKNN 常停在中等版本）
-
-<span class="k">一句话：opset 是 ONNX 与下游工具链之间的"接口版本"。</span></div>
-    <div class="board"><span class="k">为什么转换报错，多半是 ONNX 算子不兼容？</span>
-  PyTorch 里一个简单操作，导出后可能是自定义 / 融合 / 高版本算子：
-    · 用了 RKNN/TFLite 不支持的算子 → <span class="r">Unsupported operator</span>
-    · 动态 shape 推断不出来 → shape 报错
-    · opset 与目标工具链不匹配 → 版本报错
-  排查顺序（背下来）：
-    ① 看报错里点名的<span class="g">算子名</span> → 是不是在目标工具链支持列表里
-    ② 用 <span class="g">netron</span> 打开 onnx，肉眼找可疑算子（自定义/高版本）
-    ③ 回 PyTorch 侧改写：换等价算子、去掉不支持的 op、固定 shape、调 opset
-  结论：<span class="k">端侧模型转换的坑，八成都出在 ONNX 这一层。</span></div>
-    <div class="board"><span class="k">用 netron 看模型（实操工具）</span>
-  netron = 开源的模型可视化工具，双击 .onnx / .rknn 就能看图。
-  能看：算子名字、连接关系、每层 shape、权重张量大小。
-  用途：确认导出对不对、找不兼容算子、核对输入输出名字/shape。
-  （它是 PC 上的工具，不用装到板子上。）</div>
-    <div class="callout"><strong>面试点：</strong>「PyTorch 到 RKNN 中间要过 ONNX 这一层——它是跨框架的通用交换格式；转换报错大多不是模型写错，而是 ONNX 算子/opset 与目标工具链不兼容，我会用 netron 定位到具体算子再回 PyTorch 改写。」</div>
-
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：推理全流程拆解</h3>
-    <p>从文本到文本，一共六步。每一章后面都会拆其中一段，这里先建全局地图。</p>
-    <div class="board"><span class="k">推理流程（从文本到文本）：</span>
-
-  tokenize     文本 → token id      （BPE / SentencePiece 分词器）
-     ↓
-  embedding    id  → 向量 [hidden]  （查表，一次搞定）
-     ↓
-  N × Transformer 层:
-        LayerNorm → <span class="g">Attention</span> → 残差
-        LayerNorm → <span class="g">FFN</span>       → 残差
-     ↓
-  logits       最后位置的向量 → [vocab] 维分数
-     ↓
-  sampling     greedy/top-k/top-p/temperature → 选出 <span class="g">1 个 id</span>
-     ↓
-  detokenize   id → 文本          （拼回可读字符串）
-
-<span class="k">架构师关注点：</span>tokenize/detokenize 是 CPU 小开销，
-真正吃时间的是 <span class="g">N × Transformer 层</span> 和 <span class="g">sampling</span>。</div>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：prefill 与 decode —— 两阶段性质完全不同</h3>
-    <p>很多人以为「生成」是一件事，其实是<b>两个物理过程</b>。这是本章最重要的一张板书。</p>
-    <div class="board"><span class="k">【Prefill 预填充】</span>
-  输入：整段 prompt（比如 512 个 token），<span class="g">一次性并行</span>处理
-  算子：矩阵 × 矩阵（matmul）→ <span class="g">算力密集</span>（compute-bound）
-  目的：把这 512 个 token 的 K/V 全部算好，存进 KV Cache
-  指标：tokens/s，衡量「吃 prompt 快不快」
-
-<span class="k">【Decode 解码】</span>
-  输入：每次只喂 <span class="g">1 个</span> 新 token
-  算子：矩阵 × 向量（matvec）→ <span class="r">带宽密集</span>（memory-bound）
-  目的：算下一个 token，把新 K/V 追加进 Cache
-  指标：tokens/s，衡量「吐字快不快」
-
-<span class="r">同一个模型，prefill 吞吐常是 decode 的 5~10 倍。</span>
-原因：matmul 每读一次权重能算一大片；matvec 每步都要把 2GB 权重全读一遍。</div>
-    <div class="callout"><strong>面试点：</strong>「首字延迟看 prefill，出字速度看 decode」——这句能立刻区分内行和外行。</div>
-
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：用 llama.cpp verbose 看每步耗时</h3>
-    <p>光讲理论不行，得会<b>看数据</b>。llama.cpp 加 <code>-v</code>（verbose）就会打印分段耗时。</p>
-    <div class="board"><span class="k">命令：</span>
-  llama-cli -m qwen2.5-3b-Q4_K_M.gguf -p "你好" -n 128 -v
-
-<span class="k">看这几行：</span>
-  load time          = 加载模型耗时（磁盘 IO + 解量化）
-  prompt eval time   = <span class="g">prefill</span> 耗时 / token 数
-  eval time          = <span class="g">decode</span> 耗时 / token 数
-  total time         = 端到端总耗时
-
-<span class="k">手算示范：</span>
-  prompt eval 512 tok / 12.0 s → 512 / 12.0 = <span class="g">42.7 tok/s</span>（prefill）
-  eval        128 tok / 25.6 s → 128 / 25.6 = <span class="g">5.0 tok/s</span>（decode）
-  load        2.1 s
-
-<span class="k">判读：</span>
-  decode 5 tok/s 就是用户看到的出字速度（3B int4 产品场景 3.5~5.5 量级）；<span class="r">这才是优化重点</span>。
-  prefill 慢 → 首字延迟高（长 prompt 场景要专门优化）。</div>
-
-    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：选型决策（背下来）</h3>
-    <div class="board"><span class="k">场景 → 框架</span>
-
-  RK3576 生产落地      → <span class="g">RKNN</span>（.rknn，吃 NPU，性能最好）
-  跨平台 / 快速验证    → <span class="g">llama.cpp + GGUF Q4_K_M</span>（CPU 就能跑）
-  Android 原生 App     → MNN / TFLite
-  高通平台（如手机）   → <span class="g">QNN</span>
-
-<span class="k">被问「RK3576 + 3B 用什么框架」→ 标准答：</span>
-「生产用 RKNN，官方 NPU 支持最好、能吃到 6 TOPS；
- 开发和验证阶段用 llama.cpp 跑 GGUF Q4_K_M，方便跨平台对比。
- 两者产物不通用，最终要转 .rknn。」</div>
-
-    <h3><span class="tag-lesson">讲解</span>8. 板书填空：框架速查表</h3>
-    <p>先自己填，再展开答案。空格处填「阵营」和「吃谁的算力」。</p>
+    <p><b>板书填空 · 请先自己填，再展开答案：</b>下面是一张 KV Cache 手算表（模型同上）。</p>
     <table class="tight">
-      <thead><tr><th>框架</th><th>阵营</th><th>吃谁的算力</th><th>端侧地位</th></tr></thead>
+      <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV 耗时(@12~16GB/s)</th></tr></thead>
       <tbody>
-        <tr><td>llama.cpp</td><td>?</td><td>?</td><td>跨平台验证</td></tr>
-        <tr><td>RKNN</td><td>?</td><td>?</td><td>3576 落地</td></tr>
-        <tr><td>QNN</td><td>?</td><td>?</td><td>高通平台</td></tr>
-        <tr><td>ONNX Runtime</td><td>?</td><td>?</td><td>通用中间格式</td></tr>
+        <tr><td>MHA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+        <tr><td>GQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
+        <tr><td>MQA</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td><td class="fill">＿＿</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
       <table class="tight">
-        <thead><tr><th>框架</th><th>阵营</th><th>吃谁的算力</th><th>端侧地位</th></tr></thead>
+        <thead><tr><th>方案</th><th>kv_heads</th><th>KV/token</th><th>8K 总 KV</th><th>每 token 读 KV(@12~16GB/s)</th></tr></thead>
         <tbody>
-          <tr><td>llama.cpp</td><td>通用跨平台</td><td>CPU 为主</td><td>跨平台验证</td></tr>
-          <tr><td>RKNN</td><td>芯片官方（瑞芯微）</td><td>RK NPU 原生</td><td>3576 落地</td></tr>
-          <tr><td>QNN</td><td>芯片官方（高通）</td><td>骁龙 Hexagon NPU</td><td>高通平台</td></tr>
-          <tr><td>ONNX Runtime</td><td>通用跨平台</td><td>多后端 EP</td><td>通用中间格式</td></tr>
+          <tr><td>MHA</td><td>16</td><td>288 KB</td><td>≈ 2.42 GB</td><td>151~202 ms</td></tr>
+          <tr><td>GQA</td><td>2</td><td>36 KB</td><td>≈ 302 MB</td><td>19~25 ms</td></tr>
+          <tr><td>MQA</td><td>1</td><td>18 KB</td><td>≈ 151 MB</td><td>9~13 ms</td></tr>
         </tbody>
       </table>
     </details>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：位置编码速览（含 RoPE 直觉）</h3>
+    <p>注意力本身是「无序」的——它只算点积，不知道谁在前谁在后。所以必须额外把<b>位置</b>喂进去。</p>
+    <div class="board"><span class="k">三种位置编码速览</span>
+
+① 绝对位置编码（Learned / 正弦）
+   做法：把"位置向量"直接加到 token embedding 上   x = tok_emb + pos_emb
+   优点：直观、简单
+   缺点：长度写死（超过训练长度就"瞎"），外推差
+
+② 相对位置编码（T5 bias / ALiBi）
+   做法：只编码"两个 token 之间的距离"，不管绝对位置
+   优点：天生外推好
+   缺点：实现各异、生态不统一，逐步被 RoPE 取代
+
+③ RoPE 旋转位置编码  ← <span class="g">现在主流（Qwen / Gemma / MiniCPM 全用）</span>
+   做法：不"加"位置，而是把 Q、K 向量按位置<span class="k">旋转一个角度</span></div>
+    <div class="board"><span class="k">RoPE 怎么编码位置（看直觉，不推公式）</span>
+
+把 q、k 的每一对维度看成一个 2D 向量 [x, y]。
+位置 m 的 token，其向量旋转 m·θ；位置 n 旋转 n·θ。
+
+关键性质：
+  旋转后 q_m · 旋转后 k_n = cos( (m-n)·θ ) · |q||k|
+  → 点积只和<span class="g">相对位置 (m-n)</span> 有关！
+
+<span class="k">举例：q = [1,0]</span>
+  位置 0 旋转 0°   → [1, 0]
+  位置 1 旋转 45°  → [0.707, 0.707]
+
+点积随距离变化：
+  m-n = 0 → cos0 = 1.0    （同位置，最相关）
+  m-n 变大 → 点积变小      （离得越远越不相关）
+
+<span class="g">就这么简单：RoPE 用"旋转角度差"来感知"位置差"。没有额外参数，天然带相对位置信息。</span></div>
+    <div class="board"><span class="k">长度外推：为什么 RoPE 能外推、又为什么还要微调</span>
+- RoPE 天然能外推：θ 频率固定，训练 4K 也能"算出" 8K 的角度
+- 但高频维度在长位置"转太快"，模型没见过 → 效果退化
+- 常见外推技巧（只需知道名字和作用）：
+  · 位置插值 (PI)：把 8K 位置压缩回 4K 范围再用
+  · NTK-aware / YaRN：调大 θ 基准（如 10000 → 500000），拉长可用范围
+  · 长上下文微调：继续训练，最稳
+
+<span class="k">架构师结论：选模型先看它的 max_position_embeddings 和是否做过 YaRN/NTK 外推。</span>
+别自己"硬拉"上下文长度——超标会静默变傻。</div>
+    <div class="callout">记住三点：<b>RoPE 用旋转编码相对位置；无额外参数、外推友好；要做长上下文，看模型有没有做 NTK/YaRN 外推。</b></div>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -231,104 +253,94 @@
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>六框架对比表</h3></div>
+    <div class="head"><span class="num">1</span><h3>Q/K/V 与注意力手算笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书①扩成你的框架矩阵：llama.cpp / MNN / TFLite / ONNX Runtime / RKNN / QNN 六列对比。</dd>
-      <dt>要掌握</dt><dd>「阵营 / 吃谁算力 / 量化方式 / 端侧适配 / 产物格式」五个维度的差别。</dd>
-      <dt>实操步骤</dt><dd>写 <code>framework_matrix.md</code>：6 行 × 5 列表格 + 一句话「哪两个是芯片官方工具、为什么它们性能最好」。</dd>
-      <dt>检验标准</dt><dd>合上讲义，能说出「落地认官方（RKNN/QNN），验证认通用（llama.cpp/ONNX）」。</dd>
+      <dt>目标</dt><dd>把板书①和②整理成自己的话：能用"查字典"讲清 Q/K/V，并复现那笔手算。</dd>
+      <dt>要掌握</dt><dd>Q 查、K 被查、V 取货；softmax 是加权平均；√d_k 防饱和。</dd>
+      <dt>实操步骤</dt><dd>写 <code>attention_handcalc.md</code>：① 用查字典类比解释 Q/K/V；② 手写 q·k → 缩放 → softmax → 加权 V 的全过程（用板书数字）；③ 用一小段文字解释"为什么 /√d_k"。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能给 15 年嵌入式背景的人一句话讲懂注意力。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>真机跑 llama.cpp，抓 prefill/decode 数据（核心实操）</h3></div>
+    <div class="head"><span class="num">2</span><h3>注意力方案对比表</h3></div>
     <dl>
-      <dt>目标</dt><dd>亲手跑一个 GGUF 模型，用 verbose 看到 prefill 与 decode 的真实速度差。</dd>
-      <dt>要掌握</dt><dd>llama.cpp 的编译/安装、<code>-v</code> 输出含义、tok/s 的手算换算。</dd>
-      <dt>实操步骤</dt><dd>① 装好 llama.cpp；② 下一个 3B 级 GGUF（Q4_K_M）；③ 用 <code>-p</code> 给一段长 prompt、<code>-n 128 -v</code> 跑；④ 抓 prompt eval / eval / load 三段耗时，手算 tok/s，记进 <code>llama_perf.md</code>（附原始日志）。</dd>
-      <dt>检验标准</dt><dd>能指出「decode tok/s 明显低于 prefill tok/s」，并解释原因是 matvec 带宽密集。</dd>
+      <dt>目标</dt><dd>把板书③扩成一张完整对比表：MHA / MQA / GQA / MLA。</dd>
+      <dt>要掌握</dt><dd>四者 KV 份数、KV Cache、质量、端侧友好度的差别与演进动机。</dd>
+      <dt>实操步骤</dt><dd>写 <code>attention_compare.md</code>：5 列对比表 + 一句话"为什么端侧默认 GQA"。</dd>
+      <dt>检验标准</dt><dd>能说清 MQA 和 GQA 的区别（一刀切 vs 分组），以及 GQA 为什么是折中点。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>画推理流程图</h3></div>
+    <div class="head"><span class="num">3</span><h3>位置编码笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>把 tokenize → embedding → attention+FFN → logits → sampling → detokenize 画成一张图。</dd>
-      <dt>要掌握</dt><dd>六步的顺序、每步的输入/输出张量形状、哪些步骤在 CPU、哪些吃 NPU。</dd>
-      <dt>实操步骤</dt><dd>写 <code>inference_flow.md</code>：用文字框图/箭头把流程画全，标注每步耗时占比与执行单元。</dd>
-      <dt>检验标准</dt><dd>能对着图讲 3 分钟，说清「prefill 在哪、decode 在哪、KV Cache 何时写入」。</dd>
+      <dt>目标</dt><dd>梳理绝对 / 相对 / RoPE 三种位置编码，重点写清 RoPE 的直觉。</dd>
+      <dt>要掌握</dt><dd>RoPE 用旋转编码相对位置；无参数、外推友好；外推技巧 PI/NTK/YaRN。</dd>
+      <dt>实操步骤</dt><dd>写 <code>position_encoding.md</code>：三种方案对比 + RoPE 的"[1,0] 旋转"手算例子 + 外推注意事项。</dd>
+      <dt>检验标准</dt><dd>能不写公式讲清"RoPE 为什么能感知相对位置"。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>RKNN 工具链调研报告</h3></div>
+    <div class="head"><span class="num">1</span><h3>KV Cache 手算脚本（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>搞清 RKNN 三件套（rknn-toolkit2 / librknnrt / rknn_server）各自职责。</dd>
-      <dt>要掌握</dt><dd>PC 端转换 → 板端运行的完整链路；支持芯片列表；量化为何要给校准集。</dd>
-      <dt>实操步骤</dt><dd>写 <code>rknn_notes.md</code>：三件套职能表 + 「onnx → .rknn → NPU 推理」链路图；查瑞芯微文档补充支持芯片与实际命令。</dd>
-      <dt>检验标准</dt><dd>能解释「为什么 RKNN 产物只能跑在 RK 芯片上」。</dd>
+      <dt>目标</dt><dd>用代码把板书④的账算出来，做到"输入 config，输出三种方案的 KV 大小与带宽耗时"。</dd>
+      <dt>要掌握</dt><dd>KV Cache 公式；带宽耗时 = KV / 带宽；不同上下文长度的变化趋势。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：输入 <code>d=2048, heads=16, head_dim=128, layers=36, ctx=[1024,4096,8192]</code>，分别按 MHA/GQA(kv=2)/MQA 打印每 token KV、总 KV(MB)、@12~16GB/s 每 token 读取耗时(ms)；再打印"权重2.0GB + KV"的估算 tok/s。复用第 1 章内存估算思路。</dd>
+      <dt>检验标准</dt><dd>脚本跑通，输出能复现板书数字：GQA 8K ≈ 302 MB、每 token 读 KV 约 19~25 ms。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>用 netron 打开一个 ONNX 看算子（实操）</h3></div>
+    <div class="head"><span class="num">2</span><h3>用真实 config 验证</h3></div>
     <dl>
-      <dt>目标</dt><dd>亲手导出一个 ONNX 并用 netron 打开，看清它的计算图与算子——把板书③落到手上。</dd>
-      <dt>要掌握</dt><dd>ONNX 图结构（node / tensor / initializer）、opset 概念、如何用 netron 定位算子。</dd>
-      <dt>实操步骤</dt><dd>写 <code>onnx_notes.md</code>：① 任选一个小模型（如一个小 MLP，或 Qwen 的一个 Transformer block）用 PyTorch <code>torch.onnx.export</code> 导出 <code>.onnx</code>；② 用 netron 打开，列出 top 5 高频算子（如 MatMul / Softmax / Add / Reshape），记录输入输出的名字与 shape；③ 记下导出用的 opset 版本，说明 opset 选低 / 选高分别会出什么问题。</dd>
-      <dt>检验标准</dt><dd>能对着 netron 的图讲清「这个模型由哪些算子组成、哪个算子在 RKNN 上可能不兼容、该怎么改」。</dd>
+      <dt>目标</dt><dd>拿一个真实模型的 <code>config.json</code>，验证你的脚本和判断。</dd>
+      <dt>要掌握</dt><dd>从 config 里找 <code>num_attention_heads / num_key_value_heads / hidden_size / num_hidden_layers / max_position_embeddings</code>。</dd>
+      <dt>实操步骤</dt><dd>（能上网就下载 Qwen2.5-3B 的 <code>config.json</code>；不能就按讲义给定 config）写 <code>attention_verify.md</code>：贴出关键字段 → 用脚本算 KV Cache → 对比 MHA/GQA 收益 → 一句话"这个模型适不适合 3576"。</dd>
+      <dt>检验标准</dt><dd>能从 config 读出 kv_heads 并算出 KV 大小，而不是背数字。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>《RK3576 + 3B 框架选型报告》（一页）</h3></div>
-    <dl>
-      <dt>目标</dt><dd>综合上面产出，给一个明确结论——本章核心产出。</dd>
-      <dt>要掌握</dt><dd>把「框架对比 + ONNX 链路 + RKNN 链路 + 流程耗时」串成一个决策。</dd>
-      <dt>实操步骤</dt><dd>写 <code>framework_selection.md</code>（一页）：①场景 ②候选框架 ③取舍理由 ④最终结论（生产 RKNN；验证 llama.cpp+GGUF Q4_K_M）⑤风险（RKNN 需校准集、ONNX 算子兼容性、跨平台产物不通用）。</dd>
-      <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做——架构文档的标准。</dd>
-    </dl>
-  </div>
-  <div class="task pm">
-    <div class="head"><span class="num">4</span><h3>秒答训练</h3></div>
+    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
     <dl>
       <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
-      <dt>实操步骤</dt><dd>自问自答：RK3576 用哪个框架？RKNN 三件套是什么？为什么需要 ONNX、opset 是什么？转换报错怎么排查？prefill 和 decode 区别？为什么 decode 慢？llama.cpp 怎么看分段耗时？</dd>
+      <dt>实操步骤</dt><dd>自问自答：Q/K/V 各是什么？为什么要 /√d_k？GQA 和 MQA 区别？GQA 为什么省内存？3576 8K 上下文 GQA 的 KV 多大？RoPE 怎么编码位置？</dd>
       <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>framework_matrix.md</code> —— 六框架对比表（阵营/算力/量化/适配/产物）。</li>
-    <li><code>inference_flow.md</code> —— 推理全流程图（六步 + 张量形状 + 执行单元）。</li>
-    <li><code>llama_perf.md</code> —— llama.cpp verbose 实测数据 + tok/s 手算（附原始日志）。</li>
-    <li><code>rknn_notes.md</code> —— RKNN 三件套调研 + 转换链路。</li>
-    <li><code>onnx_notes.md</code> —— 导出 ONNX + netron 算子分析笔记（链路中间层）。</li>
-    <li><code>framework_selection.md</code> —— RK3576 + 3B 框架选型报告（一页，核心产出）。</li>
+    <li><code>attention_handcalc.md</code> —— Q/K/V 直觉 + 注意力手算全过程。</li>
+    <li><code>attention_compare.md</code> —— MHA / MQA / GQA / MLA 对比表（核心产出）。</li>
+    <li><code>position_encoding.md</code> —— 位置编码笔记（绝对 / 相对 / RoPE）。</li>
+    <li><code>kv_cache_calc.py</code> —— KV Cache 与带宽手算脚本。</li>
+    <li><code>attention_verify.md</code> —— 用真实 config 验证的结论。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>给「RK3576 + 3B」秒答「生产用 RKNN（吃 NPU），验证用 llama.cpp + GGUF Q4_K_M」。</li>
-    <li>能背出推理六步：tokenize → embedding → attention+FFN → logits → sampling → detokenize。</li>
-    <li>能讲清 prefill（matmul、算力密集）与 decode（matvec、带宽密集）的区别。</li>
-    <li>会用 llama.cpp <code>-v</code> 读出 prompt eval / eval 耗时并手算 tok/s。</li>
-    <li>能说清 ONNX 的作用（跨框架通用中间格式）与 opset 概念，会用 netron 看算子、定位转换报错。</li>
+    <li>用"查字典"讲清 Q/K/V：Q 查、K 被查、V 取货。</li>
+    <li>说出 /√d<sub>k</sub> 的作用：防止 softmax 饱和（梯度消失）。</li>
+    <li>说清 MQA 与 GQA 的区别：一刀切共享 vs 分组共享。</li>
+    <li>给出 GQA 为什么省内存的答案（KV 份数从 heads 降到 G，直接砍 KV Cache 到 1/8 量级）。</li>
+    <li>能从 config 算出 KV Cache，并判断模型适不适合 RK3576。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「推理框架分两类：芯片官方工具和通用框架。RK3576 的 NPU 是瑞芯微自己的，所以生产落地我一定用 RKNN——它是官方工具链，onnx 经 rknn-toolkit2 转成 .rknn，板端 librknnrt 直接吃 NPU，能拿到 6 TOPS 的算力。开发和跨平台验证阶段我会用 llama.cpp 跑 GGUF Q4_K_M，因为它 CPU 就能跑、方便对比，但它吃不满 NPU，最终产物还要转回 RKNN。中间这一层是 ONNX：PyTorch 到 RKNN 必须过 ONNX，因为它是跨框架的通用交换格式，链路是 PyTorch→ONNX→.rknn；转换报错十有八九不是模型写错，而是 ONNX 算子或 opset 跟目标工具链不兼容，我会用 netron 打开计算图定位到具体算子，再回 PyTorch 侧改写。推理流程上，prefill 是把整段 prompt 并行算、矩阵乘矩阵、偏算力；decode 是逐 token 生成、矩阵乘向量、受内存带宽限制，所以首字延迟看 prefill、出字速度看 decode。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能说清「用什么框架、为什么用、模型怎么转过去、流程卡在哪」——框架选型、模型转换与性能拆解能力。</p>
+    <span class="tag">要点回顾</span>
+    <p>注意力本质是加权取值：Q 是提问、K 是被检索的索引、V 是内容，用 QKᵀ 算相似度、softmax 归一化、再对 V 加权求和；除以 √d_k 是为了防止分数随维度变大后 softmax 饱和、梯度消失。</p>
+    <p>端侧最关键的是 KV Cache：MHA 每个 Q 头一组 KV，GQA 是多个头共享一组、把 KV 份数从 16 降到 2，KV Cache 直接砍到约 1/8。3B 模型在 8K 上下文下 MHA 的 KV 约 2.4GB、GQA 只有 300MB；因为 decode 是带宽瓶颈、RK3576 产品场景带宽只有 7~11GB/s（NPU 独占 12~16），GQA 每生成一个 token 读 KV 从约 200ms 降到约 25ms，端到端吞吐能拉回约两倍，所以端侧一律优先 GQA。</p>
+    <p style="margin:0">位置编码上现在主流是 RoPE，用旋转角度差编码相对位置，没有额外参数、外推友好；长上下文则看模型有没有做 NTK 或 YaRN 外推。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 的 NPU 算力约 <strong>6 TOPS（int8）</strong>，只有走 <strong>RKNN</strong> 才吃得到；用 llama.cpp 只跑 CPU，吃不到 NPU。</li>
-      <li>模型落地链路是 <strong>PyTorch → ONNX → .rknn</strong>：ONNX 这层的算子/opset 兼容性直接决定转换成败。</li>
-      <li>RKNN 转换必须给<strong>校准集</strong>，第 9 章会用真实数据做校准。</li>
-      <li>端侧首字延迟主要卡在 <strong>prefill</strong>，长 prompt 场景要专门优化（如分块、批处理）。</li>
-      <li>decode 阶段是<strong>带宽瓶颈</strong>（第 5 章展开），3576 带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）是硬约束。</li>
+      <li>3576 的瓶颈是<strong>带宽（LPDDR5-4800，三档：峰值约 19 / NPU 独占 12~16 / 产品 7~11 GB/s）</strong>，不是算力。注意力层选型的第一标准永远是"KV Cache 省不省带宽"。</li>
+      <li>优先选 <strong>GQA 模型</strong>（Qwen2.5、Gemma、MiniCPM 都是 GQA），MHA 长上下文会明显掉速。</li>
+      <li>MLA 省得更多，但 RKNN/NPU <strong>不直接支持</strong>，端侧落地成本高；目前仍以 GQA 为甜点。</li>
+      <li>做长上下文方案时，先确认模型的 <code>max_position_embeddings</code>，不要盲目拉长——超标会静默"变傻"。</li>
     </ul>
   </div>
 

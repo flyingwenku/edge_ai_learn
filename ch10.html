@@ -3,384 +3,405 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 10 章 · 性能调优与精度评估（讲义 + 作业）</title>
+<title>第 10 章：CV 检测全链路与量化敏感点</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构师 · 公开课</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html">第 4 章</a>
-    <a href="ch05.html">第 5 章</a>
-    <a href="ch06.html">第 6 章</a>
-    <a href="ch07.html">第 7 章</a>
-    <a href="ch08.html">第 8 章</a>
-    <a href="ch09.html">第 9 章</a>
-    <a href="ch10.html" class="active">第 10 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html" class="active">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 10 章：性能调优与精度评估</h1>
-  <p class="lead"><strong>章节目标：</strong>从「能跑」到「跑得快」——掌握 NPU 核心数 / batch / 量化配置 / CPU+NPU 混合 / 投机解码几大手段，能在给定延迟目标下<b>调出达标配置</b>，并说清每一步为什么有效。</p>
+  <h1>第 10 章：CV 检测全链路与量化敏感点</h1>
+  <p class="lead"><strong>章节目标：</strong>把计算机视觉检测的端侧链路整条走通——<b>数据 → 拿模型 → 导出 ONNX → RKNN 转量化 → 板上部署 → mAP 验收</b>，并讲清 CV 量化与 LLM 量化的关键差异。核心心法一句话：<span class="key">量化交给厂商工具链，你把关校准集与精度验收</span>。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
-    <span class="chip">上午 4h · 3 个任务</span>
+    <span class="chip">上午 4h · 4 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
-    <span class="chip">产出目录：ch10-perf-tuning</span>
+    <span class="chip">产出目录：ch10-cv</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把性能指标和五大优化手段看懂，不懂就问我。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的配置矩阵 / 加速比手算自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」跑配置矩阵、出调优报告。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把 CV 任务、代表网络、ONNX 导出、RKNN 量化、mAP 评估看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的全链路空表 / 手算自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真跑一次转换与评估，出 <code>cv_pipeline.md</code> 与 <code>eval_map.py</code>。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>性能调优不是「多试几次碰运气」，而是<b>先建指标、再测基线、然后一次只动一个变量</b>。你作为架构师要能说：这个配置为什么快、瓶颈在哪、还有多少空间。</p>
-    <div class="callout"><strong>你要能四件事：</strong>① 说清看哪些性能指标；② 会建基线和算 Amdahl 上限；③ 会跑配置矩阵找最优；④ 给一个延迟目标，<span class="key">能反推出该动哪些旋钮</span>。</div>
+    <p>CV（计算机视觉）检测是端侧最成熟的一类落地任务：<b>模型小、算子规整、工具链支持好</b>。别的领域还在摸索，CV 已经有了标准答案。所以这一章的深度不是「从零训练一个检测网络」，而是<b>「全链路能跑通、每步的坑能讲清」</b>：你会走完 6 步，会用 <b>mAP</b> 判断量化做得好不好，并理解为什么<b>回归头比分类头更怕量化</b>。</p>
+    <div class="callout"><strong>深度定位：</strong>量化算法、粒度这些「重活」厂商工具链（RKNN Toolkit）已经封装好了——<span class="key">int8 per-channel 是默认配置，你不需要手写</span>。你要做的只有两件事：<b>① 校准集是否覆盖真实场景；② 量化后 mAP 是否达标</b>。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：性能指标体系（先会量，才会调）</h3>
-    <p>「快」是个模糊词。端侧对话至少拆成两组指标：<b>首响（prefill）</b>和<b>吐字（decode）</b>，二者瓶颈完全不同。</p>
-    <div class="board"><span class="k">五个必测指标</span>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：CV 任务与选型</h3>
+    <p>先分清 CV 的三大任务，各自的输出不同、选型也不同。</p>
+    <div class="board"><span class="k">CV 三大任务</span>
 
-① TTFT（首 token 时延）  用户按下回车到第一个字出现
-     ≈ prompt_tokens ÷ prefill 吞吐(tok/s)
-     受算力影响大（prefill 是算力瓶颈）
+  检测 detection ：找出"是什么、在哪" → 输出 bbox + 类别
+                  端侧代表：YOLOv8n / PP-YOLOE-s
+  分类 classification：判断"整张图是什么" → 输出 1 个类别
+                  端侧代表：MobileNetV3 / EfficientNet-Lite
+  分割 segmentation ：分到"每个像素属于谁" → 输出掩码 mask
+                  端侧代表：PP-LiteSeg / 轻量 DeepLab
 
-② decode tok/s（吐字速度）
-     生成阶段每秒出多少 token
-     <span class="g">受带宽影响大</span>（每 token 读一遍全部权重）
+<span class="k">端侧选型三原则：参数少 + 算子规整 + 有现成预训练</span>
+  检测：YOLOv8n（约 3.2M 参数，fp32 约 6MB）最通用
+        PP-YOLOE-s（国产 Paddle 系，工具链友好）
+  分类：MobileNetV3（约 2.5M）
+  分割：PP-LiteSeg（端侧偏重，优先做检测/分类）
 
-③ 内存占用（RSS / 模型常驻）
-     free -m / nvidia-smi 类比 → 端侧用 free、/proc/self/status
+<span class="k">为什么 CV 端侧成熟（记这 4 条）：</span>
+  ① 模型小：检测网络才几 MB，fp32 都塞得进内存
+  ② 算子规整：卷积 / BN / 激活为主，NPU 支持成熟
+  ③ 预训练多：COCO 上现成权重，多数场景只做"转换+量化"
+  ④ 工具链好：ONNX → RKNN 顺畅，量化配置已封装</div>
 
-④ NPU 利用率
-     cat /sys/kernel/debug/rknpu/load   （看到百分比）
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：CV 代表网络（结构要点，不推公式）</h3>
+    <p>不背公式，只记每个部件<b>在物理上干什么</b>。</p>
+    <div class="board"><span class="k">CNN 三个核心操作的物理含义</span>
 
-⑤ 带宽利用率 = decode_tok/s × 模型真实GB ÷ 有效带宽上限（NPU 独占 12~16 GB/s）
-     判断"是不是带宽瓶颈"的核心尺子
+  卷积 conv：滑动小窗口只看局部（<span class="g">局部感受野</span>），
+             同一组权重到处复用（<span class="g">权值共享</span>）
+             → 从像素里抽出边缘 / 纹理 / 形状
+  池化 pool：下采样、放大感受野，让后面的层"看得更广"
+  激活 + BN：引入非线性、把数值拉回稳定范围（利于量化）
 
-<span class="k">一句话：新用户感受 TTFT，长时间对话感受 decode tok/s。</span></div>
+<span class="k">YOLO 结构三段（检测通用骨架）</span>
+  Backbone 主干：CSPDarknet，逐层从像素 → 特征图，抽"语义"
+  Neck 颈部    ：PAN-FPN，把深层的"语义"和浅层的"位置"融合
+  Head 头部    ：解耦检测头，每个网格预测 bbox + 类别 + 置信度
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：基线 + Amdahl（优化前先算天花板）</h3>
-    <p>没基线就没优化。先测「什么都不改」的原始数字，再算理论加速上限，避免白忙。</p>
-    <div class="board"><span class="k">基线表（先填原始配置）</span>
-配置              TTFT    decode   内存     NPU   带宽利用率
-baseline          1200ms  6.0 t/s  2.1GB   70%   75.0%
-...
+<span class="g">一句话：backbone 认"是什么"，neck 合"位置+语义"，
+        head 吐"框和类"。</span>
+端侧只关心：这三段算子规整不规整、能不能落到 NPU。</div>
 
-<span class="k">Amdahl 定律：先看瓶颈占总时间多少</span>
-加速比 = 1 / ( (1−p) + p/S )
-   p = 可优化部分占比， S = 该部分加速倍数
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：数据与标注（COCO / YOLO 格式）</h3>
+    <p>标注格式就两种主流，看懂就能转。</p>
+    <div class="board"><span class="k">两种主流标注格式</span>
 
-<span class="g">例：耗时 80% 在量化可加速的 NPU 算子，若把它加速 4 倍</span>
-  加速比 = 1 / (0.2 + 0.8/4) = 1 / 0.4 = <span class="g">2.5×</span>
-  → 就算把 NPU 部分优化到极限，整体最多 2.5 倍，别指望 5 倍
+  COCO（json 单文件管全部图）
+    images[]      ：file_name / width / height
+    annotations[] ：bbox = [x, y, w, h]   <span class="g">左上角 + 宽高，像素单位</span>
+                    category_id / image_id
+    categories[]  ：类别表（id ↔ name）
 
-<span class="k">结论：先优化占比最大的那部分，收益最大。</span></div>
-    <div class="callout"><strong>面试加分点：</strong>「我会先测 baseline 和 Amdahl 上限，确认瓶颈占比，再决定投入——不做没有上界的优化。」</div>
+  YOLO（每张图一个 txt，每行一个框）
+    class  cx  cy  w  h    <span class="g">全部归一化到 0~1</span>（中心点 + 宽高）
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：三旋钮实测矩阵（核心实操）</h3>
-    <p>三大旋钮：<b>量化配置</b>、<b>NPU 核心数</b>、<b>batch size</b>。做法：固定其他，一次动一个，填进矩阵。</p>
-    <div class="board"><span class="k">旋钮一：量化配置</span>
-w4a16  最省内存、最快，精度略降   ← 端侧默认起点
-w8a16  精度更好，慢约 15~30%
-w8a8   最稳，LLM 上未必最快
+<span class="k">端侧常见做法：能不重训就不重训</span>
+  下载官方 / 开源预训练权重（.pt / .onnx）→ 直接转 RKNN 用。
+  只有类别对不上（如自有工业缺陷）才微调，且微调在 PC 上做。
 
-<span class="k">旋钮二：NPU 核心数 num_npu_core</span>
-<span class="r">3576 单核，固定 1（没得调）</span>；
-3588 三核，实测 1→2 核近线性、2→3 核收益递减（带宽抢用）。
+<span class="r">标注质量决定精度上限：漏标 = 训练时被当负样本，
+                          mAP 会被拉低（或虚高）。</span></div>
+    <div class="board"><span class="k">格式换算（COCO 像素 ⇄ YOLO 归一化）</span>
+  COCO bbox = [x, y, w, h]（左上角）
+  → cx = (x + w/2) / W_img
+    cy = (y + h/2) / H_img
+    w' = w / W_img      h' = h / H_img
+  例：图 640×480，bbox=[100, 60, 200, 120]
+    cx=(100+100)/640=0.3125  cy=(60+60)/480=0.25
+    w'=200/640=0.3125        h'=120/480=0.25
+  <span class="g">转标注、写评估脚本都要反复用这个换算。</span></div>
 
-<span class="k">旋钮三：batch size（并发数）</span>
-单路 bandwidth-bound，多路可"摊薄"权重读取：
-  batch=1  → 6.0 t/s，带宽利用率 75.0%
-  batch=4  → <span class="g">7.6 t/s（合计）</span>，利用率 <span class="g">95%</span>
-  batch=8  → 7.9 t/s（合计），利用率 98%，但单路 TTFT 变差
-<span class="k">batching 提吞吐、不降延迟——适合多用户服务端场景。</span></div>
-    <p><b>练习（板书填空）：</b>把 batch 提升后的带宽利用率算出来，再展开答案。</p>
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：导出 ONNX（转 RKNN 报错的重灾区）</h3>
+    <div class="board"><span class="k">PyTorch → ONNX：torch.onnx.export(...)</span>
+
+torch.onnx.export(model, dummy_input, "yolov8n.onnx",
+                  opset_version=12,
+                  input_names=["images"],
+                  output_names=["output"])
+
+<span class="k">三个常见坑（转 RKNN 报错大多出在这）</span>
+  ① <span class="g">opset 版本</span>：RKNN 支持的 opset 有上限（常见 11/12），
+     太新可能带来不支持的算子
+  ② <span class="g">动态 shape</span>：端侧固定输入更稳；导出时固定
+     batch=1、H=W=640，别留动态维
+  ③ <span class="g">算子兼容</span>：NMS / GridSample / HardSwish 等要确认支持；
+     不支持时的标准做法——<span class="k">导出到 NMS 之前，
+     NMS 放到（板上或PC上的）后处理里做</span>
+
+<span class="k">验证一步不能省：</span>
+  onnx.checker 过一遍 + onnxruntime 跑一张图，
+  与 PyTorch 输出对齐（误差 &lt; 1e-3）才算导出成功。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：RKNN 转换 + 量化（厂商工具链主场）</h3>
+    <p>这一步是「厂商已经把量化做掉大半」的地方。你要理解配置项在干什么，然后把关两个关键点。</p>
+    <div class="board"><span class="k">rknn-toolkit2：ONNX → .rknn</span>
+
+rknn.config(
+    target_platform="rk3576",
+    mean_values=[[0,0,0]], std_values=[[255,255,255]],
+    quantized_dtype="w8a8",      <span class="g">int8 权重 + int8 激活</span>
+    quantized_method="channel",  <span class="g">per-channel（厂商默认）</span>
+)
+rknn.load_onnx("yolov8n.onnx")
+rknn.build(do_quantization=True, dataset="calib.txt")
+rknn.export_rknn("yolov8n_int8.rknn")
+
+<span class="k">你真正要动手的：校准集（dataset）</span>
+  一份列表文件，指向 100~500 张<span class="g">真实场景</span>图片。
+
+<span class="r">你不必手写量化算法 / 粒度</span>——int8 per-channel 厂商已封装。
+<span class="k">你只把关两件事：</span>
+  ① 校准集是否覆盖真实场景（分布对不对）
+  ② 量化后 mAP 是否达标（掉幅在不在预算内）</div>
+    <div class="board"><span class="k">预处理对齐（最容易被忽略、后果最严重）</span>
+  mean / std 与训练时不一致 → 输入分布错位 → 精度崩
+  letterbox 是否与训练一致（YOLO 用 letterbox 保持长宽比）
+  RGB / BGR 通道顺序要一致
+  <span class="g">对齐一条口诀：训练怎么喂，转换就怎么配。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：部署 + mAP 评估</h3>
+    <p>转完不算完，要用数字验收。<b>量化前 vs 量化后跑同一套 mAP</b>，看「相对掉点」。</p>
+    <div class="board"><span class="k">两个 mAP 口径</span>
+  mAP@0.5      ：IoU 阈值取 0.5 下的平均精度（宽松，看"框住没有"）
+  mAP@0.5:0.95 ：IoU 从 0.5 到 0.95（步长 0.05）取平均（严格，贴近实用）
+
+<span class="k">验收要记录四个数</span>
+  量化前 mAP、量化后 mAP、掉幅、单帧延迟 / FPS
+  例：mAP@0.5  0.42 → 0.40  （掉 2 个点，<span class="g">可接受</span>）
+      mAP@0.5:0.95  0.28 → 0.25
+      单帧 12 ms → 约 83 FPS（瑞芯微 3576 int8 参考量级）
+
+<span class="k">掉点厉害时按顺序排查：</span>
+  ① 先怀疑<span class="r">校准集</span>（分布是否覆盖真实场景）
+  ② 预处理对齐（mean/std、letterbox、RGB/BGR）
+  ③ 对回归头 / 敏感层保 fp16（<span class="g">混合量化</span>）</div>
+    <div class="formula">mAP = 各类别 AP 在类别上的平均 · AP = PR 曲线下面积</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：CV 量化 vs LLM 量化差异</h3>
+    <p>前面第 2 章讲过通用量化，这里用 CV 的口径再对一次——<b>搞混了就会「LLM 那套调法用在检测上，mAP 掉一半」</b>。</p>
+    <div class="board"><span class="k">CV 量化 vs LLM 量化：目标不同，敏感点不同</span>
+
+              CV 量化（检测/分割）            LLM 量化
+输入          图像（连续、空间相关）           文本 token（离散）
+输出          bbox 坐标 + 掩码 / 类别         词表概率分布
+关键头        回归头（做连续值回归）          最后 logits 层
+量化最怕      <span class="r">回归头：连续值，误差直接进坐标</span>   <span class="k">权重/激活里的 outlier</span>
+主流评估      <span class="g">mAP（检测）/ mIoU（分割）</span>    <span class="g">PPL（困惑度）</span>
+对齐手法      回归头 / 敏感层保高精度          权重分组 + 保护重要通道
+
+<span class="k">一句话：CV 盯"坐标回归准不准"，LLM 盯"权重离群值"。</span></div>
+    <p>为什么<b>回归头对量化更敏感、分类头相对鲁棒</b>？用手算把差别算出来：</p>
+    <div class="board"><span class="k">回归头 vs 分类头：量化噪声谁更能忍？</span>
+
+设回归头输出归一化 bbox 坐标（0~1），int8 对称量化，qmax=127。
+
+情形 A：动态范围正常，scale = 1/127 ≈ 0.00787
+  单坐标最大误差 = scale/2 ≈ <span class="g">±0.0039</span>
+  640px 图 → 0.0039 × 640 ≈ <span class="g">±2.5 px</span>   → IoU 基本无损
+
+情形 B：范围被别的输入撑大（outlier），scale = 5/127 ≈ 0.0394
+  误差 = ±0.0197 → 0.0197 × 640 ≈ <span class="r">±12.6 px</span>
+  20px 的小目标直接偏半个框 → <span class="r">mAP 掉一大截、小目标漏检</span>
+
+<span class="k">对比分类头：</span>输出是"第几类"，只要 argmax 的最大项没被翻转，
+   <span class="g">结论就不变</span>——量化噪声被"离散化"吃掉了 → 相对鲁棒。
+
+<span class="k">结论：量化检测/分割，重点盯回归头与坐标/掩码精度；</span>
+<span class="k">      量化 LLM，重点处理权重与激活的离群值。</span></div>
+    <div class="board"><span class="k">评估指标别搞混（量化前后跑同一套，看"相对掉点"）</span>
+  CV  ：mAP@0.5 / mAP@0.5:0.95（检测）、mIoU（分割）
+  LLM ：PPL（困惑度）——预测下一个词有多"犹豫"，越大越差
+  <span class="k">CV 看绝对值掉几个点，LLM 看 PPL 的变化率。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书填空：CV 全链路 6 步空表</h3>
+    <p>先自己填，再展开答案。</p>
     <table class="tight">
-      <thead><tr><th>batch</th><th>合计 tok/s</th><th>模型(GB)</th><th>有效带宽(GB/s)</th><th>利用率(填)</th></tr></thead>
+      <thead><tr><th>步骤</th><th>做什么（填）</th><th>关键点 / 坑（填）</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td>6.0</td><td>2.0</td><td>12.0</td><td class="fill">?</td></tr>
-        <tr><td>2</td><td>7.0</td><td>2.0</td><td>14.0</td><td class="fill">?</td></tr>
-        <tr><td>4</td><td>7.6</td><td>2.0</td><td>15.2</td><td class="fill">?</td></tr>
-        <tr><td>8</td><td>7.9</td><td>2.0</td><td>15.8</td><td class="fill">?</td></tr>
+        <tr><td>① 任务与选型</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>② 数据与标注</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>③ 拿模型</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>④ 导出 ONNX</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>⑤ RKNN 转量化</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>⑥ 部署 + 评估</td><td class="fill">?</td><td class="fill">?</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案（先自己填！）</summary>
-      <p>利用率 = 有效带宽 ÷ 16：1→<b>75.0%</b>，2→<b>87.5%</b>，4→<b>95.0%</b>，8→<b>98.8%</b>。<br>
-      规律：batch 越大越接近带宽上限，但收益递减；到 8 路只多 0.3 t/s，成本（内存×8、TTFT 变差）不划算——这就是「甜点」在哪的判断。</p>
+      <div class="board"><span class="k">CV 检测全链路 6 步</span>
+① 任务与选型：定检测/分类/分割，选 YOLOv8n 这类轻量预训练模型。
+   关键点：参数少、算子规整、有预训练。
+② 数据与标注：组织数据集（COCO json / YOLO txt），核对标注质量。
+   关键点：格式换算（像素 ↔ 归一化）；漏标会毁掉精度上限。
+③ 拿模型：下载官方预训练权重（.pt/.onnx）。
+   关键点：端侧通常不重训，只做转换 + 量化。
+④ 导出 ONNX：torch.onnx.export。
+   坑：opset 版本、固定动态 shape、算子兼容（NMS 放后处理）。
+⑤ RKNN 转量化：rknn-toolkit2 配置校准集 + int8 per-channel。
+   关键点：量化已封装，你只管校准集 + 预处理对齐。
+⑥ 部署 + 评估：板上推理，算量化前后 mAP 与 FPS。
+   关键点：掉点先查校准集，再考虑敏感层保 fp16（混合量化）。
+
+<span class="k">口诀：数据 → 拿模型 → ONNX → RKNN → 部署 → mAP。</span></div>
     </details>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：CPU + NPU 混合调度</h3>
-    <p>NPU 不是万能的：有些算子 NPU 不支持或支持差（如某些动态 shape、特殊激活、非标准 attention）。这些会<b>回退（fallback）到 CPU</b>，一旦掉 CPU 就会拖慢整体。</p>
-    <div class="board"><span class="k">混合调度三原则</span>
-
-① 能塞 NPU 的就塞 NPU   —— 主体矩阵乘全部 NPU 化
-② 掉 CPU 的算子要盯住   —— 看 build 日志的 "not supported"
-③ 减少 NPU↔CPU 数据搬运 —— 搬运 = 额外带宽 + 时延
-
-<span class="k">判断是否掉 CPU：</span>
-  跑推理时 top 看主进程 CPU% —— 若 CPU 长期 100%+
-  且 NPU 利用率低 → 多半有算子掉 CPU
-
-<span class="g">典型分工：
-  Prefill 大矩阵乘  → NPU（算力密集）
-  sampling/采样     → CPU（轻量、控制逻辑）
-  tokenizer         → CPU</span>
-<span class="k">目标：让 NPU 干重活、CPU 干调度，别让 CPU 抢带宽。</span></div>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：投机解码（speculative decoding）</h3>
-    <p>思路：用<b>小模型（draft）</b>先猜几个 token，再用<b>大模型（target）</b>一次验证。猜对了就白赚——因为大模型一次前向能确认多个 token，分摊了权重读取，<b>正好打带宽瓶颈</b>。</p>
-    <div class="board"><span class="k">参数：</span>γ = 每轮猜几个；α = 猜中率(acceptance rate)；r = 小/大模型耗时比
-
-<span class="k">手算（α=0.8, γ=4, r=0.1）</span>
-每轮平均猜中数 = α(1−α^γ)/(1−α)
-              = 0.8 × (1 − 0.8⁴) / 0.2
-              = 0.8 × (1 − 0.4096) / 0.2
-              = 0.8 × 0.5904 / 0.2 = <span class="g">2.3616</span>
-每轮总产出 = 猜中 + 1（大模型兜底）= 1 + 2.3616 = <span class="g">3.36 token</span>
-每轮耗时   = γ·r + 1 = 4×0.1 + 1 = 1.4（相对大模型单次前向）
-
-加速比 = 3.36 / 1.4 = <span class="g">≈ 2.4×</span>
-
-<span class="k">结论：猜中率 α 越高、小模型越便宜(r 越小)，加速比越大。
-α 太低或小模型太重 → 反而变慢，要果断关掉。</span>
-
-<span class="k">llama.cpp 支持：</span>--model big.gguf --model-draft small.gguf
-（-md 指定草稿模型；--draft-max 控制 γ）</div>
-    <div class="callout"><strong>为什么端侧特别值：</strong>decode 是带宽瓶颈，投机解码让一次权重读取服务多个 token，<span class="key">本质是提升带宽利用率</span>——和第 9 章那把尺子对上了。</div>
-
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：找最优组合（配置矩阵 + 帕累托）</h3>
-    <div class="board"><span class="k">实验矩阵（示例，一次动一个变量）</span>
-#  quant  core  batch  TTFT    decode  内存   带宽利用
-1  w4a16   1     1      1200ms  6.0 t/s 2.1GB  75.0%
-2  w8a16   1     1      1300ms  5.0 t/s 2.4GB  62.5%
-3  w4a16   1     4      1500ms  7.6 t/s 2.9GB  95.0%
-4  w4a16   1     8      1700ms  7.9 t/s 3.6GB  98.8%
-5  w4a16+投机 1  1      900ms   7.2 t/s 2.5GB  90.0%
-
-<span class="k">选型原则：按目标选，不是越大越好</span>
-  要低延迟单路对话     → 选 5（投机解码）：TTFT 低、tok/s 高
-  要多用户高吞吐       → 选 3（batch=4）：最平衡
-  要极致精度           → 选 2（w8a16）：慢但准
-  <span class="g">在"满足延迟目标"的候选里，挑内存最小的那个</span></div>
-
-    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：给延迟目标反推配置</h3>
-    <div class="board"><span class="k">任务：3B int4，目标 decode ≥ 6 tok/s（NPU 独占），内存 ≤ 4GB</span>
-
-① 理论天花板（NPU 独占）：16 ÷ 2.0 = 8.0 t/s  → 目标 6 可达，需高利用率
-② 目标利用率：6 × 2.0 ÷ 16 = <span class="g">75%</span>
-③ 单路(w4a16) 6.0 t/s = 75%，刚好达标；产品场景会掉到 3.5~5.5
-④ 手段：
-   - batch=4 → 7.6 t/s（95%）✅ 内存 2.9GB（≤4GB）；单路 TTFT 变差
-   - 投机解码 → 7.2 t/s（90%），单路低延迟优先
-   - batching + 投机 组合 → 冲 95%+
-⑤ 结论：<span class="g">先保单路达 6 tok/s，再用 batch 或投机解码冲利用率</span>
-
-<span class="k">被问"给个延迟目标怎么调"→ 标准答：</span>
-「先算理论天花板确认目标可达 → 再算需要的带宽利用率 →
-若单路不够，就上 batch（提吞吐）或投机解码（摊薄权重读取）→
-在满足目标的方案里挑内存最小、最稳的那个。」</div>
-
-    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：精度评估闭环（量化后第一件事）</h3>
-    <p>完成转换 / 量化后，<b>第一件事不是压性能，而是评精度</b>。速度再快，答案错了就是废品。评估要先定指标、再定流程、最后定上线门槛——一步都不能省。</p>
-    <div class="board"><span class="k">按任务选指标（选错指标 = 白评）</span>
-
-<span class="g">LLM / 语言模型</span>   → PPL（困惑度，越低越好）
-                       + 抽样人肉问答（有没有事实错误）
-<span class="g">检测 / 分割</span>       → mAP（IoU 阈值下的平均精度）
-                       + mIoU（分割）
-<span class="g">分类</span>            → Top-1 / Top-5 准确率
-<span class="g">回归 / 关键点 / 深度</span> → RMSE / MAE（越小越好）
-
-<span class="k">一句话：语言看 PPL，检测看 mAP，回归看 RMSE/MAE。</span>
-别用「感觉变笨了」判断——那是感觉，不是指标。</div>
-
-    <div class="board"><span class="k">评估流程（固定验证集是关键）</span>
-① 固定验证集：量化前就切好一份<b>不参与校准</b>的测试集，
-   之后每次量化都用同一份——可比才有意义。
-② 跑原始模型：先测 FP / 原始精度 baseline。
-③ 跑量化模型：同验证集、同指标、同脚本。
-④ 前后对比：算 Δ（绝对差 + 相对涨幅）。
-⑤ 判定：对照门槛决定「上线 / 调优 / 回退」。
-
-<span class="k">门槛参考</span>
-  PPL 涨幅 &lt;5% / mAP 掉点 &lt;1pt / RMSE 涨幅 &lt;5% → 可上线
-  超门槛 → 先补校准集（板书⑩），不行再上 QAT（板书⑩）</div>
-    <div class="callout"><strong>纪律：</strong><span class="key">校准集和验证集必须分开。</span>拿校准集去评精度 = 自己给自己出题还提前看答案，涨幅必然好看，线上必崩。</div>
-
-    <h3><span class="tag-lesson">讲解</span>9. 板书⑨：量化误差分析（找出塌掉的那一层）</h3>
-    <p>精度不达标时，别急着换方案——先<b>定位误差出自哪一层</b>。量化误差是逐层累积的，找到「罪魁层」，往往只改一个配置就能救。</p>
-    <div class="board"><span class="k">两种定位粒度</span>
-
-<span class="g">逐层（per-layer）</span>
-  逐层把量化张量与原始张量比对：
-    · 相对误差 = ‖W_q − W‖ / ‖W‖
-    · 余弦相似度 = cos(W_q, W)
-  找误差突然变大的那一层 / 那一段（常是 attention 输出、
-  FFN 第二个矩阵、LayerNorm 附近）。
-
-<span class="g">逐通道（per-channel）</span>
-  对每层再按输出通道拆，找「离群通道」：
-    · 某通道 scale 被 outlier 撑大 → 同层其他通道全被压平
-    · 这正是第 2 章 outlier 陷阱的「逐层放大版」
-
-<span class="k">判读</span>
-  · 单层相对误差 &gt; 10% → 该层敏感，优先保精度；
-  · 误差集中在个别通道 → 该层需要 group-wise 或提高位宽。</div>
-    <div class="board"><span class="k">误差定位后的三板斧</span>
-① 该层单独保精度：敏感层抬到 w8a16 / 保持 fp16；
-② 缩小 group_size：让 outlier 关进更小的组（回顾第 2 章）；
-③ 换 quantized_algorithm：normal → mmse / kl_divergence，
-   让标定更贴合分布。</div>
-
-    <h3><span class="tag-lesson">讲解</span>10. 板书⑩：校准集工程 + PTQ/QAT 验证</h3>
-    <p>精度问题的根治手段只有两个：<b>校准集做对</b>，或 <b>PTQ 不够就上 QAT</b>。先榨干校准集，再决定要不要动 QAT——QAT 成本高得多。</p>
-    <div class="board"><span class="k">校准集工程（覆盖真实分布）</span>
-
-  · 分布对齐：用线上真实输入，不用随机数（第 9 章的校准集三条军规）。
-  · 分层覆盖：长度（短/中/长）、任务（问答/翻译/代码）、
-    边界样本（超长、含数字、含专有名词）都要有。
-  · 规模：LLM 100~500 条；太少统计不稳，太多收益递减。
-  · 一致性：校准集与上线输入同源、同预处理管线，
-    否则「校准的世界」和「运行的世界」是两回事。
-  · 可复现：固定随机种子与采样脚本，存 calib/prompts.txt。</div>
-
-    <div class="board"><span class="k">PTQ vs QAT</span>
-<span class="g">PTQ（训练后量化）</span>——首选
-  不训练，只校准；快、成本低。
-  覆盖 80% 场景；w4a16 / w8a8 通常够用。
-<span class="g">QAT（量化感知训练）</span>——PTQ 不行才上
-  训练时模拟量化误差，让模型「学会」在量化下工作；
-  精度最接近原始，但要重训 + 数据 + 算力。
-  适合：PTQ 后仍超门槛、且该模型值得投入。</div>
-
-    <div class="board"><span class="k">验证闭环（PTQ / QAT 都要走）</span>
-  校准集 → 量化 → <b>固定验证集评测</b> → 对比 baseline →
-    达标 → 上线
-    不达标 → 换校准集重来 → 仍不达标 → 上 QAT → 再评测
-  <span class="k">每一版量化都留一份评测记录，可追溯到「哪一版达标」。</span></div>
-    <div class="callout"><strong>顺序别乱：</strong>先 PTQ + 好校准集（性价比最高），实在过不了门槛再上 QAT。<span class="key">一上来就 QAT = 用最贵的办法解决最便宜的问题。</span></div>
+    <h3><span class="tag-lesson">讲解</span>9. 板书填空：量化前后 mAP 验收表</h3>
+    <p>把「相对掉点」自己算出来，再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>配置</th><th>量化前 mAP@0.5</th><th>量化后 mAP@0.5</th><th>掉幅（填）</th><th>结论（填）</th></tr></thead>
+      <tbody>
+        <tr><td>int8 per-channel</td><td>0.42</td><td>0.40</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>int8 校准集偏（只有白天）</td><td>0.42</td><td>0.33</td><td class="fill">?</td><td class="fill">?</td></tr>
+      </tbody>
+    </table>
+    <details>
+      <summary>点击展开答案（先自己填！）</summary>
+      <p>第一行：掉幅 = 0.42 − 0.40 = <b>0.02（2 个点）</b>，在 2~3 个点的预算内 → <b>可接受，量产</b>。<br>
+      第二行：掉幅 = 0.42 − 0.33 = <b>0.09（9 个点）</b>，明显超标 → <b>不可接受</b>：先补校准集（加夜景/小目标/逆光），再考虑对回归头保 fp16。<br>
+      要点：掉幅只看「相对掉点」，且第一嫌疑永远是<b>校准集分布</b>。</p>
+    </details>
   </div>
 
   <h2>练习（交作业）</h2>
-  <p class="lead">讲义看懂后动手跑配置矩阵。做完贴回来我批改。</p>
+  <p class="lead">讲义看懂后动手真跑一遍。做完贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>性能指标采集脚本</h3></div>
+    <div class="head"><span class="num">1</span><h3>CV 任务与选型笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>写一个脚本，一次跑出 TTFT / decode / 内存 / NPU / 带宽利用率五项。</dd>
-      <dt>要掌握</dt><dd>五项指标的取法（<code>free</code>、<code>/sys/kernel/debug/rknpu/load</code>、计时首 token）。</dd>
-      <dt>实操步骤</dt><dd>写 <code>bench.sh</code>：跑一次推理，用 <code>date +%s.%N</code> 计 TTFT，统计 decode tok/s，抓内存与 NPU load，输出 <code>baseline.txt</code>。</dd>
-      <dt>检验标准</dt><dd>脚本一条命令出五项数字，重跑误差在合理范围。</dd>
+      <dt>目标</dt><dd>把板书①整理成一张选型表：任务 / 输出 / 端侧代表模型 / 参数与体积量级。</dd>
+      <dt>要掌握</dt><dd>检测、分类、分割的输出差异；为什么 CV 端侧成熟（4 条）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>cv_tasks.md</code>：① 三大任务对比表；② 每类给 2 个端侧候选模型 + 参数量/体积量级；③ 一句话说明「为什么先做检测、为什么能不重训」。</dd>
+      <dt>检验标准</dt><dd>合上讲义，能说出检测/分类/分割各输出什么、YOLOv8n 大约多少参数多大体积。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>基线 + Amdahl 上限计算</h3></div>
+    <div class="head"><span class="num">2</span><h3>标注格式解析与可视化</h3></div>
     <dl>
-      <dt>目标</dt><dd>建基线表，并用 Amdahl 算出理论加速上限。</dd>
-      <dt>要掌握</dt><dd>Amdahl 公式；如何估「可优化部分占比 p」。</dd>
-      <dt>实操步骤</dt><dd>把 baseline 数字填表；假设 NPU 部分占 80%、能加速 4 倍，手算上限写入 <code>amdahl.md</code>。</dd>
-      <dt>检验标准</dt><dd>能说出「整体最多几倍」并解释为什么不是叠加。</dd>
+      <dt>目标</dt><dd>能吃 COCO / YOLO 两种标注，并在图上画出框验证解析正确。</dd>
+      <dt>要掌握</dt><dd>COCO 的像素 bbox 与 YOLO 的归一化中心框之间的换算（板书③）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>label_check.py</code>：读一份标注（COCO json 或 YOLO txt），做 COCO ⇄ YOLO 换算，用代码在图上画出检测框并落盘 <code>vis/</code>；打印一张图的换算过程（对照板书数字）。</dd>
+      <dt>检验标准</dt><dd>画出的框与目标贴合；能口算一例「COCO [100,60,200,120] @640×480」的 YOLO 四元组。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>CPU+NPU 分工排查</h3></div>
+    <div class="head"><span class="num">3</span><h3>YOLOv8n 导出 ONNX</h3></div>
     <dl>
-      <dt>目标</dt><dd>找出哪些算子在 CPU 上跑（fallback）。</dd>
-      <dt>要掌握</dt><dd>怎么从 build 日志 / top 判断掉 CPU；为什么搬运要避免。</dd>
-      <dt>实操步骤</dt><dd>跑推理，<code>top</code> 记录主进程 CPU%；翻 build 日志找 "not supported"；写 <code>cpu_npu_split.md</code> 列出候选 fallback 算子。</dd>
-      <dt>检验标准</dt><dd>能指出至少 1 个疑似掉 CPU 的算子，并说清它对带宽/时延的影响。</dd>
+      <dt>目标</dt><dd>把官方 YOLOv8n 权重导出为固定输入的 ONNX，并验证输出与 PyTorch 对齐。</dd>
+      <dt>要掌握</dt><dd>opset 选择、固定动态 shape、算子兼容（NMS 放后处理）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>export_onnx.py</code>：加载 <code>yolov8n.pt</code>，以 dummy(1,3,640,640) 导出 ONNX（opset 12，固定 shape）；用 onnx.checker 校验，并用 onnxruntime 跑一张图与 PyTorch 输出对比，记录最大误差。</dd>
+      <dt>检验标准</dt><dd>生成 <code>yolov8n.onnx</code>；onnxruntime 与 PyTorch 输出误差 &lt; 1e-3；能说出踩到的 shape/opset 坑。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">4</span><h3>RKNN 转换脚本（含校准集配置）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把 ONNX 转成 int8 的 <code>.rknn</code>，配置好校准集与预处理。</dd>
+      <dt>要掌握</dt><dd>rknn.config 各参数含义；校准集列表怎么写；mean/std 与训练对齐。</dd>
+      <dt>实操步骤</dt><dd>写 <code>convert_yolo.py</code>：config（target_platform 按板型、mean/std、w8a8、channel）+ load_onnx + build(do_quantization=True, dataset=calib.txt) + export_rknn；先在 PC 上用 RKNN Toolkit 的仿真模式跑通，记录转换日志与警告。</dd>
+      <dt>检验标准</dt><dd>生成 <code>yolov8n_int8.rknn</code>；能解释每个 config 参数；说明校准集里放了什么、为什么。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>配置矩阵实测（核心实操）</h3></div>
+    <div class="head"><span class="num">1</span><h3>校准集准备（PTQ 的命门）</h3></div>
     <dl>
-      <dt>目标</dt><dd>跑通板书③⑥的矩阵：量化 × batch（× 投机），填满性能表。</dd>
-      <dt>要掌握</dt><dd>「一次只动一个变量」；batch 对吞吐/带宽利用率的影响。</dd>
-      <dt>实操步骤</dt><dd>至少跑 5 组配置，用 <code>bench.sh</code> 采集，写入 <code>perf_matrix.md</code>（含 TTFT/decode/内存/带宽利用率列）。</dd>
-      <dt>检验标准</dt><dd>表里能看出「batch 越大利用率越高、收益递减」的趋势。</dd>
+      <dt>目标</dt><dd>产出一份覆盖真实场景的校准集，并说明选择理由。</dd>
+      <dt>要掌握</dt><dd>校准集为什么必须覆盖真实输入分布；数量与多样性怎么权衡。</dd>
+      <dt>实操步骤</dt><dd>写 <code>calib_set.md</code> + 生成 <code>calib.txt</code>：选 100~500 张图，覆盖光照（白天/夜）、尺度（含小目标）、角度、类别、难例；说明「训练分布 ≠ 线上分布」的风险与你的选取标准。</dd>
+      <dt>检验标准</dt><dd>能说出「校准集选错的 2 个后果」；校准列表文件被 <code>convert_yolo.py</code> 正确读取。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>投机解码验证</h3></div>
+    <div class="head"><span class="num">2</span><h3>mAP 评估脚本 + 量化前后对比（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>用 llama.cpp 草稿模型跑一次投机解码，测实际加速比。</dd>
-      <dt>要掌握</dt><dd>γ/α/r 三参数；加速比手算公式；α 低时为何要关。</dd>
-      <dt>实操步骤</dt><dd>用 <code>llama-cli --model big --model-draft small</code> 对比开关前后 tok/s，记录 α 与实测加速比，写入 <code>spec_decode.md</code>。</dd>
-      <dt>检验标准</dt><dd>能对比手算与实测加速比，并给出「是否值得开」的结论。</dd>
+      <dt>目标</dt><dd>写一份可复用的 mAP 评估脚本，跑出量化前 / 量化后的 mAP。</dd>
+      <dt>要掌握</dt><dd>mAP@0.5 与 mAP@0.5:0.95 的算法；IoU 与 TP/FP/FN 判定；PR 曲线取面积。</dd>
+      <dt>实操步骤</dt><dd>写 <code>eval_map.py</code>：输入预测框与真值标注（COCO 格式），按 IoU 阈值匹配、按置信度排序算各类 AP、再取平均；分别对 fp32 ONNX 与 int8 RKNN 输出跑一遍，落盘 <code>map_report.md</code>（含两行 mAP 与掉幅）。</dd>
+      <dt>检验标准</dt><dd>脚本跑通、给出两组 mAP；掉幅可量化；能一句话判断「这次量化是否达标」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>《性能调优报告（含最优配置）》（本章核心产出）</h3></div>
+    <div class="head"><span class="num">3</span><h3>部署与性能测试（FPS / 延迟）</h3></div>
     <dl>
-      <dt>目标</dt><dd>综合矩阵与实验，给出最优配置与理由——一页纸。</dd>
-      <dt>要掌握</dt><dd>把指标 + Amdahl + 矩阵 + 投机解码串成一个决策。</dd>
-      <dt>实操步骤</dt><dd>写 <code>perf_tuning_report.md</code>（一页）：①基线 ②Amdahl 上界 ③配置矩阵 ④最优配置（含延迟/内存/带宽利用率）⑤从目标反推的调优路径。</dd>
-      <dt>检验标准</dt><dd>给定一个延迟目标，拿报告能立刻选出配置——架构决策标准。</dd>
+      <dt>目标</dt><dd>在板上跑通 RKNN 推理，测出单帧延迟与 FPS，与 mAP 一起构成验收表。</dd>
+      <dt>要掌握</dt><dd>板上加载 .rknn 的流程；单帧延迟的测法（多次取均值 / P95）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>bench_cv.py</code>：板上加载 <code>yolov8n_int8.rknn</code>，跑 100 帧测单帧延迟均值与 P95，换算 FPS；把结果并入 <code>map_report.md</code>。</dd>
+      <dt>检验标准</dt><dd>有单帧延迟与 FPS 数字；能说明延迟与 FPS 的关系（1s ÷ 单帧延迟）。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">4</span><h3>精度评估脚本模板（新增）</h3></div>
+    <div class="head"><span class="num">4</span><h3>《CV 全链路记录》一页（核心产出）</h3></div>
     <dl>
-      <dt>目标</dt><dd>写一个可复用的评估脚本模板：LLM 算 PPL，或检测算 mAP。</dd>
-      <dt>要掌握</dt><dd>固定验证集的做法；PPL / mAP / RMSE 的取法；量化前后对比与门槛判定。</dd>
-      <dt>实操步骤</dt><dd>① 切一份不参与校准的验证集 <code>eval/</code>；② 写 <code>eval_ppl.py</code>（读验证集逐 token 累加 logp，<code>PPL=exp(-mean(logp))</code>）或 <code>eval_map.py</code>（跑检测框、按 IoU 计算 AP 后求均值）；③ 同一脚本跑原始模型与量化模型，输出 <code>eval_report.md</code>：baseline / 量化 / Δ / 是否达标。</dd>
-      <dt>检验标准</dt><dd>改配置不用改脚本就能重测；报告里能指着数字说清「涨/跌多少、为什么、是否上线」。</dd>
+      <dt>目标</dt><dd>把整条链路收口成一页可复现文档——这是本章核心产出。</dd>
+      <dt>要掌握</dt><dd>6 步串成一个决策流；量化交给工具链、自己把关校准集与 mAP 的逻辑。</dd>
+      <dt>实操步骤</dt><dd>写 <code>cv_pipeline.md</code>（一页）：① 任务与选型 ② 数据/标注 ③ ONNX 导出配置 ④ RKNN 转换配置（校准集说明）⑤ 部署命令 ⑥ mAP / FPS 验收表 + 踩坑记录 + 下一步。</dd>
+      <dt>检验标准</dt><dd>别人拿这页，不用问你就能独立复现「ONNX → RKNN → 板上推理 → mAP 评估」，并能说清校准集怎么选。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>bench.sh</code> + <code>baseline.txt</code> —— 五项性能指标采集脚本与基线。</li>
-    <li><code>amdahl.md</code> —— 基线表 + Amdahl 加速上限手算。</li>
-    <li><code>cpu_npu_split.md</code> —— CPU/NPU 分工排查记录。</li>
-    <li><code>perf_matrix.md</code> —— 配置矩阵实测表（量化 × batch）。</li>
-    <li><code>spec_decode.md</code> —— 投机解码验证（手算 vs 实测加速比）。</li>
-    <li><code>perf_tuning_report.md</code> —— 性能调优报告（含最优配置，核心产出）。</li>
-    <li><code>eval_ppl.py</code> / <code>eval_map.py</code> + <code>eval_report.md</code> —— 精度评估脚本模板与前后对比。</li>
+    <li><code>cv_tasks.md</code> —— CV 任务与选型对比表。</li>
+    <li><code>label_check.py</code> —— 标注格式解析与可视化（COCO ⇄ YOLO 换算）。</li>
+    <li><code>export_onnx.py</code> + <code>yolov8n.onnx</code> —— ONNX 导出与对齐验证。</li>
+    <li><code>convert_yolo.py</code> + <code>calib.txt</code> —— RKNN 转换与校准集列表。</li>
+    <li><code>calib_set.md</code> —— 校准集选择说明（覆盖真实分布）。</li>
+    <li><code>eval_map.py</code> + <code>map_report.md</code> —— mAP 评估脚本与量化前后对比。</li>
+    <li><code>bench_cv.py</code> —— 板上推理性能测试（单帧延迟 / FPS）。</li>
+    <li><code>cv_pipeline.md</code> —— CV 全链路一页文档（核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>说清 TTFT 与 decode tok/s 的瓶颈为何不同（prefill 算力密集、decode 带宽密集）。</li>
-    <li>会用 Amdahl 算整体加速上限，并解释「为什么不是叠加」。</li>
-    <li>会算 batch 提升后的带宽利用率，判断收益是否划算。</li>
-    <li>能用公式手算投机解码加速比（α=0.8, γ=4, r=0.1 → ≈2.4×）。</li>
-    <li>给一个延迟目标，能反推出该动 batch 还是投机解码。</li>
-    <li>能按任务选对精度指标（LLM 用 PPL、检测用 mAP、回归用 RMSE/MAE），并用固定验证集做前后对比。</li>
-    <li>能定位量化误差最大的层，并说出「PTQ 不够就上 QAT」的判定顺序。</li>
+    <li>能说出 CV 三大任务的输出差异，以及端侧选型三原则。</li>
+    <li>能说出 CV 端侧成熟的 4 条原因。</li>
+    <li>能用一句话讲清 YOLO 的 backbone / neck / head 各干什么（不推公式）。</li>
+    <li>能口算 COCO 像素框 ⇄ YOLO 归一化框的换算。</li>
+    <li>能说出 ONNX 导出的三个坑（opset / 动态 shape / 算子兼容），并知道 NMS 放后处理。</li>
+    <li>能说清「量化交给工具链、自己把关校准集与 mAP」的分工。</li>
+    <li>能报出 mAP@0.5 与 mAP@0.5:0.95 两个口径，并用掉幅判断量化是否达标。</li>
+    <li>能说清 CV 量化（mAP/mIoU）与 LLM 量化（PPL）的评估差异。</li>
+    <li>能用手算说明「回归头比分类头对量化更敏感」。</li>
   </ul>
 
-  <h2>面试话术</h2>
-  <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「我做端侧性能调优先建指标：TTFT、decode tok/s、内存、NPU 利用率、带宽利用率。先测 baseline 再用 Amdahl 算理论上界，确认瓶颈占比。优化手段上：量化配置在 w4a16/w8a16 间权衡精度与速度；batch size 能提升吞吐和带宽利用率，多用户服务端优先；CPU+NPU 混合调度让 NPU 干矩阵乘、CPU 干采样和 tokenizer，尽量避免算子掉 CPU 造成搬运；单路低延迟场景用投机解码，用小模型猜、大模型验证，让一次权重读取服务多个 token，实测能到 2 倍左右加速。最后按目标在候选里挑内存最小、最稳的配置。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能建指标、定基线、算上界、跑矩阵，给延迟目标调出达标配置——性能调优能力。</p>
-  </div>
+  <h2>本节要点回顾</h2>
+  <ul class="clean">
+    <li>CV 检测的端侧链路是六步：任务选型 → 数据标注 → 拿预训练模型 → 导出 ONNX → RKNN 转量化 → 部署与 mAP 评估。</li>
+    <li>CV 端侧成熟的原因是模型小、算子规整、预训练丰富、工具链支持好；多数场景只做「转换 + 量化」，不重训。</li>
+    <li>YOLO 结构分三段：backbone 抽语义、neck 融位置与语义、head 输出框与类别。</li>
+    <li>ONNX 导出的三个坑是 opset 版本、动态 shape、算子兼容；NMS 通常放在后处理。</li>
+    <li>RKNN 的 int8 per-channel 量化已由工具链封装，工程重点在「校准集覆盖真实分布」与「预处理对齐」。</li>
+    <li>量化验收看 mAP@0.5 与 mAP@0.5:0.95 的相对掉幅，掉点首先怀疑校准集，其次考虑敏感层保 fp16。</li>
+    <li>CV 量化看 mAP/mIoU，LLM 量化看 PPL；回归头对量化最敏感，分类头相对鲁棒。</li>
+  </ul>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 是<strong>单核 NPU</strong>，<code>num_npu_core</code> 固定 1，调核心数没意义；这一点要说清，别照搬 3588 的经验。</li>
-      <li>带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s），batch 与投机解码是<strong>提升带宽利用率的正路</strong>；超过 ~95% 利用率后收益递减。</li>
-      <li>NPU 利用率看 <code>/sys/kernel/debug/rknpu/load</code>；若 CPU 长期 ≥100% 而 NPU 低，说明有算子掉 CPU（fallback），要回第 9 章查 build 日志。</li>
-      <li>内存有限，batch 翻倍内存也翻倍——3B int4 batch=8 约 3.6GB，别再叠加其它服务。</li>
+      <li>3576 的 NPU 是 <strong>int8 定点加速器为主</strong>，CV 走 RKNN Toolkit（<code>.rknn</code>），不要用 rkllm——rkllm 只吃 LLM。</li>
+      <li>RKNN 的 int8 量化<strong>已是 per-channel</strong>，你无需手写量化算法；重心放在<strong>校准集</strong>与<strong>预处理对齐</strong>（mean/std、letterbox、RGB/BGR）。</li>
+      <li>校准集务必覆盖<strong>夜景、小目标、强光/逆光、难例</strong>等真实场景，否则激活范围估偏，mAP 直接掉。</li>
+      <li><strong>回归头更敏感</strong>：必要时对回归头 / 敏感层保留 fp16（混合量化），别一刀切 int8。</li>
+      <li>ONNX 导出时<strong>固定输入 shape</strong>（如 1×3×640×640）最稳；NMS 放后处理，别塞进模型。</li>
+      <li>板上性能与精度要一起记：单帧延迟参考量级约十几毫秒，具体以实测为准；验收以<strong>量化前后 mAP 掉幅</strong>为准绳。</li>
     </ul>
   </div>
 

@@ -3,286 +3,374 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 8 章 · RK3576 上手（讲义 + 作业）</title>
+<title>第 8 章：LLM③ KV Cache、PagedAttention 与带宽瓶颈</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html">第 4 章</a>
-    <a href="ch05.html">第 5 章</a>
-    <a href="ch06.html">第 6 章</a>
-    <a href="ch07.html">第 7 章</a>
-    <a href="ch08.html" class="active">第 8 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html" class="active">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 8 章：RK3576 上手</h1>
-  <p class="lead"><strong>章节目标：</strong>把一块<b>真板子</b>从零跑到能对话——烧系统、装 RKNN 工具链、转一个 1.5B 模型、跑通推理并记录出 TTFT / tok/s / 内存 / NPU 利用率。<span class="key">面试时"我手里有块 RK3576" 就是最大优势。</span></p>
+  <h1>第 8 章：LLM③ KV Cache、PagedAttention 与带宽瓶颈</h1>
+  <p class="lead"><strong>章节目标：</strong>把「<b>内存怎么涨、速度卡在哪</b>」算成数字，并搞懂 KV Cache 的<b>分页管理与量化</b>——拿到任意模型 + 上下文长度，能<b>秒算 KV Cache、秒判算力瓶颈还是带宽瓶颈</b>。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 3 个任务</span>
-    <span class="chip">产出目录：ch08-rk3576</span>
+    <span class="chip">下午 4h · 4 个任务</span>
+    <span class="chip">产出目录：ch08-llm-kv</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把烧录 / 工具链 / 转换 / 跑通四条链路串起来。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的命令模板、记录空表自己填，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真机操作、记录数据、出报告。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把 KV Cache 公式和瓶颈判据看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的 KV Cache 空表自己算，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写计算器、出性能报告。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>前面 7 章都在"算账"。这一章开始<b>动手</b>：把一套完整的端侧部署链路走通一遍。链路四步——<span class="key">装系统 → 配工具链 → 转模型 → 跑推理</span>。四步都通，你手里的"有真板子"就成了简历上最硬的差异化。</p>
+    <p>第 3 章你知道 decode 是「逐 token 生成」。但每生成一个 token，模型要去看前面所有 token 的信息——如果每次重算，代价爆炸。KV Cache 就是为此而生，代价是<b>内存随上下文线性增长</b>。算得清它，你才算摸到端侧 LLM 的门槛。这一章的 KV Cache、瓶颈定位，以及它的<b>分页管理（PagedAttention）与量化</b>，都是端侧落地的核心内容。</p>
+    <div class="callout"><strong>一句话记住：</strong>KV Cache 是「时间换空间」；端侧跑 LLM，空间（带宽）往往比时间（算力）更致命。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：烧录系统（镜像 + 工具）</h3>
-    <div class="board"><span class="k">第一步：给 RK3576 装系统（两条路线）</span>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：KV Cache 为什么存在</h3>
+    <p>Attention 的本质：新的 Query 要和前面<b>所有</b> token 的 Key 做点积、再用结果去加权所有 Value。问题在于这些 K、V 每步都会用到。</p>
+    <div class="board"><span class="k">没有 Cache 会怎样：</span>
+  生成第 100 个 token 时，要把前 99 个 token 的 K、V <span class="r">全部重算</span>一遍；
+  生成第 101 个再重算前 100 个…… 计算量 ~ N² 爆炸。
 
-<span class="k">路线 A：厂商成品镜像（推荐，最省事）</span>
-  1. 下载 .img 镜像（Debian 12 / Ubuntu 22.04）
-     · 来源：板子厂商（Firefly / Toybrick / 香橙派 / 瑞芯微官方）
-     · 选对应板型 + 需要 NPU 驱动齐全的镜像
-  2. 工具：Windows 用 <span class="g">RKDevTool</span>；Linux 用 <span class="g">upgrade_tool</span>
-  3. 板子进入 Loader / MaskROM 模式（按住 recovery 键或短接，USB 连接电脑）
-  4. RKDevTool → "升级固件" → 选 .img → 执行 → 等待完成
+<span class="k">有 Cache 之后：</span>
+  每个 token 的 K、V 只算 <span class="g">一次</span>，算完就存起来；
+  第 N 个 token 直接用缓存里的 [K1…K_{N-1}]，只算自己这份。
 
-<span class="k">路线 B：SD 卡烧录（部分板支持）</span>
-  用 balenaEtcher 把 .img 写到 TF 卡 → 插卡 → 上电启动
+<span class="k">代价：</span>省了算力，但要一块内存常驻 —— <span class="r">这就是 KV Cache</span>。
+它随上下文长度<span class="r">线性增长</span>，是端侧内存的头号变量。</div>
 
-<span class="k">烧完先做三件验证</span>
-  uname -a                          # 看内核与架构 (aarch64)
-  cat /proc/device-tree/model       # 确认是 RK3576
-  cat /sys/kernel/debug/rknpu/version   # 确认 NPU 驱动存在
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：KV Cache 公式 + 手算 Qwen2.5-3B</h3>
+    <p>公式不长，但每个符号都要理解物理含义。别背，按「2 份 × 层 × 头 × 维度 × 长度 × 字节」念出来。</p>
+    <div class="formula">KV_bytes = 2 × layers × kv_heads × head_dim × seq_len × bytes</div>
+    <div class="board"><span class="k">逐项物理含义：</span>
+  2         = K 和 V 两份（各存一份）
+  layers    = 层数（每层都有自己的 K/V）
+  kv_heads  = KV 的头数（GQA 时 &lt; Q 头数）
+  head_dim  = 每个头的维度
+  seq_len   = 缓存了多长上下文（token 数）
+  bytes     = 每个数的字节：fp16 = <span class="g">2</span>，int8 = <span class="g">1</span>
 
-<span class="k">登录方式</span>
-  串口 / HDMI 接屏幕；或网线 SSH（默认用户常见：linaro / firefly / rock / root）
-  默认密码厂商各异（常见：firefly / linaro / rockchip / 空）</div>
-    <div class="callout"><b>先别急着跑模型</b>：镜像一定要选"<b>带 NPU 驱动（rknpu）</b>"的，否则后面 RKNN 一律跑不起来。<code>/sys/kernel/debug/rknpu/version</code> 能读出东西，才算烧对。</div>
+<span class="k">Qwen2.5-3B 假设：</span>layers = 36, kv_heads = 2, head_dim = 128, fp16
+  <span class="g">每 token = 2 × 36 × 2 × 128 × 2</span>
+           = 2×36 = 72
+           = 72×2 = 144
+           = 144×128 = 18432
+           = 18432×2 = <span class="g">36864 B ≈ 36 KB / token</span>
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：安装 RKNN 工具链（上位机 + 板端，别装错机器）</h3>
-    <div class="board"><span class="k">RKNN 工具链分两半，装错机器 = 白折腾</span>
+<span class="k">长度换算（× token 数）：</span>
+  1K  = 36 KB × 1024 ≈ <span class="g">36 MB</span>
+  4K  = 36 KB × 4096 ≈ <span class="g">144 MB</span>
+  8K  = 36 KB × 8192 ≈ <span class="g">288 MB</span></div>
+    <div class="callout"><strong>秒算口诀：</strong>「每 token 36 KB」——记住这个数，4K/8K 随口就来。</div>
 
-<span class="k">【上位机 x86 Ubuntu 20.04 / 22.04】—— 负责"转换 + 量化"</span>
-  pip install rknn-toolkit2                # Python 3.8 / 3.10
-  python3 -c "from rknn.api import RKNN; print('ok')"   # 验证
-  → 作用：把 ONNX 模型转成 .rknn（这一步在电脑上做）
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：MHA → MQA → GQA → MLA 演进</h3>
+    <p>为什么 KV 头数可以比 Q 头数少？因为<b>KV 才是内存大头</b>，业界想尽办法砍它。</p>
+    <div class="board"><span class="k">四种注意力，砍的就是 KV 头数：</span>
 
-<span class="k">【板端 RK3576】—— 负责"推理"</span>
-  运行库：librknnrt.so（与板端 NPU 驱动对应）
-  Python 轻量包：rknn-toolkit-lite2       # 板端只推理，不转换
-  git clone https://github.com/airockchip/rknn_model_zoo
-  → 作用：加载 .rknn 跑推理
+【MHA 多头注意力】Q/K/V 头数全部相等 = 16
+  每 token = 2×36×<span class="r">16</span>×128×2 = <span class="r">288 KB</span>　← 最贵
+  表达力最强，但 KV Cache 最大
 
-<span class="r">版本必须对齐！</span>
-  rknn-toolkit2 版本  ↔  librknnrt.so 版本  ↔  NPU 驱动版本
-  不一致 → 报 "version mismatch" 或直接跑不动。
-  查板端运行库版本：strings librknnrt.so | grep -i version
-  查 NPU 驱动：cat /sys/kernel/debug/rknpu/version</div>
-    <div class="callout"><b>口诀：转换在上位机，推理由板端；两边版本必须能用同一套号。</b>记不住就去 rknn_model_zoo 的 README 找"对应关系表"。</div>
+【MQA 多查询注意力】K/V 只有 <span class="g">1</span> 个头，所有 Q 共享它
+  每 token = 2×36×<span class="g">1</span>×128×2 = <span class="g">18 KB</span>　← 最省
+  省 16 倍，但精度掉得明显，大模型少用
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：转换一个 1.5B 模型到 RKNN</h3>
-    <div class="board"><span class="k">以 Qwen2.5-1.5B 为例（走 rknn_model_zoo 现成脚本）</span>
+【GQA 分组查询注意力】K/V 头数 = <span class="g">2</span>（16 个 Q 分成 8 组共享）
+  每 token = 2×36×<span class="g">2</span>×128×2 = <span class="g">36 KB</span>　← 工业主流
+  Qwen2.5 / Llama3 都用它：省内存又保精度
 
-<span class="k">① 准备：克隆仓库 + 下载 HF 模型</span>
-  git clone https://github.com/airockchip/rknn_model_zoo
-  cd rknn_model_zoo
-  # 下载 Qwen2.5-1.5B 的 HF 权重（huggingface-cli / modelscope）
+【MLA 多头潜在注意力】DeepSeek：把 K/V 压成低维隐向量再存
+  比 GQA 更省，但结构复杂、NPU 不友好</div>
+    <div class="callout"><strong>要点：</strong>「GQA 是 MHA 省内存、MQA 保精度的折中，Qwen2.5 用 GQA（K/V=2 头）。」</div>
 
-<span class="k">② 导出 ONNX（用仓库 LLM 专用脚本，别自己写）</span>
-  cd examples/llm
-  python3 export_rknn.py \
-      --model_path /path/to/Qwen2.5-1.5B \
-      --model_type qwen2  --target_platform rk3576
-  # 注意：LLM 导出要处理 RoPE、KV Cache 布局，官方脚本已封装
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：算力瓶颈 vs 带宽瓶颈（算术强度）</h3>
+    <p>判断瓶颈不用跑测试，一个比值就够——<b>算术强度</b>。</p>
+    <div class="formula">算术强度 AI = 计算量(FLOPs) ÷ 访存量(Bytes)</div>
+    <div class="board"><span class="k">判据：</span>
+  AI 大 → 每次搬数都能算很多次 → <span class="g">算力瓶颈</span>（compute-bound）
+  AI 小 → 数据搬进来还没算几下就没了 → <span class="r">带宽瓶颈</span>（memory-bound）
 
-<span class="k">③ 量化（必须给校准文本！）</span>
-  # 用一段覆盖真实输入的文本做校准集（几百条）
-  # 目标：w8a8 = int8 权重 + int8 激活，per-channel
-  # 校准集放进 dataset.txt，脚本会读取
+<span class="k">机器的「脊点」= 峰值算力 ÷ 内存带宽：</span>
+  RK3576：6 TOPS int8 = 6000 GFLOP/s
+  · 用 NPU 独占 12~16 GB/s → 脊点 ≈ <span class="g">375~500 FLOP / Byte</span>
+  · 用理论峰值 19 GB/s     → 脊点 ≈ <span class="g">316 FLOP / Byte</span>
+  只要任务 AI &lt; 脊点（≥316）→ 判为带宽瓶颈
 
-<span class="k">④ 生成 .rknn 产物</span>
-  qwen2.5-1.5b_w8a8.rknn   （约 1.6 ~ 1.9 GB）
+<span class="k">decode 的 AI 有多小？</span>
+  3B int4 权重 ≈ 2 GB，生成 1 token ≈ 2×3G = 6 GFLOP
+  AI ≈ 6 GFLOP ÷ 2 GB = <span class="r">3 FLOP / Byte</span>
+  3 ≪ 316 → <span class="r">严重带宽瓶颈</span>
 
-<span class="k">坑提示</span>
-  · 优先用 zoo 里<span class="g">已支持并测过</span>的模型，自己从头转 LLM 坑极多
-  · 量化校准集不覆盖真实分布 → 精度崩（第 2 章讲过）
-  · 3599/3576 target_platform 别填错</div>
-    <div class="callout"><b>架构师的偷懒正确姿势：</b>先跑通官方示例，<b>再</b>换自己的模型。<b>不要一上来就自己写导出脚本</b>——LLM 的 RoPE/KV Cache 布局是深坑，zoo 已经踩过了。</div>
+<span class="k">prefill 的 AI 呢？</span>
+  512 token 一次并行，权重读一次算一大片 → AI 高，<span class="g">偏算力瓶颈</span></div>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：在板子上跑通推理 + 记录四项指标</h3>
-    <div class="board"><span class="k">把模型推到板子 + 登录</span>
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：为什么 RK3576 上是带宽瓶颈</h3>
+    <p>三个数字摆一起，结论自动浮现。</p>
+    <div class="board"><span class="k">三个数字（LPDDR5-4800）：</span>
+  NPU 算力 6 TOPS int8      （很快，够用）
+  内存带宽三档：理论峰值 19 / NPU 独占 12~16 / 产品 <span class="r">7~11 GB/s</span>
+  模型 int4 3B ≈ 2 GB       （每步都要整个读一遍）
 
-  # 方式一：ADB
-  adb devices
-  adb push qwen2.5-1.5b_w8a8.rknn /userdata/
+<span class="k">tok/s 区间（带宽 ÷ 2 GB）：</span>
+  NPU 独占 = 12~16 ÷ 2 = <span class="g">6~8 tok/s</span>
+  产品真实 =  7~11 ÷ 2 = <span class="g">3.5~5.5 tok/s</span>
+  再扣掉读 KV Cache、算子开销、非理想访存 → 实际还会更低
 
-  # 方式二：SSH / scp
-  ssh root@192.168.x.x
-  scp qwen2.5-1.5b_w8a8.rknn root@192.168.x.x:/userdata/
+<span class="k">推论（重要）：</span>
+  把 NPU 换成算力翻倍的芯片、但带宽不变 → decode <span class="r">几乎不变</span>
+  把模型从 int4 压更狠、或上 GQA/KV 量化 → decode <span class="g">明显变快</span>
 
-<span class="k">板端跑 demo（rknn_model_zoo 的 llm 示例）</span>
-  cd rknn_model_zoo/examples/llm/python
-  python3 llm_demo.py \
-      --model_path /userdata/qwen2.5-1.5b_w8a8.rknn \
-      --prompt "你好，介绍一下你自己" --max_new_tokens 128
+<span class="k">结论：3576 上 LLM decode 的天花板由带宽决定，不是算力。</span>
+  优化方向 = 「少读、少存」，不是「堆算力」。</div>
+    <div class="callout"><strong>一句话结论：</strong>带宽 12~16 GB/s ÷ 模型 2 GB ≈ 6~8 tok/s（产品场景 7~11 GB/s → 3.5~5.5），这就是端侧 LLM 的物理上限。</div>
 
-<span class="k">要记录的 4 个指标</span>
-  ① 首 token 延迟 TTFT：从发送 prompt 到吐出第一个 token 的时间（受 prefill 影响）
-  ② 生成速度 tok/s：后续 token 的稳态速度（受 decode 带宽影响）
-  ③ 内存占用：free -m   （看 used / available）
-  ④ NPU 利用率：cat /sys/kernel/debug/rknpu/load
-      输出形如：NPU load: Core0: 78%, Core1: 0%
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：瓶颈定位速查</h3>
+    <div class="board"><span class="k">现象 → 判定 → 对策</span>
 
-<span class="k">辅助命令</span>
-  free -m                                   # 内存
-  cat /proc/meminfo | head                  # 内存细节
-  cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq  # CPU 频率
-  cat /sys/kernel/debug/rknpu/load           # NPU 负载</div>
-    <p><b>记录模板（每次实验一行，先自己填一栏再展开答案）：</b></p>
-    <div class="board"><span class="k">inference_metrics.csv</span>
-model, quant, prompt_len, ttft_ms, tok_per_s, mem_used_mb, npu_pct, note
-qwen2.5-1.5b, w8a8, 32, ___, ___, ___, ___, 短 prompt
-qwen2.5-1.5b, w8a8, 512, ___, ___, ___, ___, 长 prompt（看 TTFT 上升）</div>
+  首字慢 / 长 prompt 卡    → <span class="g">prefill 偏算力</span>   → 批处理、分块 prefill
+  出字慢 / 逐 token 卡     → <span class="r">decode 带宽瓶颈</span> → 量化、GQA、KV 量化
+  上下文越长越卡           → KV Cache 膨胀        → 缩短上下文、KV Cache 量化
+  换更强 NPU 却没用        → 说明卡在带宽        → 先查带宽，别急着换芯片
+
+<span class="k">速算模板（背下来）：</span>
+  1) KV / token = 2×L×kv_heads×d×bytes
+  2) 总量 = ×seq_len
+  3) 瓶颈 = 比较 AI 和脊点 (3576 ≈ 316~500)</div>
+
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：PagedAttention —— 把 KV Cache 分页分块</h3>
+    <p>KV Cache 体积大、生命周期又长，怎么「摆」在显存里，本身就是一个系统问题。<b>PagedAttention</b> 借用了操作系统的<b>虚拟内存分页</b>思想。</p>
+    <div class="board"><span class="k">问题：KV Cache 怎么分配内存才不浪费？</span>
+  朴素做法：给每条请求预留一段<span class="r">连续</span>显存，按最大长度开。
+  → 长度未知 ⇒ 要么开太大（<span class="r">预留浪费</span>），
+     要么开太小（要重新拷贝、<span class="r">碎片化</span>）。
+  → 连续分配下，显存利用率常常只有 <span class="r">20~40%</span>。
+
+<span class="k">PagedAttention 的做法：分页 / 分块</span>
+  把 KV Cache 切成固定大小的 <span class="g">block</span>（块，如 16 个 token 一块），
+  按需分配、块之间<span class="g">不必连续</span>，
+  用一张 <span class="g">block table（块表）</span>记录「逻辑块 → 物理块」的映射。
+  和 OS 里「物理页 + 页表」几乎一样：
+    · 逻辑上的 token 序列  ↔ 虚拟地址空间
+    · 物理 block           ↔ 物理页框
+    · block table          ↔ 页表
+
+<span class="k">好处：</span>
+  ① 消除连续分配浪费 → 块内最多浪费不到 1 块（如 16 token）
+  ② 消除外部碎片 → 显存利用率可提到 <span class="g">90%+</span>
+  ③ 公共前缀的 KV 可被<span class="g">多条请求共享</span>，进一步省内存
+  → 同样显存能塞下<span class="g">更多并发请求</span>，吞吐大涨。
+
+<span class="k">它是谁的核心机制：</span>vLLM 靠 PagedAttention 起家，
+如今已是主流推理框架的标配思想。</div>
+    <div class="callout"><strong>要点：</strong>「PagedAttention 把 KV Cache 按固定 block 分页分配、用块表映射，类比 OS 虚拟内存——解决内存碎片、提高并发时的显存利用率，是 vLLM 的核心机制。」</div>
+    <p><b>端侧要能讲取舍：</b>RK3576/NPU 上不一定直接跑 vLLM（NPU 的 KV Cache 通常由运行时静态管理、形状更固定），但要把「KV Cache 怎么管理、怎么提高并发」的分页原理和它的代价（块表开销、块碎片、实现复杂度）说清楚。</p>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：KV Cache 量化（fp16 → int8 / int4）</h3>
+    <p>权重能量化，KV Cache 也一样。它直接决定 decode 阶段要读多少字节——而 decode 正是带宽瓶颈。</p>
+    <div class="board"><span class="k">KV Cache 量化 = 把每个 K/V 数从 fp16 压成 int8 / int4</span>
+  fp16 → int8：每个数 <span class="g">2 → 1</span> 字节 → 内存/带宽 <span class="g">减半</span>
+  fp16 → int4：每个数 <span class="g">2 → 0.5</span> 字节 → 内存/带宽 <span class="g">降到 1/4</span>
+
+<span class="k">对本章结论的意义：</span>
+  decode 是带宽瓶颈，KV Cache 与权重<span class="r">抢同一块带宽</span>；
+  上下文越长，KV 占比越大（甚至超过权重）→
+  <span class="g">KV 量化直接给带宽「减负」</span>，是端侧长上下文的关键手段。
+
+<span class="k">但代价：精度更敏感！</span>
+  权重只在前向里「被读一次」，KV 却要在<span class="r">每一步注意力</span>里被反复用到。
+  量化的误差会<span class="r">沿着上下文长度累积</span>、被 attention 放大 →
+  同样位宽下，<span class="k">KV 量化对 PPL 的影响通常比权重量化更明显</span>。
+  工程折中：常用 <span class="g">int8 KV</span>（几乎无损、直接减半）；
+  int4 KV 收益大，但要用分组 / per-head scale 等技巧并更小心验证。</div>
+    <div class="board"><span class="k">权重量化 vs KV 量化（对比，背下来）</span>
+
+  维度            权重量化              KV Cache 量化
+  ─────────────────────────────────────────────
+  压什么          模型参数（静态）      运行时产生的 K/V（动态）
+  省什么          内存占用、读取带宽    内存占用、KV 读取带宽
+  何时生效        加载即定              随上下文增长
+  误差特性        一次性、可控          逐步累积、被 attention 放大
+  精度敏感度      相对温和              <span class="r">更敏感</span>（同 bit 掉 PPL 更多）
+  常用位宽        int8 / int4           int8（稳）/ int4（激进）
+  端侧价值        模型装得下            长上下文不爆、带宽减负
+
+<span class="k">一句话：权重量化让「模型变小」，KV 量化让「上下文变便宜」。</span>
+两者叠加，才是端侧长上下文的完整解法。</div>
+    <div class="callout"><strong>要点：</strong>「KV 也能量化，fp16→int8 直接减半带宽；但 KV 参与每一步注意力，误差会随上下文累积，所以对 PPL 比权重量化更敏感，端侧一般先上 int8 KV。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>9. 板书填空：KV Cache 空表</h3>
+    <p>用 Qwen2.5-3B（L=36, kv_heads=2, d=128, fp16）自己填，再展开答案。</p>
+    <table class="tight">
+      <thead><tr><th>上下文</th><th>每 token</th><th>KV Cache 总量</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>1K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
+        <tr><td>4K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
+        <tr><td>8K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
+      </tbody>
+    </table>
     <details>
-      <summary>点击展开答案（参考量级，实测为准）</summary>
-      <div class="board">qwen2.5-1.5b w8a8，RK3576 参考量级：
-  · TTFT：短 prompt 数百 ms；512 token prompt 明显上升到 ~1 s
-  · tok/s：约 5 ~ 10 tok/s（带宽受限；NPU 独占 12~16 GB/s，产品场景只有 7~11 GB/s）
-  · 内存：模型 ~1.8 GB + 运行时 ≈ 2.5 GB 量级
-  · NPU：生成阶段 Core0 常见 60 ~ 90%
+      <summary>点击展开答案</summary>
+      <div class="board">每 token = 2 × 36 × 2 × 128 × 2 = <span class="g">36864 B ≈ 36 KB</span>
 
-<span class="k">关键：数字不重要，"趋势"才重要——</span>
-prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
+  1K → 36 KB × 1024 = <span class="g">≈ 36 MB</span>
+  4K → 36 KB × 4096 = <span class="g">≈ 144 MB</span>
+  8K → 36 KB × 8192 = <span class="g">≈ 288 MB</span>
+
+<span class="k">对照：</span>若为 MHA（kv_heads=16），8K 会涨到 <span class="r">≈ 2.3 GB</span>，
+内存直接爆——所以 GQA 是端侧刚需。
+
+<span class="k">再做一步：</span>若把 KV 量化成 int8（每数 2 → 1 字节），
+上面每个数<span class="g">全部减半</span>：每 token ≈ 18 KB，8K ≈ <span class="g">144 MB</span>，
+带宽压力也同步减半。</div>
     </details>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：RK3576 性能画像与三条铁律</h3>
-    <div class="board"><span class="k">RK3576 性能画像（架构师必须背）</span>
-  NPU 6 TOPS            ← 算力够（对 1.5B~3B）
-  内存带宽 19 / 12~16 / 7~11 GB/s ← <span class="r">真正的瓶颈</span>（理论/NPU 独占/产品，decode 打产品档）
-  CPU 4×A72 + 4×A53     ← CPU 弱，别指望 CPU 兜底
-  内存 ≤ 16 GB LPDDR5
-
-<span class="k">三条铁律</span>
-① <span class="r">优先纯 NPU 推理</span>：一旦有算子回落到 CPU，
-   速度会被 CPU 拖垮（3576 的 CPU 很弱）。
-② 带宽是命门：能减小的权重 / KV 一定要减（量化 + GQA）。
-③ 首 token 慢是正常的：prefill 要算完整个 prompt，
-   长 prompt 的 TTFT 会明显上升。
-
-<span class="k">自测基准（参考，实测为准）</span>
-  Qwen2.5-1.5B w8a8：TTFT 数百 ms ~ 1 s，生成 5 ~ 10 tok/s
-  如果实测远低于此 → 查两件事：
-    (a) 有没有算子回落到 CPU？（看日志 fallback / cpu 提示）
-    (b) 模型是不是没跑在 NPU 上？（NPU load 一直 0% = 没上 NPU）</div>
-    <div class="callout"><b>排障第一反应：</b>速度不对，先看 <code>rknpu/load</code>。<b>NPU 利用率为 0 或很低，说明大量算子在 CPU 上跑</b>——这才是端侧最常见的性能坑。</div>
   </div>
 
   <h2>练习（交作业）</h2>
-  <p class="lead">这一章全是实操。做完把命令记录和数据贴回来我批改。</p>
+  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>烧录系统 + 基础环境验证</h3></div>
+    <div class="head"><span class="num">1</span><h3>KV Cache 手算表</h3></div>
     <dl>
-      <dt>目标</dt><dd>让 RK3576 从零启动到能登录，并确认 NPU 驱动存在。</dd>
-      <dt>要掌握</dt><dd>Loader/MaskROM 进法、RKDevTool/upgrade_tool 用法、三条验证命令。</dd>
-      <dt>实操步骤</dt><dd>① 下载厂商镜像 → 用 RKDevTool（或 upgrade_tool）烧录；② 串口/HDMI/SSH 登录；③ 跑 <code>uname -a</code>、<code>cat /proc/device-tree/model</code>、<code>cat /sys/kernel/debug/rknpu/version</code>；写 <code>rk3576_flash_notes.md</code>：镜像版本、工具、进模式方法、三条命令输出、登录用户/密码。</dd>
-      <dt>检验标准</dt><dd>能重启后再次进入系统；<code>rknpu/version</code> 有输出（证明 NPU 驱动在）。</dd>
+      <dt>目标</dt><dd>用板书公式，手算 Qwen2.5-3B 在 1K/4K/8K/32K 的 KV Cache 占用。</dd>
+      <dt>要掌握</dt><dd>公式每一项的物理含义；「每 token 36 KB」的速算。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_cache.md</code>：完整公式推导 + 一张「长度 × KV Cache」表（含手算过程），并加一行对照 MHA（kv_heads=16）的数值。</dd>
+      <dt>检验标准</dt><dd>给你任意 layers/kv_heads/head_dim，能在 30 秒内算出 8K 的 KV Cache。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>安装 RKNN 工具链（上位机 + 板端）</h3></div>
+    <div class="head"><span class="num">2</span><h3>KV Cache 计算器（核心实操）</h3></div>
     <dl>
-      <dt>目标</dt><dd>上位机能 import RKNN，板端有 librknnrt.so 和 lite2，版本对齐。</dd>
-      <dt>要掌握</dt><dd>两半工具链的分工；版本对齐；zoo 仓库拉取。</dd>
-      <dt>实操步骤</dt><dd>① 上位机 <code>pip install rknn-toolkit2</code> 并 <code>from rknn.api import RKNN</code> 验证；② 板端确认 librknnrt.so（<code>strings librknnrt.so | grep -i version</code>）、安装 rknn-toolkit-lite2；③ <code>git clone</code> rknn_model_zoo；写 <code>toolchain_setup.md</code>：版本号、安装命令、验证输出、版本对应关系。</dd>
-      <dt>检验标准</dt><dd>上位机 import 成功；板端能读到运行库版本；能与 toolkit2 对上号。</dd>
+      <dt>目标</dt><dd>写一个可复用的 Python 脚本：输入模型配置和上下文长度，输出 KV Cache 大小。</dd>
+      <dt>要掌握</dt><dd>把公式代码化；支持 fp16/int8/int4 切换；打印「MB/GB」并高亮超限。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：函数 <code>kv_cache_bytes(layers, kv_heads, head_dim, seq_len, bytes_per=2)</code>；加 <code>main</code> 打印 Qwen2.5-3B 在 1K/4K/8K/32K 的结果（并列出 fp16 / int8 / int4 三档），并与手算表对照。</dd>
+      <dt>检验标准</dt><dd>脚本输出与手算表完全一致；改参数即改结果；能看出 int8/int4 的减半/四分之一效果。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>转换 Qwen2.5-1.5B 到 RKNN</h3></div>
+    <div class="head"><span class="num">3</span><h3>上下文长度 → 内存曲线</h3></div>
     <dl>
-      <dt>目标</dt><dd>产出可用的 <code>qwen2.5-1.5b_w8a8.rknn</code>。</dd>
-      <dt>要掌握</dt><dd>LLM 专用导出脚本；校准集做法；w8a8 含义。</dd>
-      <dt>实操步骤</dt><dd>① 下载 HF 权重；② 跑 <code>examples/llm/export_rknn.py</code>；③ 准备校准文本 <code>dataset.txt</code> 并量化；④ 记录产物大小；写 <code>convert_log.md</code>：命令、校准集规模、产物大小、耗时、遇到的问题。</dd>
-      <dt>检验标准</dt><dd>.rknn 文件生成且大小合理（≈1.6~1.9 GB）。</dd>
+      <dt>目标</dt><dd>画出「上下文长度 vs 内存占用」的线性关系，找出 3576 的内存临界点。</dd>
+      <dt>要掌握</dt><dd>KV Cache 是线性的（不是平方）；和模型权重（int4 约 1.6 GB）叠加后的总占用。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_curve.md</code>：以模型 1.6 GB + KV Cache 叠加，算出 16 GB 内存下能撑多长上下文；给出结论。</dd>
+      <dt>检验标准</dt><dd>能说出「KV Cache 线性增长，16 GB 下 3B int4 理论可撑很长上下文，但带宽仍是瓶颈」。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>跑通推理 + 记录四项指标</h3></div>
+    <div class="head"><span class="num">1</span><h3>瓶颈判定推导</h3></div>
     <dl>
-      <dt>目标</dt><dd>板端跑通 llm_demo，至少测 2 个 prompt（短 + 长），填满指标表。</dd>
-      <dt>要掌握</dt><dd>llm_demo 用法；TTFT / tok/s / 内存 / NPU 四个指标怎么取。</dd>
-      <dt>实操步骤</dt><dd>① <code>adb push</code> 或 <code>scp</code> 模型到板子；② 跑 <code>llm_demo.py</code>；③ 用 <code>free -m</code> 与 <code>cat /sys/kernel/debug/rknpu/load</code> 采集数据；写 <code>inference_metrics.md</code> + <code>inference_metrics.csv</code>：按模板填表（短 prompt / 长 prompt 各一行）。</dd>
-      <dt>检验标准</dt><dd>能观察到"prompt 变长 → TTFT 变大"的趋势，四条数据齐全。</dd>
+      <dt>目标</dt><dd>用算术强度手算，证明 RK3576 上 decode 是带宽瓶颈。</dd>
+      <dt>要掌握</dt><dd>算术强度定义；机器「脊点」算法（6 TOPS ÷ 12~16 GB/s ≈ 375~500）；decode 的 AI 计算。</dd>
+      <dt>实操步骤</dt><dd>写 <code>bottleneck.md</code>：①给出 RK3576 脊点推导（≈316~500）②算 decode AI（≈3）③算 prefill AI ④结论「decode 带宽瓶颈、prefill 偏算力」。</dd>
+      <dt>检验标准</dt><dd>能解释「为什么换更强 NPU 但带宽不变，decode 速度几乎不变」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>纯 NPU vs 回落 CPU 对比</h3></div>
+    <div class="head"><span class="num">2</span><h3>PagedAttention 原理笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>确认推理确实跑在 NPU 上，并观察 NPU 利用率。</dd>
-      <dt>要掌握</dt><dd>怎么判断算子是否回落 CPU；NPU 负载怎么读。</dd>
-      <dt>实操步骤</dt><dd>① 生成时反复读 <code>cat /sys/kernel/debug/rknpu/load</code>；② 看 demo 日志有无 CPU fallback 提示；③ 对比 tok/s 与 NPU 利用率的关系；写 <code>npu_usage.md</code>：NPU 负载曲线、是否全 NPU、若回落是哪个环节。</dd>
-      <dt>检验标准</dt><dd>能明确说出"这个推理是不是纯 NPU"，以及依据。</dd>
+      <dt>目标</dt><dd>用自己的话讲清 PagedAttention 的「分页分块」思想，以及它解决什么问题。</dd>
+      <dt>要掌握</dt><dd>block / block table 的类比；连续分配为什么会碎片化；分页为什么提高并发利用率。</dd>
+      <dt>实操步骤</dt><dd>写 <code>paged_attention.md</code>：①画出「逻辑 token 序列 ↔ block table ↔ 物理 block」的映射示意图（文字框图即可）；②列出分页解决的两个问题（预留浪费、外部碎片）；③写一句端侧取舍（3576 不一定跑 vLLM，但原理要会讲）。</dd>
+      <dt>检验标准</dt><dd>能用「操作系统虚拟内存分页」的类比，30 秒讲清 PagedAttention 是什么、为什么能提高并发显存利用率。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>《RK3576 跑通报告》（一页，核心产出）</h3></div>
+    <div class="head"><span class="num">3</span><h3>KV 量化对 PPL 影响的实验设计</h3></div>
     <dl>
-      <dt>目标</dt><dd>综合全链路，出一页可给面试官看的报告。</dd>
-      <dt>要掌握</dt><dd>把烧录 / 工具链 / 转换 / 指标串成一个可复现的流程。</dd>
-      <dt>实操步骤</dt><dd>写 <code>rk3576_report.md</code>（一页）：①环境（板子/镜像/驱动/toolkit 版本）②模型与量化 ③关键命令 ④指标表（TTFT/tok/s/内存/NPU）⑤结论与瓶颈判断（带宽受限）⑥下一步。</dd>
-      <dt>检验标准</dt><dd>别人拿这页能复现你的流程——这就是端侧部署能力的证据。</dd>
+      <dt>目标</dt><dd>设计一个能对比「权重量化 vs KV 量化对困惑度(PPL)影响」的实验方案——讲清为什么 KV 更敏感。</dd>
+      <dt>要掌握</dt><dd>PPL（困惑度）是衡量语言模型精度的常用指标；控制变量法：权重保持不动，只改 KV 位宽。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_quant_ppl.md</code>：①实验假设（KV 量化对 PPL 比权重量化更敏感）；②变量设计（权重固定 int8，KV 分 fp16 / int8 / int4 三档）；③评价指标（PPL + 在 2K/8K 两个长度上分别测，看误差是否随上下文累积）；④预期结论与端侧取舍建议。</dd>
+      <dt>检验标准</dt><dd>能说清「为什么 KV 量化误差会随上下文累积、比权重量化更敏感」，并给出端侧建议（优先 int8 KV，int4 需谨慎验证）。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>《端侧 LLM 性能分析报告》（一页）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>综合本章产出，写一份能直接交付的性能分析——本章核心产出。</dd>
+      <dt>要掌握</dt><dd>把「KV Cache 大小 + 瓶颈判定 + 优化方向」串成决策。</dd>
+      <dt>实操步骤</dt><dd>写 <code>perf_report.md</code>（一页）：①目标模型/场景 ②KV Cache 实测与手算 ③瓶颈结论（带宽）④优化清单（int4、GQA、KV 量化、PagedAttention、上下文裁剪）⑤预期收益。</dd>
+      <dt>检验标准</dt><dd>别人拿这页能直接判断「这产品能不能跑、卡在哪、怎么优化」。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">5</span><h3>秒答训练</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把本章核心结论练成条件反射。</dd>
+      <dt>实操步骤</dt><dd>自问自答：KV Cache 公式是什么？3B 8K 的 KV 多大？GQA 为什么省内存？算术强度怎么算？RK3576 为什么是带宽瓶颈？decode 的 tok/s 区间是多少（NPU 独占 / 产品）？PagedAttention 解决什么问题？KV 量化为什么比权重量化更敏感？</dd>
+      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>rk3576_flash_notes.md</code> —— 烧录步骤与基础环境验证。</li>
-    <li><code>toolchain_setup.md</code> —— RKNN 工具链安装与版本对齐。</li>
-    <li><code>convert_log.md</code> —— Qwen2.5-1.5B 转 RKNN 记录。</li>
-    <li><code>inference_metrics.md</code> + <code>inference_metrics.csv</code> —— 推理四项指标记录。</li>
-    <li><code>npu_usage.md</code> —— 纯 NPU / 回落 CPU 判定。</li>
-    <li><code>rk3576_report.md</code> —— RK3576 跑通报告（一页，核心产出）。</li>
+    <li><code>kv_cache.md</code> —— KV Cache 手算表（含公式推导 + 长度对照）。</li>
+    <li><code>kv_cache_calc.py</code> —— KV Cache 计算器（参数化、可切换位宽）。</li>
+    <li><code>kv_curve.md</code> —— 上下文长度 → 内存曲线 + 临界点。</li>
+    <li><code>bottleneck.md</code> —— 算术强度推导 + 瓶颈判定。</li>
+    <li><code>paged_attention.md</code> —— PagedAttention 分页原理笔记。</li>
+    <li><code>kv_quant_ppl.md</code> —— KV 量化对 PPL 影响的实验设计。</li>
+    <li><code>perf_report.md</code> —— 端侧 LLM 性能分析报告（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>能独立完成"烧系统 → 配工具链 → 转模型 → 跑推理"全流程。</li>
-    <li>知道 RKNN 工具链分上位机（转换）和板端（推理）两半，且版本必须对齐。</li>
-    <li>能用 <code>rknpu/load</code> 判断推理是否跑在 NPU 上。</li>
-    <li>能记录并解释 TTFT / tok/s / 内存 / NPU 四项指标及其趋势。</li>
-    <li>能说出 3576 的瓶颈是带宽（产品场景仅 7~11 GB/s）与弱 CPU，因此优先纯 NPU。</li>
+    <li>秒算 KV Cache：Qwen2.5-3B 每 token 约 36 KB，8K 约 288 MB。</li>
+    <li>能背出公式 <code>2 × layers × kv_heads × head_dim × seq_len × bytes</code> 并解释每项含义。</li>
+    <li>能说出 GQA（K/V=2 头）是内存与精度的折中，比 MHA 省 8 倍。</li>
+    <li>能判断「RK3576 上 decode 是带宽瓶颈」，并用算术强度（3 ≪ 316~500）说明。</li>
+    <li>能讲清 PagedAttention 的分页思想，以及它解决的碎片 / 并发利用率问题。</li>
+    <li>能说清 KV 量化（fp16→int8/int4）减半/四分之一带宽，以及它对 PPL 比权重量化更敏感的原因。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「我手里有一块 RK3576，完整部署流程我自己走过：先用厂商镜像加 RKDevTool 烧 Debian/Ubuntu 系统，确认 <code>rknpu/version</code> 能读出驱动；然后上位机装 rknn-toolkit2 负责转换、板端配 librknnrt.so 和 rknn-toolkit-lite2 负责推理，两边版本必须对齐；转换用 rknn_model_zoo 的 LLM 脚本导出 ONNX、给校准集做 w8a8 量化，产出 .rknn；最后推到板子上跑 llm_demo，记录首 token 延迟、tok/s、内存和 NPU 利用率。3576 的特点是 NPU 6 TOPS 够用，但内存带宽很小（理论峰值 19GB/s，NPU 独占 12~16，产品场景只有 7~11GB/s）、CPU 弱，所以一定要优先纯 NPU 推理，一旦算子回落到 CPU 速度就崩；瓶颈在带宽，优化方向就是量化和 GQA 减 KV。因为我有真板子、走过全流程，所以性能数字不是纸上算的，是实测的。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能独立完成 RK3576 端侧部署全流程并有实测数据——端侧部署能力（有真板子是最大优势）。</p>
+    <span class="tag">要点回顾</span>
+    <p>KV Cache 是为了避免 decode 时重算历史 K/V，公式是 2 乘层数乘 KV 头数乘 head_dim 乘序列长度乘字节数。以 Qwen2.5-3B 为例，36 层、GQA、KV 头数 2、head_dim 128，每 token 约 36 KB，8K 上下文大概 288 MB。</p>
+    <p>判断瓶颈用算术强度：计算量除以访存量。RK3576 的脊点是 6 TOPS 除以 NPU 独占 12~16 GB/s 约等于 375~500（用理论峰值 19 GB/s 也才约 316），而 decode 每 token 只做 2×3G 的浮点运算却要读 2 GB 权重，算术强度约等于 3，远低于脊点，所以 decode 是带宽瓶颈。tok/s 上限是 NPU 独占 12~16 GB/s 除以 2 GB 约 6~8，产品场景带宽 7~11 GB/s 只有 3.5~5.5。所以优化方向是量化、GQA、KV Cache 量化去少读少存，而不是堆算力。</p>
+    <p>KV Cache 的内存管理上，主流是 PagedAttention——把它切成固定大小的 block 分页分配、用块表映射，思路跟操作系统虚拟内存分页一样，能消除碎片、提高并发时的显存利用率，是 vLLM 的核心机制；端侧不一定直接跑 vLLM，但原理和取舍要讲得清。</p>
+    <p style="margin:0">KV 本身也能量化，fp16 到 int8 直接减半带宽、到 int4 降到四分之一，但 KV 参与每一步注意力、误差会随上下文累积，所以比权重量化对 PPL 更敏感，端侧长上下文一般先上 int8 KV。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>镜像务必选<strong>带 NPU 驱动</strong>的固件；烧完先验证 <code>/sys/kernel/debug/rknpu/version</code>。</li>
-      <li>带宽三档：峰值 <strong>19</strong> / NPU 独占 <strong>12~16</strong> / 产品 <strong>7~11 GB/s</strong>，CPU 弱——一旦算子回落 CPU，速度会被拖垮，<strong>优先纯 NPU</strong>。</li>
-      <li>日志里搜 <strong>fallback / cpu</strong>；性能差先看 <code>rknpu/load</code>，NPU 利用率为 0 说明没好利用 NPU。</li>
-      <li>优先用 <strong>rknn_model_zoo 已支持</strong>的模型（Qwen2.5 等），别一上来自己写 LLM 导出脚本。</li>
-      <li>长 prompt 的 TTFT 上升属正常（prefill），别误判为"模型有问题"。</li>
+      <li>3576 内存带宽三档（LPDDR5-4800）：理论峰值约 <strong>19 GB/s</strong>、NPU 独占 <strong>12~16 GB/s</strong>、产品真实 <strong>7~11 GB/s</strong>——产品场景才是 LLM decode 的硬天花板；算力 6 TOPS 反而不是瓶颈。</li>
+      <li>LPDDR5 双通道才能跑满带宽，工程上要注意内存颗粒与频率配置。</li>
+      <li>KV Cache 与模型权重<strong>抢同一块带宽</strong>，长上下文会同时拖慢 decode。</li>
+      <li>端侧长上下文优先考虑 <strong>KV Cache int8 量化</strong>（直接减半带宽压力）；int4 KV 收益更大但精度风险高，需实测 PPL。</li>
+      <li>PagedAttention 的<strong>分页思想</strong>要会讲，但 3576 的 NPU KV Cache 多由运行时静态管理，不一定直接跑 vLLM——讲清原理与取舍即可。</li>
     </ul>
   </div>
 

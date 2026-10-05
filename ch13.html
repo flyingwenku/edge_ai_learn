@@ -3,334 +3,306 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 13 章 · 架构方案演练（讲义 + 作业）</title>
+<title>第 13 章：RK3576 上手与部署实战</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html">第 4 章</a>
-    <a href="ch05.html">第 5 章</a>
-    <a href="ch06.html">第 6 章</a>
-    <a href="ch07.html">第 7 章</a>
-    <a href="ch08.html">第 8 章</a>
-    <a href="ch09.html">第 9 章</a>
-    <a href="ch10.html">第 10 章</a>
-    <a href="ch11.html">第 11 章</a>
-    <a href="ch12.html">第 12 章</a>
-    <a href="ch13.html" class="active">第 13 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html" class="active">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 13 章：架构方案演练</h1>
-  <p class="lead"><strong>章节目标：</strong>拿到一条需求，<b>10 分钟内出一页纸架构方案</b>——端云怎么分、成本多少、功耗多少、断网怎么办。这就是架构师每天真正在做的事。</p>
+  <h1>第 13 章：RK3576 上手与部署实战</h1>
+  <p class="lead"><strong>章节目标：</strong>把一块<b>真板子</b>从零跑到能对话——烧系统、装 RKNN 工具链、转一个 1.5B 模型、跑通推理并记录出 TTFT / tok/s / 内存 / NPU 利用率。<span class="key">从纸上算账走到真机实测，这一步跑通，端侧部署链路就完整闭环了。</span></p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 4 个任务</span>
-    <span class="chip">产出目录：ch13-architecture-drill</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch13-rk3576</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把端云协同、能力边界、BOM、功耗、多模型并发五块看懂。</li>
-    <li><strong>第 2 步 填模板：</strong>讲义给的「一页纸方案模板」先拿一个场景手填一遍。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」为三个场景各出一页纸方案。</li>
-    <li><strong>第 4 步 自测：</strong>对着「检验标准」随机抽一个需求，10 分钟内讲出方案。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把烧录 / 工具链 / 转换 / 跑通四条链路串起来。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里的命令模板、记录空表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」真机操作、记录数据、出报告。</li>
+    <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>前 12 章是「做出来」；这章是「<b>做决策</b>」。架构师的核心动作就一句话：<span class="key">在成本、功耗、延迟、能力之间做取舍，并说清理由。</span>练法只有一个——拿真实场景反复出方案，直到能条件反射。</p>
+    <p>前面几章都在"算账"。这一章开始<b>动手</b>：把一套完整的端侧部署链路走通一遍。链路四步——<span class="key">装系统 → 配工具链 → 转模型 → 跑推理</span>。四步都通，"手里有真板子"就从概念变成了可复现的工程能力。</p>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：端云协同——什么端侧、什么云端</h3>
-    <p>端侧不是什么都自己干，云端也不是万能。分工原则：<b>高频、低延迟、隐私、离线可用 → 端侧；低频、重算力、要最新知识 → 云端</b>。</p>
-    <div class="board"><span class="k">端云分工决策表</span>
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：烧录系统（镜像 + 工具）</h3>
+    <div class="board"><span class="k">第一步：给 RK3576 装系统（两条路线）</span>
 
-  任务               端侧              云端
-  ─────────────────────────────────────────────
-  唤醒词（常驻）      <span class="g">✅</span> 常驻低功耗       ❌
-  语音识别 ASR        <span class="g">✅</span> 小模型可端侧     ⚠️ 强场景转云
-  意图识别            <span class="g">✅</span> 1.5~3B          ❌
-  简单多轮对话        <span class="g">✅</span> 1.5~3B          ❌
-  本地知识检索        <span class="g">✅</span> RAG             ❌
-  复杂推理/长文/代码  <span class="r">❌</span> 转云             <span class="g">✅</span> 大模型
-  需要最新信息        <span class="r">❌</span> → 云             <span class="g">✅</span>
-  隐私敏感数据        <span class="g">✅</span> 必须留在端      <span class="r">禁止外发</span>
+<span class="k">路线 A：厂商成品镜像（推荐，最省事）</span>
+  1. 下载 .img 镜像（Debian 12 / Ubuntu 22.04）
+     · 来源：板子厂商（Firefly / Toybrick / 香橙派 / 瑞芯微官方）
+     · 选对应板型 + 需要 NPU 驱动齐全的镜像
+  2. 工具：Windows 用 <span class="g">RKDevTool</span>；Linux 用 <span class="g">upgrade_tool</span>
+  3. 板子进入 Loader / MaskROM 模式（按住 recovery 键或短接，USB 连接电脑）
+  4. RKDevTool → "升级固件" → 选 .img → 执行 → 等待完成
 
-<span class="k">断网策略：</span>降级到本地 1.5B，只保基础对话 + 本地工具 + RAG。</div>
-    <div class="callout"><b>一句话结论：</b>端云协同的判据是「<b>延迟 / 隐私 / 离线 / 成本</b>」四把尺子——能满足就地端侧，满足不了才上云，且必须设计<b>断网降级路径</b>。</div>
+<span class="k">路线 B：SD 卡烧录（部分板支持）</span>
+  用 balenaEtcher 把 .img 写到 TF 卡 → 插卡 → 上电启动
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：RK3576 的能力边界（背下来的结论）</h3>
-    <p>架构师要清楚手上的芯片「能吃多大模型」。RK3576 的舒适区很小但很实用。</p>
-    <div class="board"><span class="k">RK3576 能力边界</span>
+<span class="k">烧完先做三件验证</span>
+  uname -a                          # 看内核与架构 (aarch64)
+  cat /proc/device-tree/model       # 确认是 RK3576
+  cat /sys/kernel/debug/rknpu/version   # 确认 NPU 驱动存在
 
-  舒适区模型规模 ：<span class="g">1.5B ~ 3B int4 / int8</span>
-  能干的活       ：意图识别、简单多轮对话、RAG 问答、语音唤醒
-  吃力的活       ：&gt;7B 模型、长上下文(&gt;8K)、复杂数学/代码
-  <span class="r">真正瓶颈</span>       ：内存带宽（产品 7~11 GB/s，NPU 独占 12~16，峰值 19）—不是 NPU 算力
-  实测参考       ：3B int4 ≈ <span class="k">3.5~5.5 tok/s</span>（产品；NPU 独占 6~8，语音交互够用）
+<span class="k">登录方式</span>
+  串口 / HDMI 接屏幕；或网线 SSH（默认用户常见：linaro / firefly / rock / root）
+  默认密码厂商各异（常见：firefly / linaro / rockchip / 空）</div>
+    <div class="callout"><b>先别急着跑模型</b>：镜像一定要选"<b>带 NPU 驱动（rknpu）</b>"的，否则后面 RKNN 一律跑不起来。<code>/sys/kernel/debug/rknpu/version</code> 能读出东西，才算烧对。</div>
 
-<span class="g">结论：3576 = 中端端侧 AI，定位「意图 + 轻对话」，不是「大模型推理机」。</span>
-往上要更强：RK3588（带宽更高）；往下要更省：3576 就够。</div>
-    <div class="callout"><b>一句话结论：</b>RK3576 用 <b>1.5B~3B int4 做意图识别和简单对话</b>是甜点；复杂推理走云端，<b>断网降级到本地 1.5B</b>——这条要能脱口而出。</div>
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：安装 RKNN 工具链（上位机 + 板端，别装错机器）</h3>
+    <div class="board"><span class="k">RKNN 工具链分两半，装错机器 = 白折腾</span>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：BOM 成本拆解</h3>
-    <p>面试官问你「这台设备物料多少钱」，答不出就是没做过产品。BOM 要能拆到主控、内存、存储、传感器、结构。</p>
-    <div class="board"><span class="k">BOM 拆解模板（示例：本地语音助手）</span>
+<span class="k">【上位机 x86 Ubuntu 20.04 / 22.04】—— 负责"转换 + 量化"</span>
+  pip install rknn-toolkit2                # Python 3.8 / 3.10
+  python3 -c "from rknn.api import RKNN; print('ok')"   # 验证
+  → 作用：把 ONNX 模型转成 .rknn（这一步在电脑上做）
 
-  主控 RK3576            ≈ <span class="k">$12</span>
-  LPDDR4X 4GB            ≈ <span class="k">$6</span>
-  eMMC 16GB              ≈ <span class="k">$3</span>
-  WiFi/BT 模组           ≈ <span class="k">$3</span>
-  麦克风阵列(2~4 mic)    ≈ <span class="k">$4</span>
-  扬声器 + Amp           ≈ <span class="k">$4</span>
-  PMIC + 电源            ≈ <span class="k">$2</span>
-  PCB + 结构 + 组装      ≈ <span class="k">$8</span>
-  ─────────────────────────────
-  合计 ≈ <span class="g">$42</span>（留 ~$8 冗余）→ 售价 $49~59 合理
+<span class="k">【板端 RK3576】—— 负责"推理"</span>
+  运行库：librknnrt.so（与板端 NPU 驱动对应）
+  Python 轻量包：rknn-toolkit-lite2       # 板端只推理，不转换
+  git clone https://github.com/airockchip/rknn_model_zoo
+  → 作用：加载 .rknn 跑推理
 
-<span class="k">成本敏感点：</span>内存和存储占大头；内存能压到 2~4GB 就别上 8GB。
-<span class="k">对照：</span>RK3588 主控更贵（±$10+），BOM 会整体抬高。</div>
-    <div class="callout"><b>一句话结论：</b>BOM 拆解要能报出「主控 / 内存 / 存储 / 外设 / 结构」五块的大致占比，并指出<b>内存与存储是成本杠杆</b>。</div>
+<span class="r">版本必须对齐！</span>
+  rknn-toolkit2 版本  ↔  librknnrt.so 版本  ↔  NPU 驱动版本
+  不一致 → 报 "version mismatch" 或直接跑不动。
+  查板端运行库版本：strings librknnrt.so | grep -i version
+  查 NPU 驱动：cat /sys/kernel/debug/rknpu/version</div>
+    <div class="callout"><b>口诀：转换在上位机，推理由板端；两边版本必须能用同一套号。</b>记不住就去 rknn_model_zoo 的 README 找"对应关系表"。</div>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：功耗估算与续航</h3>
-    <p>续航不是拍脑袋，是 <b>电池容量 ÷ 平均功耗</b>。平均功耗要从工作剖面推。</p>
-    <div class="board"><span class="k">功耗估算与续航</span>
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：转换一个 1.5B 模型到 RKNN</h3>
+    <div class="board"><span class="k">以 Qwen2.5-1.5B 为例（走 rknn_model_zoo 现成脚本）</span>
 
-  待机（仅唤醒词）        ≈ <span class="g">0.3 W</span>
-  本地 1.5B 语音对话      ≈ <span class="g">2.5 ~ 3.5 W</span>
-  峰值（最大推理+喇叭）   ≈ <span class="g">5 W</span>
+<span class="k">① 准备：克隆仓库 + 下载 HF 模型</span>
+  git clone https://github.com/airockchip/rknn_model_zoo
+  cd rknn_model_zoo
+  # 下载 Qwen2.5-1.5B 的 HF 权重（huggingface-cli / modelscope）
 
-  假设平均 2.5 W，电池 20 Wh（=3.7V × 5400mAh）
-  <span class="k">续航 = 20 Wh ÷ 2.5 W = 8 h</span>  ✅（对齐需求）
+<span class="k">② 导出 ONNX（用仓库 LLM 专用脚本，别自己写）</span>
+  cd examples/llm
+  python3 export_rknn.py \
+      --model_path /path/to/Qwen2.5-1.5B \
+      --model_type qwen2  --target_platform rk3576
+  # 注意：LLM 导出要处理 RoPE、KV Cache 布局，官方脚本已封装
 
-  要 8h ：电池 ≥ 20 Wh
-  要 12h：电池 ≥ 30 Wh，或把平均功耗压到 2.0 W
-  要 4h ：电池 ≥ 10 Wh（可省成本）
+<span class="k">③ 量化（必须给校准文本！）</span>
+  # 用一段覆盖真实输入的文本做校准集（几百条）
+  # 目标：w8a8 = int8 权重 + int8 激活，per-channel
+  # 校准集放进 dataset.txt，脚本会读取
 
-<span class="r">常见坑：</span>只按峰值算续航 → 严重高估；要按「带权平均」算。</div>
-    <div class="callout"><b>一句话结论：</b>续航 = <b>电池容量 ÷ 平均功耗</b>；平均功耗要按工作剖面加权，不能拿峰值或待机糊弄。</div>
+<span class="k">④ 生成 .rknn 产物</span>
+  qwen2.5-1.5b_w8a8.rknn   （约 1.6 ~ 1.9 GB）
 
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：一页纸方案模板（本章核心，背下来）</h3>
-    <p>这是本章要你反复练到肌肉记忆的东西。任何端侧 AI 需求，都用这七段回答。</p>
-    <div class="board"><span class="k">《一页纸架构方案》模板</span>
+<span class="k">坑提示</span>
+  · 优先用 zoo 里<span class="g">已支持并测过</span>的模型，自己从头转 LLM 坑极多
+  · 量化校准集不覆盖真实分布 → 精度崩（第 2 章讲过）
+  · 3599/3576 target_platform 别填错</div>
+    <div class="callout"><b>高效的偷懒正确姿势：</b>先跑通官方示例，<b>再</b>换自己的模型。<b>不要一上来就自己写导出脚本</b>——LLM 的 RoPE/KV Cache 布局是深坑，zoo 已经踩过了。</div>
 
-1. 场景与目标     ：一句话说清「这是什么产品、给谁用」
-2. 需求与指标     ：功能清单 + 硬指标（延迟 / 续航 / 成本 / 温度）
-3. <span class="k">端云分工</span>       ：端侧做什么 / 云端做什么 / 断网怎么降级
-4. <span class="k">关键选型</span>       ：SoC / 模型规模 / 量化 / 框架 / 内存预算
-5. <span class="k">成本(BOM)</span>      ：主控+内存+存储+外设+结构 ≈ $___
-6. <span class="k">功耗与续航</span>     ：峰值/平均功耗 → 电池容量 → 续航
-7. 风险与取舍     ：最大的 2 个风险 + 应对方案
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：在板子上跑通推理 + 记录四项指标</h3>
+    <div class="board"><span class="k">把模型推到板子 + 登录</span>
 
-<span class="g">判据：一页纸、七段齐、每个数字有来源、每个取舍有理由。</span></div>
-    <p>拿三个真实场景各走一遍，你会发现「模板不变，数字变」：</p>
-    <div class="board"><span class="k">场景演练①：本地语音助手</span>
-  目标：离线可用、隐私、便宜
-  指标：TTFT&lt;1s, tok/s&gt;4, 续航 8h, BOM $50
-  端云：端侧全包（唤醒/ASR/意图/对话/RAG），复杂问题转云
-  选型：RK3576 + 1.5B int4 + RKNN；内存 4GB
-  BOM ：≈ $42 → 售价 $49~59
-  功耗：平均 2.5W → 20Wh 电池 → <span class="k">8h</span>
-  风险：带宽瓶颈 → 靠更狠量化 + 短上下文缓解
+  # 方式一：ADB
+  adb devices
+  adb push qwen2.5-1.5b_w8a8.rknn /userdata/
 
-<span class="k">场景演练②：车机语音</span>
-  目标：低延迟、离线安全、车规
-  指标：TTFT&lt;0.8s, 断网必可用, 宽温
-  端云：端侧唤醒+意图+短对话；导航/联网内容走云
-  选型：车规级 SoC 或 RK3576 + 3B int4；内存 8GB
-  BOM ：主控+内存抬高，估算 $___
-  功耗：由车电供电，续航不是约束
-  风险：车规认证 + 热环境 → 降频策略
+  # 方式二：SSH / scp
+  ssh root@192.168.x.x
+  scp qwen2.5-1.5b_w8a8.rknn root@192.168.x.x:/userdata/
 
-<span class="k">场景演练③：工业边缘盒子</span>
-  目标：多路输入、常驻、可靠、可扩展
-  指标：并发 N 路、7×24 稳定、散热受限
-  端云：端侧做实时检测/意图；集中管理走云
-  选型：RK3576 + 1.5B~3B int4；内存 4~8GB
-  BOM ：按路数与接口扩展，估算 $___
-  功耗：常驻供电，关注散热与 MTBF
-  风险：散热→降频；建议无风扇或主动散热</div>
-    <div class="callout"><b>一句话结论：</b>一页纸方案 = <b>七段模板 × 场景数字</b>；练到「给需求 10 分钟出方案」，你就具备架构师的核心能力。</div>
+<span class="k">板端跑 demo（rknn_model_zoo 的 llm 示例）</span>
+  cd rknn_model_zoo/examples/llm/python
+  python3 llm_demo.py \
+      --model_path /userdata/qwen2.5-1.5b_w8a8.rknn \
+      --prompt "你好，介绍一下你自己" --max_new_tokens 128
 
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：多模型并发与内存争抢（CV + LLM 同时跑）</h3>
-    <p>真实产品很少「只跑一个 LLM」：摄像头要跑 CV（检测/人脸），耳朵要跑 ASR（唤醒），嘴要跑 LLM 对话——<b>它们共用同一块内存和同一条总线</b>。不做预算就会互相踩脚：轻则掉帧、掉 tok/s，重则 OOM 崩掉。</p>
-    <div class="board"><span class="k">多模型并发资源预算表（RK3576 / 8GB / 视觉 + 语音助手同时在线）</span>
+<span class="k">要记录的 4 个指标</span>
+  ① 首 token 延迟 TTFT：从发送 prompt 到吐出第一个 token 的时间（受 prefill 影响）
+  ② 生成速度 tok/s：后续 token 的稳态速度（受 decode 带宽影响）
+  ③ 内存占用：free -m   （看 used / available）
+  ④ NPU 利用率：cat /sys/kernel/debug/rknpu/load
+      输出形如：NPU load: Core0: 78%, Core1: 0%
 
-模块                    常驻权重   运行时峰值     带宽需求(NPU 忙)   优先级
-──────────────────────────────────────────────────────────────
-系统+驱动+中间件          —         1.00 GB         —               —
-唤醒 + ASR + 声学前端     20 MB     0.10 GB         ~1 GB/s         <span class="g">最高</span>
-LLM 3B int4              2.00 GB    0.50 GB(KV4K)   ~10 GB/s        <span class="g">高</span>
-LLM 1.5B int4（降级态）   1.00 GB    0.35 GB(KV4K)   ~6 GB/s         <span class="g">高</span>
-CV 检测 YOLOv8n int8      4 MB      0.25 GB         ~3 GB/s         <span class="k">中（可降帧）</span>
-CV 分割/pose int8         8 MB      0.20 GB         ~2 GB/s         <span class="r">低（可关）</span>
-应用 + RAG 索引            —         0.30 GB         ~1 GB/s         <span class="k">中</span>
-预留（碎片/峰值/OOM 缓冲） —         1.00 GB         —               —
-──────────────────────────────────────────────────────────────
-合计(3B + 双 CV)          ≈2.03 GB   3.35 GB         ≈17 GB/s <span class="r">⚠ 超总线</span>
-合计(1.5B + 单 CV)        ≈1.02 GB   3.00 GB         ≈11 GB/s <span class="g">✅ 安全</span>
-
-<span class="k">内存红线：</span>永远留 ≥1GB 预留，见底就主动降级，别等 OOM Killer。
-<span class="k">带宽安全线：</span>总线（NPU 独占上沿）≈16 GB/s，留 20% 余量 → 并发安全线 ≈ <span class="g">12.8 GB/s</span>（产品场景 7~11 更低）。</div>
-    <p><b>① 内存怎么分：</b>分三类——<b>常驻权重</b>（开机 mmap，基本不动）、<b>动态运行时</b>（激活 / KV Cache / 工作区，可回收）、<b>预留缓冲</b>（碎片 + 峰值，≥1GB）。给每个模型设内存上限（进程隔离或 cgroup），防止一个模型把另一个挤爆。</p>
-    <p><b>② NPU 时间片与优先级：</b>3576 只有一个 NPU（6 TOPS），多模型只能<b>分时复用</b>，且<span class="key">切换只发生在一次推理的边界</span>（不能打断正在算的那一层）。所以给 LLM 的<span class="g">首 token（TTFT）</span>最高优先级、CV 用低优先级 + 降帧；别让长任务霸占 NPU——把大推理拆小、限制单次时长。</p>
-    <p><b>③ 带宽争抢：</b>LLM 解码是<span class="r">带宽型</span>（每出一个 token 要把权重搬一遍：3B int4 ≈ 2GB/token），CV 每帧也要搬激活。两者同时跑，总需求叠加 → 谁抢到谁快，另一方 tok/s 或帧率就掉。这正是「CPU 空闲但推理变慢」的原因——瓶颈在带宽，不在算力。</p>
-    <p><b>④ OOM 风险与降级顺序：</b>降级要<span class="key">有顺序、有阈值</span>——先牺牲「可重算、体验类」负载，最后才动核心功能；先砍内存大头（KV、模型规模），再砍小头。</p>
-    <div class="board"><span class="k">降级顺序（从上到下依次触发）</span>
-
-① 可用内存 &lt; <span class="k">1.5 GB</span> → CV 降帧 30 → 15 fps
-② 可用内存 &lt; <span class="k">1.2 GB</span> → CV 输入 640 → 320，或停「分割/pose」
-③ 可用内存 &lt; <span class="k">1.0 GB</span> → LLM 上下文 8K → 4K → 2K（缩 KV Cache）
-④ 可用内存 &lt; <span class="k">0.8 GB</span> → LLM 3B → <span class="g">1.5B</span>（保对话，牺牲理解力）
-⑤ 仍不足            → 只保 唤醒 + ASR + 本地工具，聊天转云或排队
-
-<span class="k">原则：</span>先体验后核心；先大对象后小对象；先可降级后不可降级。
-<span class="r">红线：</span>宁可主动降级，也不要被动 OOM。</div>
-    <div class="callout"><b>一句话结论：</b>并发预算 = <b>内存三类分账 + NPU 时间片优先级 + 带宽安全线 + 有序降级</b>；核心动作是「先算账、留缓冲、按阈值降」。</div>
-
-    <h3><span class="tag-lesson">讲解</span>7. 板书填空：并发预算手算（填完展开答案）</h3>
-    <p>用上面预算表，填出「3B + 双 CV」并发的运行时峰值、带宽需求合计，并判断该不该降级（安全线 12.8 GB/s）。</p>
-    <table class="tight">
-      <thead><tr><th>项目</th><th>算式</th><th>结果（填）</th></tr></thead>
-      <tbody>
-        <tr><td>运行时峰值合计</td><td>1.0 + 0.1 + 0.5 + 0.25 + 0.20 + 0.30 + 1.00</td><td class="fill">?</td></tr>
-        <tr><td>带宽需求合计</td><td>1 + 10 + 3 + 2 + 1</td><td class="fill">?</td></tr>
-        <tr><td>是否超安全线</td><td>合计 vs 12.8 GB/s</td><td class="fill">?</td></tr>
-        <tr><td>第一步降级动作</td><td>按降级顺序表</td><td class="fill">?</td></tr>
-      </tbody>
-    </table>
+<span class="k">辅助命令</span>
+  free -m                                   # 内存
+  cat /proc/meminfo | head                  # 内存细节
+  cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq  # CPU 频率
+  cat /sys/kernel/debug/rknpu/load           # NPU 负载</div>
+    <p><b>记录模板（每次实验一行，先自己填一栏再展开答案）：</b></p>
+    <div class="board"><span class="k">inference_metrics.csv</span>
+model, quant, prompt_len, ttft_ms, tok_per_s, mem_used_mb, npu_pct, note
+qwen2.5-1.5b, w8a8, 32, ___, ___, ___, ___, 短 prompt
+qwen2.5-1.5b, w8a8, 512, ___, ___, ___, ___, 长 prompt（看 TTFT 上升）</div>
     <details>
-      <summary>点击展开答案（先自己填！）</summary>
-      <div class="board">运行时峰值合计 = 1.0+0.1+0.5+0.25+0.20+0.30+1.00 = <span class="g">3.35 GB</span>
-带宽需求合计 = 1+10+3+2+1 = <span class="r">17 GB/s</span> &gt; 安全线 12.8 → <span class="r">必须降级</span>
-第一步 = CV 降帧 30 → 15 fps（先压最不痛、可重算的负载）
-若仍 &gt;12.8：停「分割/pose」，带宽 ≈ <span class="g">15 GB/s</span>；再不行才缩 LLM 上下文。
+      <summary>点击展开答案（参考量级，实测为准）</summary>
+      <div class="board">qwen2.5-1.5b w8a8，RK3576 参考量级：
+  · TTFT：短 prompt 数百 ms；512 token prompt 明显上升到 ~1 s
+  · tok/s：约 5 ~ 10 tok/s（带宽受限；NPU 独占 12~16 GB/s，产品场景只有 7~11 GB/s）
+  · 内存：模型 ~1.8 GB + 运行时 ≈ 2.5 GB 量级
+  · NPU：生成阶段 Core0 常见 60 ~ 90%
 
-<span class="k">关键理解：</span>17 GB/s 是「需求之和」，真实总线（NPU 独占）16 GB/s；
-叠加结果是 LLM tok/s 掉档 + CV 掉帧（不一定崩），但预留见底就 OOM。</div>
+<span class="k">关键：数字不重要，"趋势"才重要——</span>
+prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
     </details>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：RK3576 性能画像与三条铁律</h3>
+    <div class="board"><span class="k">RK3576 性能画像（必须背）</span>
+  NPU 6 TOPS            ← 算力够（对 1.5B~3B）
+  内存带宽 19 / 12~16 / 7~11 GB/s ← <span class="r">真正的瓶颈</span>（理论/NPU 独占/产品，decode 打产品档）
+  CPU 4×A72 + 4×A53     ← CPU 弱，别指望 CPU 兜底
+  内存 ≤ 16 GB LPDDR5
+
+<span class="k">三条铁律</span>
+① <span class="r">优先纯 NPU 推理</span>：一旦有算子回落到 CPU，
+   速度会被 CPU 拖垮（3576 的 CPU 很弱）。
+② 带宽是命门：能减小的权重 / KV 一定要减（量化 + GQA）。
+③ 首 token 慢是正常的：prefill 要算完整个 prompt，
+   长 prompt 的 TTFT 会明显上升。
+
+<span class="k">自测基准（参考，实测为准）</span>
+  Qwen2.5-1.5B w8a8：TTFT 数百 ms ~ 1 s，生成 5 ~ 10 tok/s
+  如果实测远低于此 → 查两件事：
+    (a) 有没有算子回落到 CPU？（看日志 fallback / cpu 提示）
+    (b) 模型是不是没跑在 NPU 上？（NPU load 一直 0% = 没上 NPU）</div>
+    <div class="callout"><b>排障第一反应：</b>速度不对，先看 <code>rknpu/load</code>。<b>NPU 利用率为 0 或很低，说明大量算子在 CPU 上跑</b>——这才是端侧最常见的性能坑。</div>
   </div>
 
   <h2>练习（交作业）</h2>
-  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+  <p class="lead">这一章全是实操。做完把命令记录和数据贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>端云协同决策表（自己重写一版）</h3></div>
+    <div class="head"><span class="num">1</span><h3>烧录系统 + 基础环境验证</h3></div>
     <dl>
-      <dt>目标</dt><dd>不照抄板书，自己列一份「哪些任务端侧、哪些云端」的决策表，并写清判据。</dd>
-      <dt>要掌握</dt><dd>延迟 / 隐私 / 离线 / 成本 四把尺子怎么用；断网降级怎么设计。</dd>
-      <dt>实操步骤</dt><dd>写 <code>end-cloud-split.md</code>：任务 × 端/云决策表 + 每条的判据 + 断网降级路径（降级到本地 1.5B 保哪些能力）。</dd>
-      <dt>检验标准</dt><dd>能解释「为什么 ASR 可端可云、为什么复杂推理必须上云、断网时牺牲了什么」。</dd>
+      <dt>目标</dt><dd>让 RK3576 从零启动到能登录，并确认 NPU 驱动存在。</dd>
+      <dt>要掌握</dt><dd>Loader/MaskROM 进法、RKDevTool/upgrade_tool 用法、三条验证命令。</dd>
+      <dt>实操步骤</dt><dd>① 下载厂商镜像 → 用 RKDevTool（或 upgrade_tool）烧录；② 串口/HDMI/SSH 登录；③ 跑 <code>uname -a</code>、<code>cat /proc/device-tree/model</code>、<code>cat /sys/kernel/debug/rknpu/version</code>；写 <code>rk3576_flash_notes.md</code>：镜像版本、工具、进模式方法、三条命令输出、登录用户/密码。</dd>
+      <dt>检验标准</dt><dd>能重启后再次进入系统；<code>rknpu/version</code> 有输出（证明 NPU 驱动在）。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>RK3576 能力边界笔记</h3></div>
+    <div class="head"><span class="num">2</span><h3>安装 RKNN 工具链（上位机 + 板端）</h3></div>
     <dl>
-      <dt>目标</dt><dd>把「RK3576 能干什么」写成一张可背的边界卡。</dd>
-      <dt>要掌握</dt><dd>舒适区模型规模、能干/吃力的任务、真正瓶颈、实测 tok/s。</dd>
-      <dt>实操步骤</dt><dd>写 <code>rk3576-boundary.md</code>：边界卡（舒适区 / 能干 / 吃力 / 瓶颈 / 实测），并对照 RK3588 写一句「什么时候该升级」。</dd>
-      <dt>检验标准</dt><dd>被问「RK3576 能跑多大模型、干什么」能 5 秒内答「1.5B~3B int4 做意图和简单对话，瓶颈是带宽」。</dd>
+      <dt>目标</dt><dd>上位机能 import RKNN，板端有 librknnrt.so 和 lite2，版本对齐。</dd>
+      <dt>要掌握</dt><dd>两半工具链的分工；版本对齐；zoo 仓库拉取。</dd>
+      <dt>实操步骤</dt><dd>① 上位机 <code>pip install rknn-toolkit2</code> 并 <code>from rknn.api import RKNN</code> 验证；② 板端确认 librknnrt.so（<code>strings librknnrt.so | grep -i version</code>）、安装 rknn-toolkit-lite2；③ <code>git clone</code> rknn_model_zoo；写 <code>toolchain_setup.md</code>：版本号、安装命令、验证输出、版本对应关系。</dd>
+      <dt>检验标准</dt><dd>上位机 import 成功；板端能读到运行库版本；能与 toolkit2 对上号。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>BOM 与功耗计算器</h3></div>
+    <div class="head"><span class="num">3</span><h3>转换 Qwen2.5-1.5B 到 RKNN</h3></div>
     <dl>
-      <dt>目标</dt><dd>做一个能改参数就出「BOM 合计 + 续航」的小工具（表格或脚本均可）。</dd>
-      <dt>要掌握</dt><dd>BOM 五块拆解；续航 = 容量 ÷ 平均功耗；平均功耗按剖面加权。</dd>
-      <dt>实操步骤</dt><dd>写 <code>bom_power.py</code>（或 <code>bom_power.md</code> 表格）：输入主控/内存/存储/外设/结构单价 → 输出 BOM 合计；输入峰值/待机功耗与占空比 → 输出平均功耗与续航。至少算 2 组（$50 助手、工业盒子）。</dd>
-      <dt>检验标准</dt><dd>改内存容量，BOM 和续航能同时变化；$50 助手算出约 8h 续航。</dd>
+      <dt>目标</dt><dd>产出可用的 <code>qwen2.5-1.5b_w8a8.rknn</code>。</dd>
+      <dt>要掌握</dt><dd>LLM 专用导出脚本；校准集做法；w8a8 含义。</dd>
+      <dt>实操步骤</dt><dd>① 下载 HF 权重；② 跑 <code>examples/llm/export_rknn.py</code>；③ 准备校准文本 <code>dataset.txt</code> 并量化；④ 记录产物大小；写 <code>convert_log.md</code>：命令、校准集规模、产物大小、耗时、遇到的问题。</dd>
+      <dt>检验标准</dt><dd>.rknn 文件生成且大小合理（≈1.6~1.9 GB）。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>一页纸方案①：本地语音助手</h3></div>
+    <div class="head"><span class="num">1</span><h3>跑通推理 + 记录四项指标</h3></div>
     <dl>
-      <dt>目标</dt><dd>按七段模板，为「离线语音助手（$50 BOM、8h 续航）」出一份一页纸方案。</dd>
-      <dt>要掌握</dt><dd>把端云分工 / 选型 / BOM / 功耗四块数字串成完整方案。</dd>
-      <dt>实操步骤</dt><dd>写 <code>plan-voice-assistant.md</code>：严格按七段模板（场景/指标/端云/选型/BOM/功耗/风险），BOM 拆到主控级，续航给出电池容量推算。</dd>
-      <dt>检验标准</dt><dd>陌生人拿这页能照做；能回答「为什么是 1.5B 不是 3B、为什么 4GB 不是 8GB」。</dd>
+      <dt>目标</dt><dd>板端跑通 llm_demo，至少测 2 个 prompt（短 + 长），填满指标表。</dd>
+      <dt>要掌握</dt><dd>llm_demo 用法；TTFT / tok/s / 内存 / NPU 四个指标怎么取。</dd>
+      <dt>实操步骤</dt><dd>① <code>adb push</code> 或 <code>scp</code> 模型到板子；② 跑 <code>llm_demo.py</code>；③ 用 <code>free -m</code> 与 <code>cat /sys/kernel/debug/rknpu/load</code> 采集数据；写 <code>inference_metrics.md</code> + <code>inference_metrics.csv</code>：按模板填表（短 prompt / 长 prompt 各一行）。</dd>
+      <dt>检验标准</dt><dd>能观察到"prompt 变长 → TTFT 变大"的趋势，四条数据齐全。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>一页纸方案②：车机语音</h3></div>
+    <div class="head"><span class="num">2</span><h3>纯 NPU vs 回落 CPU 对比</h3></div>
     <dl>
-      <dt>目标</dt><dd>为「车机语音助手」出一页纸方案，重点处理低延迟、离线安全、车规约束。</dd>
-      <dt>要掌握</dt><dd>场景不同 → 指标与取舍不同（续航让位于可靠性/温度）。</dd>
-      <dt>实操步骤</dt><dd>写 <code>plan-carmachine.md</code>：七段模板；端云分工强调断网必可用；风险段写车规认证与热降频应对。</dd>
-      <dt>检验标准</dt><dd>能说清「车机为什么和语音助手的选型不一样、取舍点在哪」。</dd>
+      <dt>目标</dt><dd>确认推理确实跑在 NPU 上，并观察 NPU 利用率。</dd>
+      <dt>要掌握</dt><dd>怎么判断算子是否回落 CPU；NPU 负载怎么读。</dd>
+      <dt>实操步骤</dt><dd>① 生成时反复读 <code>cat /sys/kernel/debug/rknpu/load</code>；② 看 demo 日志有无 CPU fallback 提示；③ 对比 tok/s 与 NPU 利用率的关系；写 <code>npu_usage.md</code>：NPU 负载曲线、是否全 NPU、若回落是哪个环节。</dd>
+      <dt>检验标准</dt><dd>能明确说出"这个推理是不是纯 NPU"，以及依据。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>一页纸方案③：工业边缘盒子 + 三方案对照</h3></div>
+    <div class="head"><span class="num">3</span><h3>《RK3576 跑通报告》（一页，核心产出）</h3></div>
     <dl>
-      <dt>目标</dt><dd>为「工业边缘盒子」出一页纸方案，并把三份方案做一张对照表。</dd>
-      <dt>要掌握</dt><dd>同一份模板在不同场景下的数字差异与取舍逻辑。</dd>
-      <dt>实操步骤</dt><dd>写 <code>plan-industrial.md</code> + <code>plan-compare.md</code>：对照三方案的关键指标（模型规模/内存/功耗/BOM/端云策略/最大风险），并各写一句「若预算翻倍会怎么改」。</dd>
-      <dt>检验标准</dt><dd>三份方案七段齐全、数字有来源；对照表能一眼看出三者的取舍差异。</dd>
-    </dl>
-  </div>
-  <div class="task pm">
-    <div class="head"><span class="num">4</span><h3>多模型并发资源预算与降级演练</h3></div>
-    <dl>
-      <dt>目标</dt><dd>给「CV + LLM 同时在线」的场景做一份资源预算表，并验证并发时的真实表现。</dd>
-      <dt>要掌握</dt><dd>内存三类预算（常驻 / 动态 / 预留）；NPU 时间片与优先级；带宽争抢；有顺序、有阈值的降级。</dd>
-      <dt>实操步骤</dt><dd>写 <code>concurrency-budget.md</code>：填「多模型并发资源预算表」（内存 / 带宽 / 优先级三列），写清内存红线（预留 1GB）与带宽安全线（12.8 GB/s），并给五级降级顺序表。能上板再写 <code>concurrency-test.md</code>：同时跑 LLM + CV，记录各自 tok/s、FPS、RSS 峰值与触发降级的内存水位。</dd>
-      <dt>检验标准</dt><dd>能报出并发总内存与总带宽是否超红线；被问「CV 和 LLM 抢资源怎么办」能答出「时间片 + 优先级 + 降级顺序 + 留 1GB 缓冲」。</dd>
+      <dt>目标</dt><dd>综合全链路，出一页可复现的跑通报告。</dd>
+      <dt>要掌握</dt><dd>把烧录 / 工具链 / 转换 / 指标串成一个可复现的流程。</dd>
+      <dt>实操步骤</dt><dd>写 <code>rk3576_report.md</code>（一页）：①环境（板子/镜像/驱动/toolkit 版本）②模型与量化 ③关键命令 ④指标表（TTFT/tok/s/内存/NPU）⑤结论与瓶颈判断（带宽受限）⑥下一步。</dd>
+      <dt>检验标准</dt><dd>别人拿这页能复现你的流程——这就是端侧部署能力的证据。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>end-cloud-split.md</code> —— 端云协同决策表 + 断网降级设计。</li>
-    <li><code>rk3576-boundary.md</code> —— RK3576 能力边界卡。</li>
-    <li><code>bom_power.py</code> —— BOM 与功耗/续航计算器。</li>
-    <li><code>plan-voice-assistant.md</code> —— 一页纸方案①：本地语音助手。</li>
-    <li><code>plan-carmachine.md</code> —— 一页纸方案②：车机语音。</li>
-    <li><code>plan-industrial.md</code> —— 一页纸方案③：工业边缘盒子。</li>
-    <li><code>plan-compare.md</code> —— 三方案对照表（核心产出）。</li>
-    <li><code>concurrency-budget.md</code> —— 多模型并发资源预算表 + 降级顺序。</li>
+    <li><code>rk3576_flash_notes.md</code> —— 烧录步骤与基础环境验证。</li>
+    <li><code>toolchain_setup.md</code> —— RKNN 工具链安装与版本对齐。</li>
+    <li><code>convert_log.md</code> —— Qwen2.5-1.5B 转 RKNN 记录。</li>
+    <li><code>inference_metrics.md</code> + <code>inference_metrics.csv</code> —— 推理四项指标记录。</li>
+    <li><code>npu_usage.md</code> —— 纯 NPU / 回落 CPU 判定。</li>
+    <li><code>rk3576_report.md</code> —— RK3576 跑通报告（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>随机给一个端侧 AI 需求，10 分钟内出一页纸方案（七段齐全）。</li>
-    <li>能说清端云分工的判据，并给出断网降级路径。</li>
-    <li>能报 RK3576 的能力边界（1.5B~3B int4 / 意图+简单对话 / 瓶颈带宽）。</li>
-    <li>能给一个产品的 BOM 拆解与续航推算，数字有来源。</li>
-    <li>能对比三个场景，说清「同样的模板、不同的取舍」。</li>
-    <li>能给「CV + LLM 并发」做内存 / 带宽预算，并说出降级顺序与安全线。</li>
+    <li>能独立完成"烧系统 → 配工具链 → 转模型 → 跑推理"全流程。</li>
+    <li>知道 RKNN 工具链分上位机（转换）和板端（推理）两半，且版本必须对齐。</li>
+    <li>能用 <code>rknpu/load</code> 判断推理是否跑在 NPU 上。</li>
+    <li>能记录并解释 TTFT / tok/s / 内存 / NPU 四项指标及其趋势。</li>
+    <li>能说出 3576 的瓶颈是带宽（产品场景仅 7~11 GB/s）与弱 CPU，因此优先纯 NPU。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「拿到一个端侧 AI 需求，我会先做端云分工：高频、低延迟、隐私、要离线可用的放端侧，复杂推理和需要最新知识的放云端，并且一定设计断网降级路径。芯片上，RK3576 我判断它的舒适区是 1.5B~3B int4，做意图识别和简单对话，瓶颈是内存带宽（产品 7~11GB/s，NPU 独占 12~16），复杂推理走云端，断网就降级到本地 1.5B。然后我会算账：BOM 拆到主控、内存、存储、外设、结构，用内存和存储做成本杠杆；功耗按工作剖面算平均，续航等于电池容量除以平均功耗——比如平均 2.5 瓦、20 瓦时电池就是 8 小时。最后落成一页纸，七段：场景、指标、端云分工、关键选型、BOM、功耗续航、风险。比如本地语音助手我会按 $50 BOM、8 小时续航给方案；车机侧重低延迟和车规；工业盒子侧重多路、常驻和散热。每个取舍我都能讲出为什么不选另一个。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>架构决策能力——端云分工、芯片选型、成本功耗权衡，一页纸说清（架构师核心能力）。</p>
+    <span class="tag">要点回顾</span>
+    <ul class="clean">
+      <li>RK3576 端侧部署是一条四步链路：<b>烧系统 → 配工具链 → 转模型 → 跑推理</b>，四步打通才算走完。</li>
+      <li>系统镜像必须带 NPU 驱动；烧完先用 <code>/sys/kernel/debug/rknpu/version</code> 验证驱动存在。</li>
+      <li>RKNN 工具链分两半：上位机 <code>rknn-toolkit2</code> 负责转换与量化，板端 <code>librknnrt.so</code> + <code>rknn-toolkit-lite2</code> 负责推理；<b>两边版本必须对齐</b>，否则报 version mismatch。</li>
+      <li>模型转换优先用 <code>rknn_model_zoo</code> 的 LLM 脚本导出 ONNX，再给覆盖真实分布的校准集做 w8a8 量化，产物 <code>.rknn</code> 约 1.6~1.9 GB。</li>
+      <li>板端跑通后记录四项指标：<b>TTFT、decode tok/s、内存占用、NPU 利用率</b>，重点看趋势而非单点数字。</li>
+      <li>3576 的瓶颈是内存带宽（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）与弱 CPU，所以优先纯 NPU 推理，一旦算子回落 CPU 速度会被拖垮。</li>
+      <li>性能不对时先看 <code>rknpu/load</code>：利用率长期为 0 说明大量算子在 CPU 上跑，这是端侧最常见的性能坑。</li>
+    </ul>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li><strong>定位要说准：</strong>3576 是中端端侧 AI，适合「意图 + 轻对话 + RAG」，不要吹它能跑大模型。</li>
-      <li><strong>瓶颈是带宽不是算力：</strong>方案里写优化方向时，优先「降比特 / 减上下文 / 前缀缓存」，而不是「加算力」。</li>
-      <li><strong>内存是成本杠杆：</strong>4GB 够就跑 4GB，别为了跑更大的模型硬上 8GB，BOM 会顶不住。</li>
-      <li><strong>升级判断：</strong>若要跑 &gt;3B 或长上下文，考虑 RK3588（带宽更高）；中端产品 3576 性价比更优。</li>
+      <li>镜像务必选<strong>带 NPU 驱动</strong>的固件；烧完先验证 <code>/sys/kernel/debug/rknpu/version</code>。</li>
+      <li>带宽三档：峰值 <strong>19</strong> / NPU 独占 <strong>12~16</strong> / 产品 <strong>7~11 GB/s</strong>，CPU 弱——一旦算子回落 CPU，速度会被拖垮，<strong>优先纯 NPU</strong>。</li>
+      <li>日志里搜 <strong>fallback / cpu</strong>；性能差先看 <code>rknpu/load</code>，NPU 利用率为 0 说明没好利用 NPU。</li>
+      <li>优先用 <strong>rknn_model_zoo 已支持</strong>的模型（Qwen2.5 等），别一上来自己写 LLM 导出脚本。</li>
+      <li>长 prompt 的 TTFT 上升属正常（prefill），别误判为"模型有问题"。</li>
     </ul>
   </div>
 
-  <div class="footer">听懂讲义 → 填一页纸模板 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
 </div>
 </body>
 </html>

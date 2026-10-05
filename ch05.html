@@ -3,243 +3,152 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 5 章：KV Cache、PagedAttention 与性能瓶颈（讲义 + 作业）</title>
+<title>第 5 章：领域插件方法论与对照</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html">第 2 章</a>
-    <a href="ch03.html">第 3 章</a>
-    <a href="ch04.html">第 4 章</a>
-    <a href="ch05.html" class="active">第 5 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html" class="active">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 5 章：KV Cache、PagedAttention 与性能瓶颈</h1>
-  <p class="lead"><strong>章节目标：</strong>把「<b>内存怎么涨、速度卡在哪</b>」算成数字，并搞懂 KV Cache 的<b>分页管理与量化</b>——拿到任意模型 + 上下文长度，能<b>秒算 KV Cache、秒判算力瓶颈还是带宽瓶颈</b>。</p>
+  <h1>第 5 章：领域插件方法论与对照</h1>
+  <p class="lead"><strong>章节目标：</strong>把「通用底座」和「领域差异」拆成两层——通用能力可迁移、领域差异可枚举；用一张 <b>7 维「领域插件模板」</b> 加一张 <b>LLM / CV / 语音 / 传感器四领域对照表</b>，让「换领域」变成「换最上面一层皮」，底座方法不动。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
     <span class="chip">上午 4h · 3 个任务</span>
-    <span class="chip">下午 4h · 4 个任务</span>
-    <span class="chip">产出目录：ch05-kvcache</span>
+    <span class="chip">下午 4h · 3 个任务</span>
+    <span class="chip">产出目录：ch05-domain</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把 KV Cache 公式和瓶颈判据看懂，不懂就问我。</li>
-    <li><strong>第 2 步 做板书练习：</strong>讲义里的 KV Cache 空表自己算，做完展开「答案」自查。</li>
-    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写计算器、出性能报告。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把两层模型、7 维模板和四领域对照表看懂，不懂就问我。</li>
+    <li><strong>第 2 步 做板书练习：</strong>讲义里留空的对照表自己填，做完展开「答案」自查。</li>
+    <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」自己填一版四领域对照表，产出 <code>domain-plugin-template.md</code>。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
   </ul>
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 7 章你知道 decode 是「逐 token 生成」。但每生成一个 token，模型要去看前面所有 token 的信息——如果每次重算，代价爆炸。KV Cache 就是为此而生，代价是<b>内存随上下文线性增长</b>。算得清它，你才算摸到端侧 LLM 的门槛。这一章的 KV Cache、瓶颈定位，以及它的<b>分页管理（PagedAttention）与量化</b>，都是面试的<b>必问题</b>。</p>
-    <div class="callout"><strong>一句话记住：</strong>KV Cache 是「时间换空间」；端侧跑 LLM，空间（带宽）往往比时间（算力）更致命。</div>
+    <p>前 4 章是<b>通用底座</b>：算内存、选量化、拆框架、跑部署链路。这套东西不管做什么任务都用得上。从本章起进入<b>领域插件</b>——LLM、CV、语音、传感器各有各的输入、网络、指标和量化痛点。但你要记住一句话：<b>领域换的是「最上面一层皮」，底座不动。</b>这一章就给你一把「换皮」的通用工具。</p>
+    <div class="callout"><strong>一句话记住：</strong>通用能力可迁移，领域差异可枚举。学会这个模板，后面每个领域只是往格子里填内容。</div>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：KV Cache 为什么存在</h3>
-    <p>Attention 的本质：新的 Query 要和前面<b>所有</b> token 的 Key 做点积、再用结果去加权所有 Value。问题在于这些 K、V 每步都会用到。</p>
-    <div class="board"><span class="k">没有 Cache 会怎样：</span>
-  生成第 100 个 token 时，要把前 99 个 token 的 K、V <span class="r">全部重算</span>一遍；
-  生成第 101 个再重算前 100 个…… 计算量 ~ N² 爆炸。
+    <h3><span class="tag-lesson">讲解</span>1. 板书①：两层模型——通用底座 + 领域插件</h3>
+    <p>端侧 AI 的知识可以切成两层。下层是跨领域通用的「底座方法」，上层是每个任务领域自己的「插件细节」。搞混两层，就会「LLM 那套调法硬套到检测上」。</p>
+    <div class="board"><span class="k">两层结构</span>
 
-<span class="k">有 Cache 之后：</span>
-  每个 token 的 K、V 只算 <span class="g">一次</span>，算完就存起来；
-  第 N 个 token 直接用缓存里的 [K1…K_{N-1}]，只算自己这份。
+<span class="g">【上层：领域插件】</span>  每个领域不一样，可枚举
+     输入模态 / 代表网络 / 预处理 / 评估指标 / 量化敏感点 …
+     例：LLM 盯「权重离群值」，CV 盯「回归头坐标」
 
-<span class="k">代价：</span>省了算力，但要一块内存常驻 —— <span class="r">这就是 KV Cache</span>。
-它随上下文长度<span class="r">线性增长</span>，是端侧内存的头号变量。</div>
+<span class="k">【下层：通用底座】</span>  跨领域通用，可迁移
+     算内存 → 选方案 → 判瓶颈 → 跑链路 → 验收
+     例：不管什么模型，先算「多大、占多少带宽」再说别的
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：KV Cache 公式 + 手算 Qwen2.5-3B</h3>
-    <p>公式不长，但每个符号都要理解物理含义。别背，按「2 份 × 层 × 头 × 维度 × 长度 × 字节」念出来。</p>
-    <div class="formula">KV_bytes = 2 × layers × kv_heads × head_dim × seq_len × bytes</div>
-    <div class="board"><span class="k">逐项物理含义：</span>
-  2         = K 和 V 两份（各存一份）
-  layers    = 层数（每层都有自己的 K/V）
-  kv_heads  = KV 的头数（GQA 时 &lt; Q 头数）
-  head_dim  = 每个头的维度
-  seq_len   = 缓存了多长上下文（token 数）
-  bytes     = 每个数的字节：fp16 = <span class="g">2</span>，int8 = <span class="g">1</span>
+<span class="k">关系：底座是方法论，插件是参数表。</span>
+换领域 = 换插件的参数，不改底座的方法。</div>
 
-<span class="k">Qwen2.5-3B 假设：</span>layers = 36, kv_heads = 2, head_dim = 128, fp16
-  <span class="g">每 token = 2 × 36 × 2 × 128 × 2</span>
-           = 2×36 = 72
-           = 72×2 = 144
-           = 144×128 = 18432
-           = 18432×2 = <span class="g">36864 B ≈ 36 KB / token</span>
+    <h3><span class="tag-lesson">讲解</span>2. 板书②：领域插件模板（7 个维度）</h3>
+    <p>任何一个领域，都可以用下面 7 个维度「解剖」清楚。这 7 格填满，这个领域的端侧落地要点就说全了。</p>
+    <div class="board"><span class="k">领域插件模板 · 7 维</span>
 
-<span class="k">长度换算（× token 数）：</span>
-  1K  = 36 KB × 1024 ≈ <span class="g">36 MB</span>
-  4K  = 36 KB × 4096 ≈ <span class="g">144 MB</span>
-  8K  = 36 KB × 8192 ≈ <span class="g">288 MB</span></div>
-    <div class="callout"><strong>秒算口诀：</strong>「每 token 36 KB」——记住这个数，4K/8K 随口就来。</div>
+① <span class="g">输入模态</span>   喂进来的是什么？（文本 / 图像 / 音频 / 时序信号）
+② <span class="g">代表网络</span>   这个领域主流用什么结构？（Transformer / CNN / Conformer …）
+③ <span class="g">预处理</span>     从原始信号到网络输入要做什么？（分词 / resize / 分帧 / 滑窗）
+④ <span class="g">端侧框架</span>   跑在什么引擎上？（RKNN rkllm / toolkit2 / CPU …）
+⑤ <span class="g">评估指标</span>   好坏怎么量？（PPL / mAP / WER / F1 …）
+⑥ <span class="g">量化敏感点</span> 哪里最容易掉精度？（离群值 / 回归头 / 特征动态范围 …）
+⑦ <span class="g">端侧成熟度</span> 现在成熟到哪一步？（能否 3B int4 落地 / 是否已量产 …）
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：MHA → MQA → GQA → MLA 演进</h3>
-    <p>为什么 KV 头数可以比 Q 头数少？因为<b>KV 才是内存大头</b>，业界想尽办法砍它。</p>
-    <div class="board"><span class="k">四种注意力，砍的就是 KV 头数：</span>
+<span class="k">用法：拿到一个新领域，先按 7 维填格，缺哪格补哪格。</span></div>
 
-【MHA 多头注意力】Q/K/V 头数全部相等 = 16
-  每 token = 2×36×<span class="r">16</span>×128×2 = <span class="r">288 KB</span>　← 最贵
-  表达力最强，但 KV Cache 最大
-
-【MQA 多查询注意力】K/V 只有 <span class="g">1</span> 个头，所有 Q 共享它
-  每 token = 2×36×<span class="g">1</span>×128×2 = <span class="g">18 KB</span>　← 最省
-  省 16 倍，但精度掉得明显，大模型少用
-
-【GQA 分组查询注意力】K/V 头数 = <span class="g">2</span>（16 个 Q 分成 8 组共享）
-  每 token = 2×36×<span class="g">2</span>×128×2 = <span class="g">36 KB</span>　← 工业主流
-  Qwen2.5 / Llama3 都用它：省内存又保精度
-
-【MLA 多头潜在注意力】DeepSeek：把 K/V 压成低维隐向量再存
-  比 GQA 更省，但结构复杂、NPU 不友好</div>
-    <div class="callout"><strong>面试点：</strong>「GQA 是 MHA 省内存、MQA 保精度的折中，Qwen2.5 用 GQA（K/V=2 头）。」</div>
-
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：算力瓶颈 vs 带宽瓶颈（算术强度）</h3>
-    <p>判断瓶颈不用跑测试，一个比值就够——<b>算术强度</b>。</p>
-    <div class="formula">算术强度 AI = 计算量(FLOPs) ÷ 访存量(Bytes)</div>
-    <div class="board"><span class="k">判据：</span>
-  AI 大 → 每次搬数都能算很多次 → <span class="g">算力瓶颈</span>（compute-bound）
-  AI 小 → 数据搬进来还没算几下就没了 → <span class="r">带宽瓶颈</span>（memory-bound）
-
-<span class="k">机器的「脊点」= 峰值算力 ÷ 内存带宽：</span>
-  RK3576：6 TOPS int8 = 6000 GFLOP/s
-  · 用 NPU 独占 12~16 GB/s → 脊点 ≈ <span class="g">375~500 FLOP / Byte</span>
-  · 用理论峰值 19 GB/s     → 脊点 ≈ <span class="g">316 FLOP / Byte</span>
-  只要任务 AI &lt; 脊点（≥316）→ 判为带宽瓶颈
-
-<span class="k">decode 的 AI 有多小？</span>
-  3B int4 权重 ≈ 2 GB，生成 1 token ≈ 2×3G = 6 GFLOP
-  AI ≈ 6 GFLOP ÷ 2 GB = <span class="r">3 FLOP / Byte</span>
-  3 ≪ 316 → <span class="r">严重带宽瓶颈</span>
-
-<span class="k">prefill 的 AI 呢？</span>
-  512 token 一次并行，权重读一次算一大片 → AI 高，<span class="g">偏算力瓶颈</span></div>
-
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：为什么 RK3576 上是带宽瓶颈</h3>
-    <p>三个数字摆一起，结论自动浮现。</p>
-    <div class="board"><span class="k">三个数字：</span>
-  NPU 算力 6 TOPS int8      （很快，够用）
-  内存带宽三档：理论 19 / NPU 独占 12~16 / 产品 <span class="r">7~11 GB/s</span>
-  模型 int4 3B ≈ 2 GB       （每步都要整个读一遍）
-
-<span class="k">tok/s 区间（带宽 ÷ 2 GB）：</span>
-  NPU 独占 = 12~16 ÷ 2 = <span class="g">6~8 tok/s</span>
-  产品真实 =  7~11 ÷ 2 = <span class="g">3.5~5.5 tok/s</span>
-  再扣掉读 KV Cache、算子开销、非理想访存 → 实际还会更低
-
-<span class="k">推论（重要）：</span>
-  把 NPU 换成算力翻倍的芯片、但带宽不变 → decode <span class="r">几乎不变</span>
-  把模型从 int4 压更狠、或上 GQA/KV 量化 → decode <span class="g">明显变快</span>
-
-<span class="k">结论：3576 上 LLM decode 的天花板由带宽决定，不是算力。</span>
-  优化方向 = 「少读、少存」，不是「堆算力」。</div>
-    <div class="callout"><strong>一句话结论：</strong>带宽 12~16 GB/s ÷ 模型 2 GB ≈ 6~8 tok/s（产品场景 7~11 GB/s → 3.5~5.5），这就是端侧 LLM 的物理上限。</div>
-
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：瓶颈定位速查</h3>
-    <div class="board"><span class="k">现象 → 判定 → 对策</span>
-
-  首字慢 / 长 prompt 卡    → <span class="g">prefill 偏算力</span>   → 批处理、分块 prefill
-  出字慢 / 逐 token 卡     → <span class="r">decode 带宽瓶颈</span> → 量化、GQA、KV 量化
-  上下文越长越卡           → KV Cache 膨胀        → 缩短上下文、KV Cache 量化
-  换更强 NPU 却没用        → 说明卡在带宽        → 先查带宽，别急着换芯片
-
-<span class="k">速算模板（背下来）：</span>
-  1) KV / token = 2×L×kv_heads×d×bytes
-  2) 总量 = ×seq_len
-  3) 瓶颈 = 比较 AI 和脊点 (3576 ≈ 316~500)</div>
-
-    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：PagedAttention —— 把 KV Cache 分页分块</h3>
-    <p>KV Cache 体积大、生命周期又长，怎么「摆」在显存里，本身就是一个系统问题。<b>PagedAttention</b> 借用了操作系统的<b>虚拟内存分页</b>思想。</p>
-    <div class="board"><span class="k">问题：KV Cache 怎么分配内存才不浪费？</span>
-  朴素做法：给每条请求预留一段<span class="r">连续</span>显存，按最大长度开。
-  → 长度未知 ⇒ 要么开太大（<span class="r">预留浪费</span>），
-     要么开太小（要重新拷贝、<span class="r">碎片化</span>）。
-  → 连续分配下，显存利用率常常只有 <span class="r">20~40%</span>。
-
-<span class="k">PagedAttention 的做法：分页 / 分块</span>
-  把 KV Cache 切成固定大小的 <span class="g">block</span>（块，如 16 个 token 一块），
-  按需分配、块之间<span class="g">不必连续</span>，
-  用一张 <span class="g">block table（块表）</span>记录「逻辑块 → 物理块」的映射。
-  和 OS 里「物理页 + 页表」几乎一样：
-    · 逻辑上的 token 序列  ↔ 虚拟地址空间
-    · 物理 block           ↔ 物理页框
-    · block table          ↔ 页表
-
-<span class="k">好处：</span>
-  ① 消除连续分配浪费 → 块内最多浪费不到 1 块（如 16 token）
-  ② 消除外部碎片 → 显存利用率可提到 <span class="g">90%+</span>
-  ③ 公共前缀的 KV 可被<span class="g">多条请求共享</span>，进一步省内存
-  → 同样显存能塞下<span class="g">更多并发请求</span>，吞吐大涨。
-
-<span class="k">它是谁的核心机制：</span>vLLM 靠 PagedAttention 起家，
-如今已是主流推理框架的标配思想。</div>
-    <div class="callout"><strong>面试点：</strong>「PagedAttention 把 KV Cache 按固定 block 分页分配、用块表映射，类比 OS 虚拟内存——解决内存碎片、提高并发时的显存利用率，是 vLLM 的核心机制。」</div>
-    <p><b>端侧要能讲取舍：</b>RK3576/NPU 上不一定直接跑 vLLM（NPU 的 KV Cache 通常由运行时静态管理、形状更固定），但面试问「KV Cache 怎么管理、怎么提高并发」时，你要能把分页这套原理和它的代价（块表开销、块碎片、实现复杂度）说清楚。</p>
-
-    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：KV Cache 量化（fp16 → int8 / int4）</h3>
-    <p>权重能量化，KV Cache 也一样。它直接决定 decode 阶段要读多少字节——而 decode 正是带宽瓶颈。</p>
-    <div class="board"><span class="k">KV Cache 量化 = 把每个 K/V 数从 fp16 压成 int8 / int4</span>
-  fp16 → int8：每个数 <span class="g">2 → 1</span> 字节 → 内存/带宽 <span class="g">减半</span>
-  fp16 → int4：每个数 <span class="g">2 → 0.5</span> 字节 → 内存/带宽 <span class="g">降到 1/4</span>
-
-<span class="k">对本章结论的意义：</span>
-  decode 是带宽瓶颈，KV Cache 与权重<span class="r">抢同一块带宽</span>；
-  上下文越长，KV 占比越大（甚至超过权重）→
-  <span class="g">KV 量化直接给带宽「减负」</span>，是端侧长上下文的关键手段。
-
-<span class="k">但代价：精度更敏感！</span>
-  权重只在前向里「被读一次」，KV 却要在<span class="r">每一步注意力</span>里被反复用到。
-  量化的误差会<span class="r">沿着上下文长度累积</span>、被 attention 放大 →
-  同样位宽下，<span class="k">KV 量化对 PPL 的影响通常比权重量化更明显</span>。
-  工程折中：常用 <span class="g">int8 KV</span>（几乎无损、直接减半）；
-  int4 KV 收益大，但要用分组 / per-head scale 等技巧并更小心验证。</div>
-    <div class="board"><span class="k">权重量化 vs KV 量化（对比，背下来）</span>
-
-  维度            权重量化              KV Cache 量化
-  ─────────────────────────────────────────────
-  压什么          模型参数（静态）      运行时产生的 K/V（动态）
-  省什么          内存占用、读取带宽    内存占用、KV 读取带宽
-  何时生效        加载即定              随上下文增长
-  误差特性        一次性、可控          逐步累积、被 attention 放大
-  精度敏感度      相对温和              <span class="r">更敏感</span>（同 bit 掉 PPL 更多）
-  常用位宽        int8 / int4           int8（稳）/ int4（激进）
-  端侧价值        模型装得下            长上下文不爆、带宽减负
-
-<span class="k">一句话：权重量化让「模型变小」，KV 量化让「上下文变便宜」。</span>
-两者叠加，才是端侧长上下文的完整解法。</div>
-    <div class="callout"><strong>面试点：</strong>「KV 也能量化，fp16→int8 直接减半带宽；但 KV 参与每一步注意力，误差会随上下文累积，所以对 PPL 比权重量化更敏感，端侧一般先上 int8 KV。」</div>
-
-    <h3><span class="tag-lesson">讲解</span>9. 板书填空：KV Cache 空表</h3>
-    <p>用 Qwen2.5-3B（L=36, kv_heads=2, d=128, fp16）自己填，再展开答案。</p>
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：四领域对照表（完整版）</h3>
+    <p>把模板套到 LLM、CV、语音、传感器四个领域，一张表看清差异。这张表就是本节核心，务必吃透。</p>
     <table class="tight">
-      <thead><tr><th>上下文</th><th>每 token</th><th>KV Cache 总量</th><th>说明</th></tr></thead>
+      <thead><tr><th>维度</th><th>LLM</th><th>CV（检测 / 分割）</th><th>语音（ASR / KWS）</th><th>传感器（时序）</th></tr></thead>
       <tbody>
-        <tr><td>1K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
-        <tr><td>4K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
-        <tr><td>8K</td><td class="fill">?</td><td class="fill">?</td><td>—</td></tr>
+        <tr><td><b>输入模态</b></td><td>文本 token 序列</td><td>图像 / 视频帧</td><td>音频帧（梅尔谱 / MFCC）</td><td>多通道时序信号</td></tr>
+        <tr><td><b>代表网络</b></td><td>Transformer decoder（Qwen / Llama 系）</td><td>CNN 检测器（YOLO 系）/ RT-DETR / 分割网</td><td>Conformer / CRNN（ASR）；小 CNN（KWS）</td><td>1D-CNN / TCN / 轻量 Transformer</td></tr>
+        <tr><td><b>预处理</b></td><td>分词（BPE / SentencePiece）</td><td>resize + 归一化 + 通道排布</td><td>分帧 + 梅尔谱 / MFCC + 归一化</td><td>滤波去噪 + 滑窗 + 归一化</td></tr>
+        <tr><td><b>端侧框架</b></td><td>RKNN（rkllm，w4a16）</td><td>RKNN toolkit2（int8，per-channel）</td><td>RKNN（int8）</td><td>RKNN（int8）或 CPU（超轻量）</td></tr>
+        <tr><td><b>评估指标</b></td><td>PPL / 任务准确率</td><td>mAP（检测）/ mIoU（分割）</td><td>WER（ASR）/ 准确率 + 误唤醒率（KWS）</td><td>准确率 / F1</td></tr>
+        <tr><td><b>量化敏感点</b></td><td>权重·激活离群值</td><td>回归头（坐标 / 掩码）</td><td>输入特征动态范围 · 流式缓存</td><td>小信号幅度 · 长尾类别</td></tr>
+        <tr><td><b>端侧成熟度</b></td><td>成熟（3B int4 可落）</td><td>最成熟</td><td>成熟</td><td>轻量模型最成熟</td></tr>
+      </tbody>
+    </table>
+    <div class="board"><span class="k">一眼看出差异在哪</span>
+  输入模态决定 <span class="g">预处理</span>（分词 / resize / 分帧 / 滑窗）
+  网络类型决定 <span class="g">量化敏感点</span>（离群值 / 回归头 / 特征范围 / 小信号）
+  输出形态决定 <span class="g">评估指标</span>（PPL / mAP / WER / F1）
+
+<span class="k">共同点：都跑 RKNN、都要校准集、都受带宽约束。</span></div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书④：换领域只是「换最上面一层皮」</h3>
+    <p>这是本章最重要的一句话。领域再变，底座方法一个字都不改。</p>
+    <div class="board"><span class="k">通用底座五步（跨领域不变）</span>
+
+  ① 算内存   模型多大？权重 + KV / 特征占多少？
+  ② 选方案   fp16 / int8 / int4？哪个框架？
+  ③ 判瓶颈   算力密集还是带宽密集？
+  ④ 跑链路   PyTorch → ONNX → RKNN，算子过不过？
+  ⑤ 验收     PPL / mAP / WER 掉多少？能不能上线？
+
+<span class="k">换领域时这五步照做，只换「填格子的内容」：</span>
+  LLM 第①步算 KV Cache；CV 第①步算特征图 + 权重；
+  语音第①步算音频缓存；传感器第①步算滑动窗口缓冲。
+  <span class="g">方法没变，只是输入不同。</span></div>
+    <div class="formula">换领域 = 换最上面一层皮 ⟶ 底座五步不变</div>
+    <div class="callout"><strong>一句话记住：</strong>领域知识学的是「参数表」，底座方法学的是「解题步骤」。参数表会过时，解题步骤可以一直用。</div>
+
+    <h3><span class="tag-lesson">讲解</span>5. 板书填空：四领域对照表（留空）</h3>
+    <p>先自己填，再展开答案。空格填对应领域的内容。</p>
+    <table class="tight">
+      <thead><tr><th>维度</th><th>LLM</th><th>CV</th><th>语音</th><th>传感器</th></tr></thead>
+      <tbody>
+        <tr><td><b>输入模态</b></td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td><b>代表网络</b></td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td><b>评估指标</b></td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td><b>量化敏感点</b></td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案</summary>
-      <div class="board">每 token = 2 × 36 × 2 × 128 × 2 = <span class="g">36864 B ≈ 36 KB</span>
-
-  1K → 36 KB × 1024 = <span class="g">≈ 36 MB</span>
-  4K → 36 KB × 4096 = <span class="g">≈ 144 MB</span>
-  8K → 36 KB × 8192 = <span class="g">≈ 288 MB</span>
-
-<span class="k">对照：</span>若为 MHA（kv_heads=16），8K 会涨到 <span class="r">≈ 2.3 GB</span>，
-内存直接爆——所以 GQA 是端侧刚需。
-
-<span class="k">再做一步：</span>若把 KV 量化成 int8（每数 2 → 1 字节），
-上面每个数<span class="g">全部减半</span>：每 token ≈ 18 KB，8K ≈ <span class="g">144 MB</span>，
-带宽压力也同步减半。</div>
+      <table class="tight">
+        <thead><tr><th>维度</th><th>LLM</th><th>CV</th><th>语音</th><th>传感器</th></tr></thead>
+        <tbody>
+          <tr><td><b>输入模态</b></td><td>文本 token 序列</td><td>图像 / 视频帧</td><td>音频帧（梅尔谱 / MFCC）</td><td>多通道时序信号</td></tr>
+          <tr><td><b>代表网络</b></td><td>Transformer decoder</td><td>CNN 检测器 / 分割网</td><td>Conformer / CRNN / 小 CNN</td><td>1D-CNN / TCN</td></tr>
+          <tr><td><b>评估指标</b></td><td>PPL / 任务准确率</td><td>mAP / mIoU</td><td>WER / 误唤醒率</td><td>准确率 / F1</td></tr>
+          <tr><td><b>量化敏感点</b></td><td>权重·激活离群值</td><td>回归头（坐标 / 掩码）</td><td>特征动态范围 · 流式缓存</td><td>小信号幅度 · 长尾类别</td></tr>
+        </tbody>
+      </table>
+      <div class="board"><span class="k">记忆钩子</span>
+  输入定预处理，输出定指标，网络定敏感点；
+  三者都跑 RKNN、都要校准集、都受带宽约束。
+  换领域 → 换格子里内容 → 底座五步照旧。</div>
     </details>
   </div>
 
@@ -248,115 +157,95 @@
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>KV Cache 手算表</h3></div>
+    <div class="head"><span class="num">1</span><h3>两层模型笔记</h3></div>
     <dl>
-      <dt>目标</dt><dd>用板书公式，手算 Qwen2.5-3B 在 1K/4K/8K/32K 的 KV Cache 占用。</dd>
-      <dt>要掌握</dt><dd>公式每一项的物理含义；「每 token 36 KB」的速算。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_cache.md</code>：完整公式推导 + 一张「长度 × KV Cache」表（含手算过程），并加一行对照 MHA（kv_heads=16）的数值。</dd>
-      <dt>检验标准</dt><dd>给你任意 layers/kv_heads/head_dim，能在 30 秒内算出 8K 的 KV Cache。</dd>
+      <dt>目标</dt><dd>把板书①整理成一张「通用底座 / 领域插件」两层结构图。</dd>
+      <dt>要掌握</dt><dd>哪一层可迁移、哪一层可枚举；为什么不能把 LLM 的调法硬套到其他领域。</dd>
+      <dt>实操步骤</dt><dd>写 <code>two_layer_model.md</code>：两层结构图 + 每层各写 3 条内容 + 一句话「换领域换的是哪一层」。</dd>
+      <dt>检验标准</dt><dd>能说清「底座是方法、插件是参数」，并举一个「同一步骤、不同内容」的例子。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>KV Cache 计算器（核心实操）</h3></div>
+    <div class="head"><span class="num">2</span><h3>拆解 7 维模板</h3></div>
     <dl>
-      <dt>目标</dt><dd>写一个可复用的 Python 脚本：输入模型配置和上下文长度，输出 KV Cache 大小。</dd>
-      <dt>要掌握</dt><dd>把公式代码化；支持 fp16/int8/int4 切换；打印「MB/GB」并高亮超限。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_cache_calc.py</code>：函数 <code>kv_cache_bytes(layers, kv_heads, head_dim, seq_len, bytes_per=2)</code>；加 <code>main</code> 打印 Qwen2.5-3B 在 1K/4K/8K/32K 的结果（并列出 fp16 / int8 / int4 三档），并与手算表对照。</dd>
-      <dt>检验标准</dt><dd>脚本输出与手算表完全一致；改参数即改结果；能看出 int8/int4 的减半/四分之一效果。</dd>
+      <dt>目标</dt><dd>把板书②的 7 个维度逐个解释清楚，形成你的模板说明书。</dd>
+      <dt>要掌握</dt><dd>每个维度在问什么问题、为什么这 7 个维度就够覆盖一个领域。</dd>
+      <dt>实操步骤</dt><dd>写 <code>plugin_template_notes.md</code>：7 维列表，每维写「它问什么」+「怎么填」+ 一个任意领域的示例值。</dd>
+      <dt>检验标准</dt><dd>拿到一个新领域，能按 7 维立即列出要查的清单，不遗漏关键项。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>上下文长度 → 内存曲线</h3></div>
+    <div class="head"><span class="num">3</span><h3>对照表初稿（LLM + CV）</h3></div>
     <dl>
-      <dt>目标</dt><dd>画出「上下文长度 vs 内存占用」的线性关系，找出 3576 的内存临界点。</dd>
-      <dt>要掌握</dt><dd>KV Cache 是线性的（不是平方）；和模型权重（int4 约 1.6 GB）叠加后的总占用。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_curve.md</code>：以模型 1.6 GB + KV Cache 叠加，算出 16 GB 内存下能撑多长上下文；给出结论。</dd>
-      <dt>检验标准</dt><dd>能说出「KV Cache 线性增长，16 GB 下 3B int4 理论可撑很长上下文，但带宽仍是瓶颈」。</dd>
+      <dt>目标</dt><dd>先把 LLM、CV 两列按 7 维填出来，搭好表格骨架。</dd>
+      <dt>要掌握</dt><dd>输入→预处理、输出→指标、网络→敏感点 的对应关系。</dd>
+      <dt>实操步骤</dt><dd>在草稿 <code>domain-plugin-template.md</code> 里建 7 行 × 3 列（维度 + LLM + CV）的表，逐格填写并注释依据。</dd>
+      <dt>检验标准</dt><dd>LLM、CV 两列填满且自洽，能解释「为什么 CV 的敏感点是回归头」。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>瓶颈判定推导</h3></div>
+    <div class="head"><span class="num">1</span><h3>补全四领域对照表（本章核心产出）</h3></div>
     <dl>
-      <dt>目标</dt><dd>用算术强度手算，证明 RK3576 上 decode 是带宽瓶颈。</dd>
-      <dt>要掌握</dt><dd>算术强度定义；机器「脊点」算法（6 TOPS ÷ 12~16 GB/s ≈ 375~500）；decode 的 AI 计算。</dd>
-      <dt>实操步骤</dt><dd>写 <code>bottleneck.md</code>：①给出 RK3576 脊点推导（≈316~500）②算 decode AI（≈3）③算 prefill AI ④结论「decode 带宽瓶颈、prefill 偏算力」。</dd>
-      <dt>检验标准</dt><dd>能解释「为什么换更强 NPU 但带宽不变，decode 速度几乎不变」。</dd>
+      <dt>目标</dt><dd>把语音、传感器两列补齐，得到完整的 LLM / CV / 语音 / 传感器四领域 7 维对照表。</dd>
+      <dt>要掌握</dt><dd>语音与传感器领域的输入模态、指标（WER / F1）与量化敏感点。</dd>
+      <dt>实操步骤</dt><dd>在 <code>domain-plugin-template.md</code> 里补齐两列，最终形成 7 行 × 5 列表格；每格一句话，必要时补来源或依据。</dd>
+      <dt>检验标准</dt><dd>表格完整、四领域对同一维度可横向比较；别人拿这张表就能快速判断「这个领域的端侧要点在哪」。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>PagedAttention 原理笔记</h3></div>
+    <div class="head"><span class="num">2</span><h3>用底座五步复述一个领域</h3></div>
     <dl>
-      <dt>目标</dt><dd>用自己的话讲清 PagedAttention 的「分页分块」思想，以及它解决什么问题。</dd>
-      <dt>要掌握</dt><dd>block / block table 的类比；连续分配为什么会碎片化；分页为什么提高并发利用率。</dd>
-      <dt>实操步骤</dt><dd>写 <code>paged_attention.md</code>：①画出「逻辑 token 序列 ↔ block table ↔ 物理 block」的映射示意图（文字框图即可）；②列出分页解决的两个问题（预留浪费、外部碎片）；③写一句端侧取舍（3576 不一定跑 vLLM，但原理要会讲）。</dd>
-      <dt>检验标准</dt><dd>能用「操作系统虚拟内存分页」的类比，30 秒讲清 PagedAttention 是什么、为什么能提高并发显存利用率。</dd>
+      <dt>目标</dt><dd>任选一个领域（推荐 CV 或语音），用通用底座五步把它从「算内存」走到「验收」。</dd>
+      <dt>要掌握</dt><dd>同一套五步在不同领域如何填充不同内容；领域差异落在哪一步。</dd>
+      <dt>实操步骤</dt><dd>写 <code>base_five_steps.md</code>：选一个领域，逐步写「① 算内存（算什么）② 选方案 ③ 判瓶颈 ④ 跑链路 ⑤ 验收」，每步写出该领域的实际内容。</dd>
+      <dt>检验标准</dt><dd>能证明「五步不变、只是内容不同」，并指出该领域差异最大的那一步。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>KV 量化对 PPL 影响的实验设计</h3></div>
+    <div class="head"><span class="num">3</span><h3>换领域推演（迁移练习）</h3></div>
     <dl>
-      <dt>目标</dt><dd>设计一个能对比「权重量化 vs KV 量化对困惑度(PPL)影响」的实验方案——讲清为什么 KV 更敏感。</dd>
-      <dt>要掌握</dt><dd>PPL（困惑度）是衡量语言模型精度的常用指标；控制变量法：权重保持不动，只改 KV 位宽。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_quant_ppl.md</code>：①实验假设（KV 量化对 PPL 比权重量化更敏感）；②变量设计（权重固定 int8，KV 分 fp16 / int8 / int4 三档）；③评价指标（PPL + 在 2K/8K 两个长度上分别测，看误差是否随上下文累积）；④预期结论与端侧取舍建议。</dd>
-      <dt>检验标准</dt><dd>能说清「为什么 KV 量化误差会随上下文累积、比权重量化更敏感」，并给出端侧建议（优先 int8 KV，int4 需谨慎验证）。</dd>
-    </dl>
-  </div>
-  <div class="task pm">
-    <div class="head"><span class="num">4</span><h3>《端侧 LLM 性能分析报告》（一页）</h3></div>
-    <dl>
-      <dt>目标</dt><dd>综合本章产出，写一份能直接交付的性能分析——本章核心产出。</dd>
-      <dt>要掌握</dt><dd>把「KV Cache 大小 + 瓶颈判定 + 优化方向」串成决策。</dd>
-      <dt>实操步骤</dt><dd>写 <code>perf_report.md</code>（一页）：①目标模型/场景 ②KV Cache 实测与手算 ③瓶颈结论（带宽）④优化清单（int4、GQA、KV 量化、PagedAttention、上下文裁剪）⑤预期收益。</dd>
-      <dt>检验标准</dt><dd>别人拿这页能直接判断「这产品能不能跑、卡在哪、怎么优化」。</dd>
-    </dl>
-  </div>
-  <div class="task pm">
-    <div class="head"><span class="num">5</span><h3>秒答训练</h3></div>
-    <dl>
-      <dt>目标</dt><dd>把本章结论练成条件反射（面试必问）。</dd>
-      <dt>实操步骤</dt><dd>自问自答：KV Cache 公式是什么？3B 8K 的 KV 多大？GQA 为什么省内存？算术强度怎么算？RK3576 为什么是带宽瓶颈？decode 的 tok/s 区间是多少（NPU 独占 / 产品）？PagedAttention 解决什么问题？KV 量化为什么比权重量化更敏感？</dd>
-      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
+      <dt>目标</dt><dd>把 LLM 的一个结论，迁移到另一个领域，验证「换皮」思路。</dd>
+      <dt>要掌握</dt><dd>哪些结论可跨领域迁移（如带宽瓶颈、校准集要真实）、哪些必须替换（如敏感点、指标）。</dd>
+      <dt>实操步骤</dt><dd>写 <code>plugin_migration.md</code>：拿「LLM decode 是带宽瓶颈」这条，判断它在 CV / 语音 / 传感器上是否成立、如何改写；再列 3 条「可迁移」与 3 条「必须替换」的案例。</dd>
+      <dt>检验标准</dt><dd>能区分出「底座的普适结论」与「插件专属结论」，迁移时不张冠李戴。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
-    <li><code>kv_cache.md</code> —— KV Cache 手算表（含公式推导 + 长度对照）。</li>
-    <li><code>kv_cache_calc.py</code> —— KV Cache 计算器（参数化、可切换位宽）。</li>
-    <li><code>kv_curve.md</code> —— 上下文长度 → 内存曲线 + 临界点。</li>
-    <li><code>bottleneck.md</code> —— 算术强度推导 + 瓶颈判定。</li>
-    <li><code>paged_attention.md</code> —— PagedAttention 分页原理笔记。</li>
-    <li><code>kv_quant_ppl.md</code> —— KV 量化对 PPL 影响的实验设计。</li>
-    <li><code>perf_report.md</code> —— 端侧 LLM 性能分析报告（一页，核心产出）。</li>
+    <li><code>two_layer_model.md</code> —— 通用底座 / 领域插件两层结构图与说明。</li>
+    <li><code>plugin_template_notes.md</code> —— 领域插件模板 7 维说明书。</li>
+    <li><code>domain-plugin-template.md</code> —— LLM / CV / 语音 / 传感器四领域 7 维对照表（核心产出）。</li>
+    <li><code>base_five_steps.md</code> —— 用底座五步复述一个领域。</li>
+    <li><code>plugin_migration.md</code> —— 换领域推演：可迁移 vs 必须替换。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>秒算 KV Cache：Qwen2.5-3B 每 token 约 36 KB，8K 约 288 MB。</li>
-    <li>能背出公式 <code>2 × layers × kv_heads × head_dim × seq_len × bytes</code> 并解释每项含义。</li>
-    <li>能说出 GQA（K/V=2 头）是内存与精度的折中，比 MHA 省 8 倍。</li>
-    <li>能判断「RK3576 上 decode 是带宽瓶颈」，并用算术强度（3 ≪ 316~500）说明。</li>
-    <li>能讲清 PagedAttention 的分页思想，以及它解决的碎片 / 并发利用率问题。</li>
-    <li>能说清 KV 量化（fp16→int8/int4）减半/四分之一带宽，以及它对 PPL 比权重量化更敏感的原因。</li>
+    <li>能说清「通用能力可迁移、领域差异可枚举」两层模型的含义。</li>
+    <li>能背出领域插件模板的 7 个维度：输入模态 / 代表网络 / 预处理 / 端侧框架 / 评估指标 / 量化敏感点 / 端侧成熟度。</li>
+    <li>能默写四领域对照表：LLM（PPL、离群值）/ CV（mAP·mIoU、回归头）/ 语音（WER、特征动态范围）/ 传感器（F1、小信号幅度）。</li>
+    <li>能讲清「输入定预处理、输出定指标、网络定敏感点」的对应关系。</li>
+    <li>能用底座五步（算内存 → 选方案 → 判瓶颈 → 跑链路 → 验收）复述任意一个领域，并说明「换领域只是换最上面一层皮」。</li>
   </ul>
 
-  <h2>面试话术</h2>
+  <h2>本节要点回顾</h2>
   <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「KV Cache 是为了避免 decode 时重算历史 K/V，公式是 2 乘层数乘 KV 头数乘 head_dim 乘序列长度乘字节数。以 Qwen2.5-3B 为例，36 层、GQA、KV 头数 2、head_dim 128，每 token 约 36 KB，8K 上下文大概 288 MB。判断瓶颈我用算术强度：计算量除以访存量。RK3576 的脊点是 6 TOPS 除以 NPU 独占 12~16 GB/s 约等于 375~500（用理论峰值 19 GB/s 也才约 316），而 decode 每 token 只做 2×3G 的浮点运算却要读 2 GB 权重，算术强度约等于 3，远低于脊点，所以 decode 是带宽瓶颈。tok/s 上限是 NPU 独占 12~16 GB/s 除以 2 GB 约 6~8，产品场景带宽 7~11 GB/s 只有 3.5~5.5。所以优化方向是量化、GQA、KV Cache 量化去少读少存，而不是堆算力。KV Cache 的内存管理上，主流是 PagedAttention——把它切成固定大小的 block 分页分配、用块表映射，思路跟操作系统虚拟内存分页一样，能消除碎片、提高并发时的显存利用率，是 vLLM 的核心机制；端侧不一定直接跑 vLLM，但原理和取舍要讲得清。KV 本身也能量化，fp16 到 int8 直接减半带宽、到 int4 降到四分之一，但 KV 参与每一步注意力、误差会随上下文累积，所以比权重量化对 PPL 更敏感，端侧长上下文我一般先上 int8 KV。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能秒算 KV Cache、能定位算力/带宽瓶颈、能讲清 KV 内存管理与量化——内存测算、瓶颈诊断与 KV 优化能力。</p>
+    <span class="tag">技术口径</span>
+    <p>端侧 AI 的知识分两层：下层是跨领域通用的<strong>通用底座</strong>（算内存 → 选方案 → 判瓶颈 → 跑链路 → 验收），上层是每个领域自己的<strong>领域插件</strong>（输入模态、代表网络、预处理、端侧框架、评估指标、量化敏感点、端侧成熟度）。通用能力可迁移，领域差异可枚举。</p>
+    <p>用 7 维模板把 LLM、CV、语音、传感器四个领域铺成一张对照表，就能横向比出差异：LLM 看 PPL、怕权重·激活离群值；CV 看 mAP / mIoU、怕回归头坐标误差；语音看 WER / 误唤醒率、怕特征动态范围与流式缓存；传感器看准确率 / F1、怕小信号幅度与长尾类别。</p>
+    <p style="margin:0">结论：换领域只是「换最上面一层皮」——输入定预处理、输出定指标、网络定敏感点，三者都会变；而底座五步（算内存、选方案、判瓶颈、跑链路、验收）和带宽口径不变。所以学新领域，是往 7 维格子里填内容，而不是重学一套方法。</p>
   </div>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 内存带宽三档：理论峰值约 <strong>19 GB/s</strong>、NPU 独占 <strong>12~16 GB/s</strong>、产品真实 <strong>7~11 GB/s</strong>——产品场景才是 LLM decode 的硬天花板；算力 6 TOPS 反而不是瓶颈。</li>
-      <li>LPDDR5 双通道才能跑满带宽，工程上要注意内存颗粒与频率配置。</li>
-      <li>KV Cache 与模型权重<strong>抢同一块带宽</strong>，长上下文会同时拖慢 decode。</li>
-      <li>端侧长上下文优先考虑 <strong>KV Cache int8 量化</strong>（直接减半带宽压力）；int4 KV 收益更大但精度风险高，需实测 PPL。</li>
-      <li>PagedAttention 的<strong>分页思想</strong>要会讲，但 3576 的 NPU KV Cache 多由运行时静态管理，不一定直接跑 vLLM——面试讲原理与取舍即可。</li>
+      <li>四个领域在 RK3576 上<strong>最终都走 RKNN</strong>：LLM 走 rkllm（w4a16），CV / 语音 / 传感器走 toolkit2（int8 为主）。</li>
+      <li>平台统一带来一个便利：<strong>底座五步和带宽口径是通用的</strong>——3576 内存 LPDDR5-4800 / 32-bit，理论峰值 ≈19 GB/s；NPU 独占实测 12~16 GB/s；产品场景（多任务抢带宽）7~11 GB/s。</li>
+      <li>领域差异主要落在<strong>预处理与量化敏感点</strong>：CV 盯回归头坐标、语音盯特征动态范围、传感器盯小幅长尾信号，LLM 盯权重·激活离群值。</li>
+      <li>多模态场景（如语音 + LLM）在端侧会<strong>同时抢 NPU 与带宽</strong>，排期与调度要按「底座第③步：判瓶颈」先算清楚。</li>
     </ul>
   </div>
 

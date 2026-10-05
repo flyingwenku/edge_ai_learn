@@ -3,33 +3,53 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>第 2 章：量化粒度与方案对比（讲义 + 作业）</title>
+<title>第 2 章：量化基础与方案对比</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <div class="topbar"><div class="inner">
-  <div class="brand">端侧 <span>AI</span> 架构师 · 冲刺计划</div>
+  <div class="brand">端侧 <span>AI</span> · 公开知识课程</div>
   <nav class="nav">
     <a href="index.html">总览</a>
-    <a href="ch01.html">第 1 章</a>
-    <a href="ch02.html" class="active">第 2 章</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html" class="active">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
   </nav>
 </div></div>
 
 <div class="wrap">
   <a class="back" href="index.html">← 返回总览</a>
-  <h1>第 2 章：量化粒度与方案对比</h1>
-  <p class="lead"><strong>章节目标：</strong>搞懂「<b>粒度决定精度、方案决定落地</b>」——拿到「RK3576 + 3B」，能 3 秒报出该用哪个量化方案。</p>
+  <h1>第 2 章：量化基础与方案对比</h1>
+  <p class="lead"><strong>章节目标：</strong>把上一章「精度 → 字节」的结论补全成完整的方法论——先搞懂量化的数学（位数、对称量化、误差），再掌握「<b>粒度决定精度、方案决定落地</b>」，做到拿到「RK3576 + 3B」就能报出该用哪个量化方案。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业</span>
     <span class="chip">上午 4h · 4 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
-    <span class="chip">产出目录：ch02-granularity</span>
+    <span class="chip">产出目录：ch02-quant</span>
+  </div>
+
+  <div class="callout">
+    <strong>本章主线：</strong>量化原理（位数→字节 / 对称量化数学 / 量化误差）→ 粒度三级 → 三大方案 GPTQ/AWQ/RKNN → GGUF → CV·语音·LLM 量化差异 → PTQ vs QAT。<br>
+    <span class="key">一句话贯穿全章：算法选 GPTQ/AWQ，落地选 RKNN；端侧先 PTQ，掉点超预算再上 QAT。</span>
   </div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
-    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把粒度和方案看懂，不懂就问我。</li>
+    <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把量化数学、粒度和方案看懂，不懂就记下问题。</li>
     <li><strong>第 2 步 做板书练习：</strong>讲义里的空表 / 手算自己填，做完展开「答案」自查。</li>
     <li><strong>第 3 步 交作业：</strong>到「练习（交作业）」写脚本、出报告。</li>
     <li><strong>第 4 步 自测：</strong>对着「检验标准」自问自答，答不出就是没学会。</li>
@@ -37,11 +57,68 @@
 
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
-    <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>第 1 章你学会了「模型多大」。但同样 int4，做法不同，精度能差一大截——差别就在<b>量化粒度</b>。搞懂粒度 + 三个主流方案，你就能回答面试官最爱问的那句：<span class="key">「这个 3B 模型你打算怎么量化、为什么？」</span></p>
+    <h3><span class="tag-lesson">讲解</span>0. 本节学什么</h3>
+    <p>第 1 章你学会了「模型多大」。这一章补上量化的另外半张图：<b>同样标成 int4，做法不同，精度能差一大截</b>——差别就在量化数学与量化粒度。搞懂「位数→字节 + 对称量化 + 粒度 + 方案」，你就能回答那句最核心的问题：<span class="key">「这个 3B 模型你打算怎么量化、为什么？」</span></p>
 
-    <h3><span class="tag-lesson">讲解</span>1. 板书①：量化粒度三级</h3>
-    <p>回顾：量化的关键是那把「尺子」——<b>scale</b>。粒度 = <b>一把尺子管多少个权重</b>。</p>
+    <h3><span class="tag-lesson">讲解</span>1. 量化原理：位数 → 字节</h3>
+    <p>模型里每个「参数」本来用 32 位小数（float32）存。量化就是<b>用更少的位去存它</b>：32 位 → 8 位 → 4 位。</p>
+    <p>类比：一张高清照片（fp32）压成小图（int4），文件小很多、传得快，但细节会糊一点。</p>
+    <div class="board">量化带来的变化：
+  位数 ↓  →  内存 ↓  →  带宽需求 ↓  →  速度 ↑
+                代价：精度 ↓（答得没那么准）
+
+架构师的口诀：<span class="k">「能用低精度，就别用高精度」</span>——
+只要效果掉得可接受，int4 永远优先于 fp16。</div>
+    <p>换算只有一条：<span class="key">1 Byte = 8 bit</span>。把「每个参数多少位」除以 8 就是字节数。</p>
+    <div class="board">精度      位数        ÷8          每参数字节
+─────────────────────────────────────────────
+fp32      32 bit   →   32/8    =   <span class="g">4.0 Byte</span>
+fp16      16 bit   →   16/8    =   <span class="g">2.0 Byte</span>
+bf16      16 bit   →   16/8    =   <span class="g">2.0 Byte</span>
+int8       8 bit   →   8/8     =   <span class="g">1.0 Byte</span>
+int4       4 bit   →   4/8     =   <span class="k">0.5 Byte</span>   ← 关键
+
+<span class="k">int4 = 0.5 字节</span>：因为 4 位装不下 1 个字节，
+所以硬件把 <span class="g">2 个参数打包进 1 个字节</span>（叫 packed）。
+这就是为什么「4 位」听起来像省了一半，其实是省到 1/8。</div>
+    <div class="callout"><strong>bf16 vs fp16（只记结论，不推公式）：</strong>字节数一样（都是 2B）。fp16 精度细但范围窄、容易溢出；bf16 范围大、更稳，现代大模型/端侧更偏好 <span class="key">bf16</span>。选型时默认 bf16 就对了。</div>
+
+    <h3><span class="tag-lesson">讲解</span>2. 板书①：对称量化数学（三步）</h3>
+    <p>对称量化就三步，把它想成「<b>找一把尺子，把所有数对齐到刻度上</b>」：</p>
+    <div class="board">给定一批数字 x，量化到 int8：
+  qmax   = 127                     # 8 位有符号最大整数
+  scale  = max(|x|) / qmax         # 这把尺子的刻度
+  q      = round(x / scale)        # 量化：小数 → 整数
+  x'     = q * scale               # 反量化：整数 → 近似小数
+
+<span class="k">举例</span> x = [-1.2, 0.5, 3.0]
+  max(|x|) = 3.0 → scale = 3.0/127 ≈ 0.0236
+  q = round([-50.8, 21.2, 127]) = [-51, 21, 127]
+  x' = [-1.204, 0.496, 3.0]
+  误差 = [-0.004, -0.004, 0]  ← 很小，因为 8 位刻度够细
+
+<span class="k">换成 int4（qmax=7）：</span>刻度变粗 → 误差明显变大
+  scale = 3.0/7 ≈ 0.4286  →  x' = [-1.29, 0.43, 3.0]
+  int4 误差 ≫ int8 误差  ← 这就是低精度的代价</div>
+
+    <h3><span class="tag-lesson">讲解</span>3. 板书②：量化误差从哪来</h3>
+    <p>量化误差的本质是<b>刻度太粗，小数被「四舍五入」到最近的刻度上</b>。位数越少、刻度越粗，误差越大。</p>
+    <div class="board"><span class="k">误差的两大来源</span>
+  ① 舍入误差：x' = round(x/scale)·scale，单点最大误差 ≈ scale/2
+      位数 ↓ → qmax ↓ → scale ↑ → 误差 ↑
+  ② 范围失配：scale 由 max|x| 决定，个别 outlier 会撑大 scale，
+      把正常权重全压在 0 附近（第 5 节详谈）
+
+<span class="k">实测口径（对同一批权重做对称量化）</span>
+  int8 最大误差 ≈ 0.0196
+  int4 最大误差 ≈ 0.357      → <span class="r">差约 18 倍</span>
+
+<span class="k">结论：低精度不是「略微掉一点」，而是误差量级上一个台阶。</span>
+所以 int4 必须靠后文的 group-wise + 好方案来补。</div>
+    <div class="callout"><strong>对称量化的关键参数：</strong>scale 是唯一要额外存的东西。<span class="key">「尺子」用几把、每把管多少权重</span>就是下一节要讲的<b>粒度</b>。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4. 板书③：量化粒度三级</h3>
+    <p>量化的关键是那把「尺子」——<b>scale</b>。粒度 = <b>一把尺子管多少个权重</b>。</p>
     <div class="board"><span class="k">粒度三级（从粗到细）</span>
 
 ① per-tensor   整个权重矩阵 <span class="r">共用 1 把尺子</span>
@@ -56,7 +133,7 @@
 <span class="k">一句话：尺子越细，精度越高，但要额外存 scale。</span>
 粒度本质是「精度 ↔ 存储开销」的权衡。</div>
 
-    <h3><span class="tag-lesson">讲解</span>2. 板书②：为什么 int4 必须 group-wise</h3>
+    <h3><span class="tag-lesson">讲解</span>5. 板书④：为什么 int4 必须 group-wise</h3>
     <p>核心矛盾：<b>权重里有个别「离群点」（outlier）数值特别大</b>。一把尺子若被 outlier 撑大，其他正常的权重就全被压到 0 附近，精度直接崩。看数字：</p>
     <div class="board"><span class="k">权重 W = [0.10, 0.15, -0.12, 0.09, 10.0]   （最后一个是 outlier）</span>
 int4 对称量化：qmax = 7，刻度只有 -7 ~ 7，共 15 档
@@ -84,7 +161,7 @@ int4 对称量化：qmax = 7，刻度只有 -7 ~ 7，共 15 档
 （若 group_size=32：开销 = 2/16 = 12.5%，太亏）
 <span class="k">所以 128 是「精度够用 + 开销小」的工程折中。</span></div>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：三大方案对比（GPTQ / AWQ / RKNN）</h3>
+    <h3><span class="tag-lesson">讲解</span>6. 板书⑤：三大方案对比（GPTQ / AWQ / RKNN）</h3>
     <p>粒度是「怎么切」，方案是「用哪条生产线」。三条线目标不同，别混：</p>
     <table class="tight">
       <thead><tr><th>方案</th><th>类型</th><th>典型精度</th><th>要校准集?</th><th>产物</th><th>端侧/NPU 适配</th></tr></thead>
@@ -94,7 +171,7 @@ int4 对称量化：qmax = 7，刻度只有 -7 ~ 7，共 15 档
         <tr><td><b>RKNN</b></td><td>瑞芯微官方工具链，per-channel PTQ</td><td>int8 为主</td><td>是</td><td><code>.rknn</code></td><td><b>强（3576 原生）</b></td></tr>
       </tbody>
     </table>
-    <div class="board"><span class="k">记住这条分工，面试直接说：</span>
+    <div class="board"><span class="k">记住这条分工：</span>
   GPTQ / AWQ  =「<span class="r">通用量化算法</span>」，精度好、压缩狠，
                  但产物是给 GPU/CPU 框架的，<span class="r">NPU 不直接吃</span>。
   RKNN        =「<span class="g">平台落地工具</span>」，直接编译成 NPU 能跑的 .rknn，
@@ -103,7 +180,7 @@ int4 对称量化：qmax = 7，刻度只有 -7 ~ 7，共 15 档
 <span class="k">一句话：算法选 GPTQ/AWQ，落地选 RKNN。</span>
 在 RK3576 上，最终一定走 RKNN。</div>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：GGUF 格式（llama.cpp）</h3>
+    <h3><span class="tag-lesson">讲解</span>7. 板书⑥：GGUF 格式（llama.cpp）</h3>
     <p>GGUF 是 llama.cpp 的模型格式，端侧/CPU 验证最常用。它用<b>块量化</b>（每 32 个一组）实现 group-wise。名字看着乱，看两个就够：</p>
     <table class="tight">
       <thead><tr><th>格式</th><th>位宽/每权重</th><th>3B 体积</th><th>特点</th></tr></thead>
@@ -120,31 +197,31 @@ int4 对称量化：qmax = 7，刻度只有 -7 ~ 7，共 15 档
 <span class="k">Q4_K_M 是「质量/体积」甜点</span>：比 Q4_0 聪明（重要层用高精度），
 端侧跑 3B 通常就选它做跨平台验证。</div>
 
-    <h3><span class="tag-lesson">讲解</span>5. 板书⑤：选型决策（背下来）</h3>
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑦：选型决策（背下来）</h3>
     <div class="board"><span class="k">场景 → 方案</span>
 
 RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU 原生、最稳）
 跨平台 / CPU 验证  → <span class="g">llama.cpp + GGUF Q4_K_M</span>
 云侧 / 大模型压榨   → GPTQ / AWQ
 
-<span class="k">被问「RK3576 + 3B 用什么量化」→ 标准答：</b>
+<span class="k">标准答法（RK3576 + 3B 用什么量化）：</span>
 「优先 RKNN int8 per-channel，直接吃 NPU；如果要 int4 且想跨平台验证，
 用 llama.cpp GGUF Q4_K_M。GPTQ/AWQ 精度好，但 NPU 不直接支持，
 不如用 RKNN。」</div>
 
-    <h3><span class="tag-lesson">讲解</span>6. 板书⑥：CV 量化 vs LLM 量化</h3>
-    <p>前面讲的是「通用量化」。但真正的端侧业务里，<b>CV 模型（检测 / 分割）和 LLM 的量化痛点完全不同</b>——一个是坐标回归，一个是词表预测。搞混了就会「LLM 那套调法用在检测上，mAP 掉一半」。</p>
-    <div class="board"><span class="k">CV 量化 vs LLM 量化：目标不同，敏感点不同</span>
+    <h3><span class="tag-lesson">讲解</span>9. 板书⑧：CV / 语音 / LLM 量化差异</h3>
+    <p>前面讲的是「通用量化」。但真正的端侧业务里，<b>CV（检测/分割）、语音（ASR/KWS）和 LLM 的量化痛点完全不同</b>——一个盯坐标回归、一个盯时序特征、一个盯词表预测。搞混了就会「LLM 那套调法用在检测上，mAP 掉一半」。</p>
+    <div class="board"><span class="k">三类负载：目标不同，敏感点不同</span>
 
-              CV 量化（检测/分割）           LLM 量化
-输入          图像（连续、空间相关）          文本 token（离散）
-输出          bbox 坐标 + 掩码/类别          词表概率分布
-关键头        回归头（做连续值回归）         最后 logits 层
-量化最怕      <span class="r">回归头：连续值，误差直接进坐标</span>   <span class="k">权重/激活里的 outlier</span>
-主流评估      <span class="g">mAP（检测）/ mIoU（分割）</span>    <span class="g">PPL（困惑度）</span>
-对齐手法      回归头/敏感层保高精度          权重分组 + 保护重要通道
+             CV（检测/分割）        语音（ASR/KWS）           LLM
+输入         图像（连续、空间相关）  音频帧/Mel 谱（时序，动态范围大） 文本 token（离散）
+输出         bbox 坐标 + 掩码/类别  字符/音素序列、关键词命中   词表概率分布
+关键头       回归头（连续值回归）    声学特征 + CTC/attention  最后 logits 层
+量化最怕     <span class="r">回归头：连续值误差直进坐标</span> <span class="r">激活动态范围大、流式状态累积</span> <span class="k">权重/激活里的 outlier</span>
+主流评估     <span class="g">mAP / mIoU</span>       <span class="g">WER（识别）/ 唤醒率</span>  <span class="g">PPL（困惑度）</span>
+对齐手法     回归头/敏感层保高精度     逐帧+流式校准、注意静音段   权重分组 + 保护重要通道
 
-<span class="k">一句话：CV 盯"坐标回归准不准"，LLM 盯"权重离群值"。</span></div>
+<span class="k">一句话：CV 盯"坐标回归准不准"，语音盯"时序特征与实时性"，LLM 盯"权重离群值"。</span></div>
     <p>为什么<b>回归头对量化更敏感、分类头相对鲁棒</b>？用手算把差别算出来：</p>
     <div class="board"><span class="k">回归头 vs 分类头：量化噪声谁更能忍？</span>
 
@@ -162,14 +239,15 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
    <span class="g">结论就不变</span>——量化噪声被"离散化"吃掉了 → 相对鲁棒。
 
 <span class="k">结论：量化检测/分割模型，重点盯回归头与坐标/掩码精度；</span>
-<span class="k">      量化 LLM，重点处理权重与激活的离群值。</span></div>
+<span class="k">      量化 LLM，重点处理权重与激活的离群值；语音则额外盯流式与实时。</span></div>
     <div class="board"><span class="k">评估指标别搞混（量化前后跑同一套，看"相对掉点"）</span>
   CV  ：mAP@IoU（检测）、mIoU（分割）——"框得准不准、分得对不对"
+  语音：WER（识别率）、唤醒率/误唤醒——"听没听对、该不该唤醒"
   LLM ：PPL（困惑度）——"预测下一个词有多犹豫"，越大越差
-<span class="k">CV 看绝对值（mAP 0.42→0.38 就是掉点），LLM 看 PPL 变化率。</span></div>
+<span class="k">CV/语音看绝对值（mAP 0.42→0.38 就是掉点），LLM 看 PPL 变化率。</span></div>
 
-    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：校准集工程要点</h3>
-    <p>PTQ（后面板书⑧）不训练，全靠<b>校准集</b>去"看一眼"每层的真实激活分布。校准集选得好不好，直接决定量化的成败。</p>
+    <h3><span class="tag-lesson">讲解</span>10. 板书⑨：校准集工程要点</h3>
+    <p>PTQ（下一节）不训练，全靠<b>校准集</b>去"看一眼"每层的真实激活分布。校准集选得好不好，直接决定量化的成败。</p>
     <div class="board"><span class="k">校准集（calibration set）是 PTQ 的命门</span>
 
 作用：PTQ 不训练，靠校准集"看一眼"真实激活分布，
@@ -190,7 +268,7 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
 
 <span class="g">校准不对 = 量化白做。评估掉点，第一件事先怀疑校准集。</span></div>
 
-    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：PTQ vs QAT 对比</h3>
+    <h3><span class="tag-lesson">讲解</span>11. 板书⑩：PTQ vs QAT 对比</h3>
     <p>前面三个方案（GPTQ/AWQ/RKNN）本质都是<b>训练后量化</b>。再往上还有一层决策：要不要动训练？这就是 PTQ 与 QAT 的分野。</p>
     <div class="board"><span class="k">PTQ（Post-Training Quantization，训练后量化）</span>
   做法：模型已训练好，只用校准集估量化参数，<span class="k">不碰训练</span>
@@ -209,7 +287,7 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
   端侧落地 → 先 PTQ；PTQ 掉点超预算 → 才上 QAT。
   （RKNN 原生支持 PTQ；QAT 需自建训练 pipeline 再导入）</div>
 
-    <h3><span class="tag-lesson">讲解</span>9. 板书填空：PTQ / QAT 决策空表</h3>
+    <h3><span class="tag-lesson">讲解</span>12. 板书填空：PTQ / QAT 决策空表</h3>
     <p>先自己填，再展开答案。</p>
     <table class="tight">
       <thead><tr><th>维度</th><th>PTQ</th><th>QAT</th></tr></thead>
@@ -233,118 +311,125 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
   </div>
 
   <h2>练习（交作业）</h2>
-  <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
+  <p class="lead">讲义看懂后动手产出，做完贴回来批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
   <div class="task">
-    <div class="head"><span class="num">1</span><h3>粒度三级对比笔记</h3></div>
+    <div class="head"><span class="num">1</span><h3>Python 手写对称量化器</h3></div>
     <dl>
-      <dt>目标</dt><dd>把板书①整理成一张表：粒度 / 每把尺子管多少 / 常见精度 / 优缺点。</dd>
-      <dt>要掌握</dt><dd>三级的区别；为什么 int8 用 per-channel、int4 用 group-wise。</dd>
-      <dt>实操步骤</dt><dd>写 <code>granularity.md</code>：三级对比表 + 「group_size=128 的 scale 开销 3.1%」手算过程。</dd>
+      <dt>目标</dt><dd>按讲义板书①，从零实现 float → int → float。</dd>
+      <dt>要掌握</dt><dd>scale = max|x| / qmax；对称量化三步；误差来源。</dd>
+      <dt>实操步骤</dt><dd>写 <code>quantize.py</code>：函数 <code>quantize(x,bits)</code> / <code>dequantize(q,scale)</code>；用随机数据跑通，打印最大/平均误差；对比 int8 与 int4。</dd>
+      <dt>检验标准</dt><dd>脚本跑通无报错，能指着输出说「int4 误差明显大于 int8」。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">2</span><h3>量化误差实测对照</h3></div>
+    <dl>
+      <dt>目标</dt><dd>用代码把板书②的误差结论复现出来：int8 与 int4 的误差量级差多少。</dd>
+      <dt>要掌握</dt><dd>舍入误差随位数变化的规律；范围失配（outlier 撑大 scale）的影响。</dd>
+      <dt>实操步骤</dt><dd>写 <code>quant_error.md</code>：对同一批随机权重分别做 int8 / int4 对称量化，记录最大误差与平均误差，算出倍数差，并验证「int4 误差约为 int8 的十几倍」。</dd>
+      <dt>检验标准</dt><dd>能讲清误差的两个来源，并能用实测数据支撑「低精度误差上一台阶」。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>粒度三级对比笔记</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书③④整理成一张表：粒度 / 每把尺子管多少 / 常见精度 / 优缺点。</dd>
+      <dt>要掌握</dt><dd>三级的区别；为什么 int8 用 per-channel、int4 用 group-wise；group_size=128 的 scale 开销 3.1% 手算过程。</dd>
+      <dt>实操步骤</dt><dd>写 <code>granularity.md</code>：三级对比表 + 「group_size=128 的 scale 开销 3.1%」手算步骤。</dd>
       <dt>检验标准</dt><dd>合上讲义，能说出三级谁最省、谁最准、int4 为什么不能用 per-tensor。</dd>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">2</span><h3>用 Python 复现 outlier 陷阱（核心实操）</h3></div>
+    <div class="head"><span class="num">4</span><h3>用 Python 复现 outlier 陷阱（核心实操）</h3></div>
     <dl>
       <dt>目标</dt><dd>用代码证明「per-tensor 会被 outlier 一锅端，group-wise 能救」。</dd>
-      <dt>要掌握</dt><dd>把板书②的数字用代码跑出来；量化误差对比。</dd>
-      <dt>实操步骤</dt><dd>写 <code>granularity_demo.py</code>：取 <code>W=[0.10,0.15,-0.12,0.09,10.0]</code>，分别做 per-tensor 和 group-wise(=4) 的 int4 量化，打印量化值、反量化值、最大误差；对比误差差距。复用第 1 章的 quantize 思路。</dd>
+      <dt>要掌握</dt><dd>把板书④的数字用代码跑出来；量化误差对比。</dd>
+      <dt>实操步骤</dt><dd>写 <code>granularity_demo.py</code>：取 <code>W=[0.10,0.15,-0.12,0.09,10.0]</code>，分别做 per-tensor 和 group-wise(=4) 的 int4 量化，打印量化值、反量化值、最大误差；对比误差差距。复用第 1 个任务的量化函数。</dd>
       <dt>检验标准</dt><dd>脚本跑通，输出能看出「per-tensor 小权重全变 0，group-wise 几乎无损」。</dd>
-    </dl>
-  </div>
-  <div class="task">
-    <div class="head"><span class="num">3</span><h3>三方案对比表</h3></div>
-    <dl>
-      <dt>目标</dt><dd>把板书③扩成你的选型表：GPTQ / AWQ / RKNN。</dd>
-      <dt>要掌握</dt><dd>三者「类型 / 精度 / 要不要校准集 / 产物 / NPU 适配」的差别。</dd>
-      <dt>实操步骤</dt><dd>写 <code>scheme_compare.md</code>：5 列对比表 + 一句话「谁适合端侧落地」。</dd>
-      <dt>检验标准</dt><dd>能说出「GPTQ/AWQ 是通用算法、RKNN 是平台落地工具，端侧最终走 RKNN」。</dd>
-    </dl>
-  </div>
-  <div class="task">
-    <div class="head"><span class="num">4</span><h3>CV 量化 vs LLM 量化（含 bbox 敏感度手算）</h3></div>
-    <dl>
-      <dt>目标</dt><dd>把板书⑥整理成对比笔记，并手算证明「回归头比分类头对量化更敏感」。</dd>
-      <dt>要掌握</dt><dd>CV（mAP/mIoU）与 LLM（PPL）评估口径的差异；回归头的连续值误差如何放大成坐标/像素误差；分类头为什么相对鲁棒。</dd>
-      <dt>实操步骤</dt><dd>写 <code>cv_vs_llm.md</code>：① CV/LLM 量化对比表（输入/输出/关键头/敏感点/评估指标）② 用板书数字复算 scale=0.004 与 scale=0.02 两种情形下的坐标误差，并换算到 640px 像素 ③ 一句话解释「为什么分类头更鲁棒」。</dd>
-      <dt>检验标准</dt><dd>能说清「量化 CV 模型要盯回归头与坐标精度，量化 LLM 要盯权重离群值」，并分别报出 mAP / PPL 的口径。</dd>
     </dl>
   </div>
 
   <h3 style="margin-top:24px"><span class="tag-hw">下午</span>任务 4h</h3>
   <div class="task pm">
-    <div class="head"><span class="num">1</span><h3>GGUF 格式对比报告</h3></div>
+    <div class="head"><span class="num">1</span><h3>三方案 + GGUF 对比报告</h3></div>
     <dl>
-      <dt>目标</dt><dd>搞清 Q8_0 与 Q4_K_M 的位宽、体积、质量差异。</dd>
-      <dt>要掌握</dt><dd>块量化=group-wise；为什么是 8.5/4.5 bit 而不是 8/4；Q4_K_M 为什么是甜点。</dd>
-      <dt>实操步骤</dt><dd>写 <code>gguf_compare.md</code>：Q8_0 vs Q4_K_M 对比表（位宽/3B 体积/质量/适用场景）；如能上网，查 llama.cpp 官方量化说明补充证据。</dd>
-      <dt>检验标准</dt><dd>能解释「Q4_K_M 体积约 1.9GB，质量损失可接受，端侧跨平台首选」。</dd>
+      <dt>目标</dt><dd>把板书⑤⑥扩成你的选型资料：GPTQ / AWQ / RKNN 三方案表，外加 Q8_0 vs Q4_K_M。</dd>
+      <dt>要掌握</dt><dd>三者「类型 / 精度 / 要不要校准集 / 产物 / NPU 适配」的差别；块量化=group-wise；为什么是 8.5/4.5 bit 而不是 8/4。</dd>
+      <dt>实操步骤</dt><dd>写 <code>scheme_compare.md</code>：① 三方案 5 列对比表 + 一句话「谁适合端侧落地」 ② Q8_0 vs Q4_K_M 对比表（位宽/3B 体积/质量/适用场景）。</dd>
+      <dt>检验标准</dt><dd>能说出「GPTQ/AWQ 是通用算法、RKNN 是平台落地工具，端侧最终走 RKNN」，并解释 Q4_K_M 为什么是甜点。</dd>
     </dl>
   </div>
   <div class="task pm">
-    <div class="head"><span class="num">2</span><h3>《RK3576 + 3B 量化方案选型报告》（一页）</h3></div>
+    <div class="head"><span class="num">2</span><h3>CV / 语音 / LLM 量化差异（含 bbox 敏感度手算）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书⑧整理成对比笔记，并手算证明「回归头比分类头对量化更敏感」。</dd>
+      <dt>要掌握</dt><dd>CV（mAP/mIoU）、语音（WER/唤醒率）、LLM（PPL）评估口径的差异；回归头的连续值误差如何放大成坐标/像素误差；分类头为什么相对鲁棒。</dd>
+      <dt>实操步骤</dt><dd>写 <code>cv_speech_llm.md</code>：① CV/语音/LLM 三类量化对比表（输入/输出/关键头/敏感点/评估指标）② 用板书数字复算 scale=0.004 与 scale=0.02 两种情形下的坐标误差，并换算到 640px 像素 ③ 一句话解释「为什么分类头更鲁棒」。</dd>
+      <dt>检验标准</dt><dd>能讲清「量化 CV 模型要盯回归头与坐标精度、语音要盯流式与实时、量化 LLM 要盯权重离群值」，并分别报出 mAP / WER / PPL 的口径。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">3</span><h3>校准集工程 + PTQ/QAT 决策笔记</h3></div>
+    <dl>
+      <dt>目标</dt><dd>把板书⑨⑩整理成一份可执行的「校准集清单 + 量化路线决策」，直接能用于检测/分割/语音模型。</dd>
+      <dt>要掌握</dt><dd>校准集为什么必须覆盖真实输入分布；校准集选错的后果；PTQ 与 QAT 在成本/精度/适用条件下的取舍。</dd>
+      <dt>实操步骤</dt><dd>写 <code>calib_ptq_qat.md</code>：① 校准集工程要点清单 ② 「校准集选错 → 掉点」的 2 个具体场景 ③ PTQ vs QAT 对比表 + 一段「端侧先 PTQ、掉点再 QAT」的决策说明。</dd>
+      <dt>检验标准</dt><dd>能按真实分布挑出合规校准集；能用一句话定当场该走 PTQ 还是 QAT。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">4</span><h3>《RK3576 + 3B 量化方案选型报告》（一页）</h3></div>
     <dl>
       <dt>目标</dt><dd>综合上面所有产出，给一个明确结论——这是本章核心产出。</dd>
-      <dt>要掌握</dt><dd>把「粒度 + 方案 + GGUF」串成一个决策。</dd>
+      <dt>要掌握</dt><dd>把「数学 + 粒度 + 方案 + GGUF + PTQ/QAT」串成一个决策。</dd>
       <dt>实操步骤</dt><dd>写 <code>selection_report.md</code>（一页）：①场景 ②候选方案 ③取舍理由 ④最终结论（RKNN int8 per-channel 落地；int4 跨平台用 GGUF Q4_K_M）⑤风险（int4 在 NPU 支持有限）。</dd>
       <dt>检验标准</dt><dd>别人拿这页，不用问你就能照做——这就是架构文档的标准。</dd>
-    </dl>
-  </div>
-  <div class="task pm">
-    <div class="head"><span class="num">3</span><h3>秒答训练</h3></div>
-    <dl>
-      <dt>目标</dt><dd>把本章结论练成条件反射。</dd>
-      <dt>实操步骤</dt><dd>自问自答：int4 为什么要 group-wise？group_size 多少、开销多少？GPTQ/AWQ/RKNN 谁落地端侧？RK3576+3B 用什么量化？Q4_K_M 多少 GB？</dd>
-      <dt>检验标准</dt><dd>每题 3 秒内、不翻资料答出。</dd>
-    </dl>
-  </div>
-  <div class="task pm">
-    <div class="head"><span class="num">4</span><h3>校准集工程 + PTQ/QAT 决策笔记</h3></div>
-    <dl>
-      <dt>目标</dt><dd>把板书⑦⑧整理成一份可执行的「校准集清单 + 量化路线决策」，直接能用于检测/分割模型。</dd>
-      <dt>要掌握</dt><dd>校准集为什么必须覆盖真实输入分布；校准集选错的后果；PTQ 与 QAT 在成本/精度/适用条件下的取舍。</dd>
-      <dt>实操步骤</dt><dd>写 <code>calib_ptq_qat.md</code>：① 校准集工程要点清单（覆盖真实分布 / 数量 / 多样性 / 剔除偏样本）② 「校准集选错 → 掉点」的 2 个具体场景 ③ PTQ vs QAT 对比表 + 一段「端侧先 PTQ、掉点再 QAT」的决策说明。</dd>
-      <dt>检验标准</dt><dd>能按真实分布挑出合规校准集；能用一句话定当场该走 PTQ 还是 QAT。</dd>
     </dl>
   </div>
 
   <h2>当日产出（要落盘）</h2>
   <ul class="clean">
+    <li><code>quantize.py</code> —— 手写对称量化器，跑通并打印误差。</li>
+    <li><code>quant_error.md</code> —— int8 / int4 量化误差实测对照。</li>
     <li><code>granularity.md</code> —— 粒度三级对比 + group-wise 开销手算。</li>
     <li><code>granularity_demo.py</code> —— outlier 陷阱的代码复现（per-tensor vs group-wise）。</li>
-    <li><code>scheme_compare.md</code> —— GPTQ / AWQ / RKNN 三方案对比。</li>
-    <li><code>cv_vs_llm.md</code> —— CV 量化 vs LLM 量化对比 + bbox 回归敏感度手算。</li>
-    <li><code>gguf_compare.md</code> —— Q8_0 vs Q4_K_M 对比。</li>
+    <li><code>scheme_compare.md</code> —— GPTQ / AWQ / RKNN 三方案 + GGUF Q8_0/Q4_K_M 对比。</li>
+    <li><code>cv_speech_llm.md</code> —— CV / 语音 / LLM 量化差异 + bbox 回归敏感度手算。</li>
     <li><code>calib_ptq_qat.md</code> —— 校准集工程要点 + PTQ/QAT 决策笔记。</li>
     <li><code>selection_report.md</code> —— RK3576 + 3B 量化方案选型报告（一页，核心产出）。</li>
   </ul>
 
   <h2>检验标准（自测）</h2>
   <ul class="clean">
-    <li>说出 int4 必须 group-wise 的原因（outlier 撑大 scale → 小权重归零）。</li>
-    <li>说出 group_size=128 的 scale 开销约 3.1%。</li>
-    <li>给「RK3576 + 3B」秒答「RKNN int8 per-channel；int4 跨平台用 GGUF Q4_K_M」。</li>
-    <li>能讲清 GPTQ/AWQ 是算法、RKNN 是平台落地工具。</li>
-    <li>能说清 CV 量化（mAP/mIoU）与 LLM 量化（PPL）的评估差异，以及回归头为什么比分类头更敏感。</li>
+    <li>能写出对称量化三步（scale = max|x|/qmax → round → 反量化），并说清误差的两个来源。</li>
+    <li>能讲清 int4 必须 group-wise 的原因（outlier 撑大 scale → 小权重归零）。</li>
+    <li>能说出 group_size=128 的 scale 开销约 3.1%。</li>
+    <li>给「RK3576 + 3B」能答「RKNN int8 per-channel；int4 跨平台用 GGUF Q4_K_M」。</li>
+    <li>能独立讲清 GPTQ/AWQ 是算法、RKNN 是平台落地工具。</li>
+    <li>能讲清 CV（mAP/mIoU）、语音（WER/唤醒率）与 LLM（PPL）量化评估的差异，以及回归头为什么比分类头更敏感。</li>
     <li>能解释校准集为什么必须覆盖真实输入分布，以及选错校准集会怎样拖垮检测/回归精度。</li>
     <li>能对比 PTQ 与 QAT：端侧先 PTQ，精度不达标才上 QAT。</li>
   </ul>
 
-  <h2>面试话术</h2>
-  <div class="quote">
-    <span class="tag">可直接背</span>
-    <p>「量化粒度决定精度：int8 用 per-channel 就够，int4 必须 group-wise，group_size 取 128，因为 4 位只有 15 个刻度、权重的 outlier 会把 scale 撑爆，不分组小权重直接归零。方案上，GPTQ 和 AWQ 是通用量化算法、精度好，但 NPU 不直接支持；端侧落地我用 RKNN 做 int8 per-channel，直接吃 NPU；如果需要 int4 且要跨平台验证，就用 llama.cpp 的 GGUF Q4_K_M，3B 大概 1.9GB。」</p>
-    <p>「CV 和 LLM 的量化痛点不一样：CV 检测/分割是坐标回归，回归头对量化最敏感，quantization noise 会直接放大成 bbox 坐标误差，评估看 mAP 或 mIoU；LLM 是词表预测，怕的是权重和激活的离群值，评估看 PPL。落地主要走 PTQ：用覆盖真实输入分布的校准集估激活范围，快、成本低；但校准集选不好——比如只有白天没有夜景——激活范围估偏，检测精度直接崩。如果 PTQ 掉点超出预算，才上 QAT，用伪量化把量化误差训进去，精度更好但要完整训练流程和算力。」</p>
-    <p style="margin:0"><strong>能力标签：</strong>能说清「怎么量化、为什么这么量化、在哪落地」——量化选型能力。</p>
-  </div>
+  <h2>本节要点回顾</h2>
+  <ul class="clean">
+    <li>量化就是「用更少的位存参数」：位数↓ → 内存↓ → 带宽需求↓ → 速度↑，代价是精度↓。</li>
+    <li>精度换算：1 字节 = 8 位；int4 = 0.5 字节（两个参数打包进一个字节）。</li>
+    <li>对称量化三步：scale = max|x|/qmax → q = round(x/scale) → x' = q·scale；误差来自舍入与范围失配。</li>
+    <li>粒度三级：per-tensor（1 把尺子）→ per-channel（int8 标配）→ group-wise（int4 标配）；尺子越细精度越高，但要额外存 scale。</li>
+    <li>int4 必须 group-wise：outlier 会撑大 scale 把小权重归零；group_size=128 的 scale 开销约 3.1%。</li>
+    <li>三大方案：GPTQ / AWQ 是通用量化算法（NPU 不直接吃），RKNN 是平台落地工具（3576 原生）；跨平台验证用 GGUF，Q4_K_M 是甜点。</li>
+    <li>三类负载敏感点不同：CV 盯回归头与坐标、语音盯流式与实时、LLM 盯权重/激活离群值。</li>
+    <li>落地路线：端侧先 PTQ（快、便宜，靠校准集），掉点超预算再上 QAT（精度好，但要训练流程）。</li>
+  </ul>
 
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
       <li>3576 的 NPU 是 <strong>int8 定点加速器为主</strong>，int4 支持有限且多为 int8 模拟，所以生产上优先 <strong>int8 per-channel</strong>。</li>
-      <li>RKNN 量化必须给<strong>校准集</strong>，且要覆盖真实输入分布（后面第 9 章会用真实数据校准）。</li>
+      <li>RKNN 量化必须给<strong>校准集</strong>，且要覆盖真实输入分布（后续部署实战章节会用真实数据校准）。</li>
       <li>GPTQ/AWQ 的产物不能直接塞给 NPU，需要转 RKNN——所以端侧落地环节认 RKNN。</li>
       <li>RKNN 走的就是 <strong>PTQ</strong>：校准集质量直接决定线上 mAP。做检测/分割时，校准集务必覆盖<strong>夜景、小目标、强光/逆光、难例</strong>等真实场景，否则激活范围估偏直接拖垮精度。</li>
       <li><strong>回归头更敏感</strong>：必要时对回归头/敏感层保留更高精度（混合量化），别一刀切 int8。</li>
@@ -352,7 +437,7 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
     </ul>
   </div>
 
-  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就说「卡住了」+ 具体问题</div>
+  <div class="footer">先听懂讲义 → 填板书练习 → 交作业 → 自测 · 卡住就记下具体问题，逐个弄懂</div>
 </div>
 </body>
 </html>
