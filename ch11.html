@@ -31,7 +31,7 @@
   <p class="lead"><strong>章节目标：</strong>把前 10 章的零件组装成一个<b>既能「看」也能「说」的端侧 AI demo v0.1</b>——摄像头 <b>YOLO 类小模型</b>负责感知（检测），本地 <b>1.5B/3B int4 LLM</b>负责交互（对话），RK3576 上无网跑通双任务，并留下双任务基准性能记录。这是你面试最硬的作品。</p>
   <div class="pill-row">
     <span class="chip">状态：进行中</span>
-    <span class="chip">上午 4h · 4 个任务</span>
+    <span class="chip">上午 4h · 5 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch11-project-demo</span>
   </div>
@@ -367,6 +367,42 @@ cat /sys/kernel/debug/rknpu/load
 四层架构、CLI 和 OpenAI 兼容 HTTP 都能用，本地断网可用，
 首 token 约 1.2s、decode 约 6 tok/s（产品 3.5~5.5、NPU 独占 6~8）、检测单帧约 12ms、
 并发内存约 4.8GB，瓶颈在内存带宽。」</div>
+
+    <h3><span class="tag-lesson">讲解</span>8. 板书⑧：CV 全链路（感知支线：数据 → mAP）</h3>
+    <p>CV 在端侧很成熟，<b>厂商工具链已经把量化做掉大半</b>，所以这一节的深度是「<span class="key">全链路能跑通、能讲清</span>」，不深挖量化公式。你要能独立走完这 6 步，并知道每步的坑在哪。</p>
+    <div class="board"><span class="k">CV 全链路 6 步（检测为例）</span>
+
+① 任务与选型
+   检测 / 分类 / 分割；端侧首选 YOLOv8n / PP-YOLOE / MobileNet 这类轻量模型。
+   为什么 CV 端侧成熟：模型小、算子规整、工具链（RKNN）支持好。
+
+② 数据与标注
+   数据集组织；标注格式 COCO(json) / YOLO(txt)。
+   端侧 demo 通常直接用公开数据集或官方预训练，不必自己重训。
+
+③ 拿模型
+   下载官方预训练权重（.pt / .onnx），端侧一般只做"转换 + 量化"，不训练。
+
+④ 导出 ONNX
+   PyTorch → ONNX（torch.onnx.export）；注意 opset 版本、动态 shape、
+   算子兼容（转 RKNN 报错多半出在这）。
+
+⑤ RKNN 转换 + 量化（<span class="g">厂商工具链主场</span>）
+   rknn-toolkit2：配置 dataset(校准集) + quantized_dtype(int8)；
+   <span class="g">量化算法/粒度厂商默认已做（int8 per-channel），你不用手写</span>。
+   你只需把关两件事：<span class="k">校准集是否覆盖真实场景</span> + <span class="k">量化后精度是否达标</span>。
+
+⑥ 部署 + 评估
+   板上跑通推理 → 算 <span class="g">mAP</span>（量化前 vs 量化后）→ 看 FPS / 延迟。
+   精度掉得狠 → 换校准集 / 提高量化精度 / 对少数敏感层保 fp16（混合量化）。</div>
+
+    <div class="board"><span class="k">CV 量化 vs LLM 量化（理解差异即可，不深挖）</span>
+  指标不同：CV 看 mAP（检测框准不准），LLM 看 PPL（预测下一个词准不准）。
+  敏感点不同：检测/分割里 <span class="r">回归头（bbox 坐标）对量化更敏感</span>，
+              分类头相对鲁棒。
+  校准集：CV 用<span class="g">真实图片</span>校准；选不好 → 激活范围估偏 → mAP 掉。</div>
+
+    <div class="callout"><strong>一句话记住：</strong>CV 端侧落地，<span class="key">量化交给工具链，你把关校准集和 mAP 验收</span>——这就是"全链路"的正确深度。</div>
   </div>
 
   <h2>练习（交作业）</h2>
@@ -407,6 +443,15 @@ cat /sys/kernel/debug/rknpu/load
       <dt>要掌握</dt><dd>V4L2/视频取帧；RKNN 检测封装（输入 resize/归一化）；检测结果 JSON 化；单帧延迟怎么测。</dd>
       <dt>实操步骤</dt><dd>写 <code>cv/capture.py</code> + <code>cv/detector.py</code>：从摄像头或一段视频取帧，调 RKNN 检测，把每帧的 <code>{cls,conf,box}</code> 写入 <code>detect_log.json</code>；统计单帧延迟（跑 100 帧取均值/P95）。</dd>
       <dt>检验标准</dt><dd>单帧延迟 &lt; 33ms（具备 ≥30fps 潜力）；<code>detect_log.json</code> 含类别/置信度/坐标；对无目标帧能正确输出空列表。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">5</span><h3>CV 全链路串通（数据 → ONNX → RKNN → mAP · 本章新增）</h3></div>
+    <dl>
+      <dt>目标</dt><dd>按板书⑧独立走完检测模型全链路，拿到量化前后 mAP 对比。</dd>
+      <dt>要掌握</dt><dd>ONNX 导出注意点；RKNN 量化配置（校准集 / quantized_dtype）；用 mAP 验收；理解 CV 与 LLM 量化的指标差异。</dd>
+      <dt>实操步骤</dt><dd>① 取 YOLOv8n 预训练权重导出 ONNX；② 写 <code>cv/convert_yolo.py</code>（rknn-toolkit2：指定校准集图片目录、int8）；③ 板上跑通并按 <code>cv/eval_map.py</code> 算量化前后 mAP；④ 写 <code>cv_pipeline.md</code>：6 步 + 踩到的坑 + mAP 对比 + 校准集选择理由。</dd>
+      <dt>检验标准</dt><dd>能独立复现「ONNX → RKNN 转换 → 板上推理 → mAP 评估」；量化后 mAP 掉幅可量化（&lt;2~3 个点可接受）；能说清校准集怎么选、为什么要覆盖真实分布。</dd>
     </dl>
   </div>
 
@@ -454,6 +499,7 @@ cat /sys/kernel/debug/rknpu/load
     <li><code>models/README.md</code> —— 模型清单（LLM + 检测：名称/格式/大小/来源配置）。</li>
     <li><code>ui/chat_loop.py</code> + <code>first_run.log</code> —— 最小对话循环与首次跑通记录。</li>
     <li><code>cv/capture.py</code> + <code>cv/detector.py</code> + <code>detect_log.json</code> —— 摄像头检测链路与结果日志。</li>
+    <li><code>cv/convert_yolo.py</code> + <code>cv/eval_map.py</code> + <code>cv_pipeline.md</code> —— CV 全链路（ONNX→RKNN→mAP）与量化前后精度对比。</li>
     <li><code>service/server.py</code> + <code>curl_test.txt</code> —— OpenAI 兼容 HTTP + 检测服务与测试。</li>
     <li><code>service/orchestrator.py</code> —— 双任务调度（时间片 / 事件驱动）。</li>
     <li><code>scripts/bench_llm.sh</code> / <code>bench_cv.sh</code> / <code>bench_dual.sh</code> + <code>bench_report.md</code> —— 基准采集与报告。</li>
@@ -470,13 +516,15 @@ cat /sys/kernel/debug/rknpu/load
     <li>能判断双任务瓶颈：主瓶颈是 LLM 内存带宽，次要是 NPU 时间片，算力与容量都不是瓶颈。</li>
     <li>能脱口说出最小对话循环的三步（load → run → callback 流式）。</li>
     <li>能解释「为什么做成 OpenAI 兼容接口」。</li>
+    <li>能独立陈述 CV 全链路 6 步，并说清「量化交给工具链、自己把关校准集与 mAP 验收」。</li>
+    <li>能说出 CV 与 LLM 量化指标差异（mAP vs PPL），以及回归头为何比分类头更怕量化。</li>
     <li>demo 能在本地无网启动、能看能说，双任务基准有数字。</li>
   </ul>
 
   <h2>面试话术</h2>
   <div class="quote">
     <span class="tag">可直接背</span>
-    <p>「我做了一个基于 RK3576 的端侧 AI 助手，是一个「感知 + 交互」双任务 demo：感知用 RKNN 部署 YOLOv8n int8 做摄像头检测，单帧约 12ms；交互用 rknn-llm 部署 Qwen2.5-3B 的 w4a16 int4 做本地对话。两个模型共享同一块 NPU 和 16GB 内存——内存上检测模型才几 MB，真正的开销是 LLM 权重 2GB 加 KV Cache，双任务合计约 4.8GB；时间片上检测只占 18%~36%，冲突点在 LLM 的长 prefill 会饿到 CV，所以我用事件驱动加保底帧率来调度。架构分四层，层间单向依赖，交互既有 CLI 也有 OpenAI 兼容的 HTTP 接口，还有 /detect 感知接口，本地断网能跑。基准上首 token 约 1.2 秒、decode 约 6 tok/s（产品 3.5~5.5、NPU 独占 6~8）、带宽利用率约 75%，结论是瓶颈在内存带宽而不是算力，所以下一步会试批处理、前缀缓存和投机解码继续压延迟。」</p>
+    <p>「我做了一个基于 RK3576 的端侧 AI 助手，是一个「感知 + 交互」双任务 demo：感知用 RKNN 部署 YOLOv8n int8 做摄像头检测，单帧约 12ms；交互用 rknn-llm 部署 Qwen2.5-3B 的 w4a16 int4 做本地对话。两个模型共享同一块 NPU 和 16GB 内存——内存上检测模型才几 MB，真正的开销是 LLM 权重 2GB 加 KV Cache，双任务合计约 4.8GB；时间片上检测只占 18%~36%，冲突点在 LLM 的长 prefill 会饿到 CV，所以我用事件驱动加保底帧率来调度。架构分四层，层间单向依赖，交互既有 CLI 也有 OpenAI 兼容的 HTTP 接口，还有 /detect 感知接口，本地断网能跑。CV 那条链我从数据标注到 ONNX 导出、RKNN 量化再到 mAP 验收都独立走过，量化主要靠厂商工具链、我把关校准集和精度验收。基准上首 token 约 1.2 秒、decode 约 6 tok/s（产品 3.5~5.5、NPU 独占 6~8）、带宽利用率约 75%，结论是瓶颈在内存带宽而不是算力，所以下一步会试批处理、前缀缓存和投机解码继续压延迟。」</p>
     <p style="margin:0"><strong>能力标签：</strong>能独立交付一个可演示、可复现、有性能数字的「多模态端侧」项目——最硬的面试作品。</p>
   </div>
 
@@ -486,6 +534,7 @@ cat /sys/kernel/debug/rknpu/load
       <li>模型放在本地 <code>models/</code>（eMMC/NVMe），加载后常驻内存；<strong>首次 load 较慢</strong>，别误判为卡死。</li>
       <li>3576 内存 16GB，但 demo + 系统 + KV + 检测缓冲 + 其它服务要一起算；<strong>3B int4 建议上下文 ≤4K</strong>，8K 会让 KV 涨到 2.3GB。</li>
       <li>检测模型务必走 <strong>RKNN Toolkit（int8 .rknn）</strong>，不要用 rkllm——rkllm 只吃 LLM。</li>
+      <li>CV 量化不用自己写：RKNN Toolkit 已封装 int8 per-channel，<strong>你只需给对校准集、并用 mAP 验收</strong>；掉点厉害时对少数敏感层保 fp16（混合量化）。</li>
       <li>NPU 是共享资源，CV 与 LLM 会<strong>抢时间片</strong>：给 CV 设保底帧率，LLM prefill 尽量分块；NPU 多核时优先给两者分核。</li>
       <li>NPU 单核场景下，服务端并发（batch）能把带宽利用率从 ~75% 拉到 ~98%，是提升吞吐的正道。</li>
       <li>demo 用 <code>1.5B</code> 做断网降级/极速模式、<code>3B</code> 做质量模式——<strong>一套代码两个档位</strong>，面试时是加分项。</li>
