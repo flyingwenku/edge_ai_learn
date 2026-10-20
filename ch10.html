@@ -36,11 +36,13 @@
   <h1>第 10 章：CV 检测全链路与量化敏感点</h1>
   <p class="lead"><strong>章节目标：</strong>把计算机视觉检测的端侧链路整条走通——<b>数据 → 拿模型 → 导出 ONNX → RKNN 转量化 → 板上部署 → mAP 验收</b>，并讲清 CV 量化与 LLM 量化的关键差异。核心心法一句话：<span class="key">量化交给厂商工具链，你把关校准集与精度验收</span>。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 4 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch10-cv</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>CV 六步链路、YOLO 三段结构、COCO/YOLO 标注换算、mAP 定义、回归头比分类头敏感的手算均为通用理论。 <span class="fact measured">实测</span>本板实测：yolov8n@640 int8 e2e 19.48 ms / 51.3 FPS（rknn_run 14.94ms）；11n 22.30→15.33 ms（双核+零拷贝）；6 类算法（检测/分割/人脸/姿态/OCR/语音）跑通。 <span class="fact dev">偏差</span>原文体积（6MB）与帧率（12ms/83FPS）对不上，已更正；并补上 airockchip 优化版 ONNX 这条真实路线。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -68,7 +70,7 @@
                   端侧代表：PP-LiteSeg / 轻量 DeepLab
 
 <span class="k">端侧选型三原则：参数少 + 算子规整 + 有现成预训练</span>
-  检测：YOLOv8n（约 3.2M 参数，fp32 约 6MB）最通用
+  检测：YOLOv8n（约 3.2M 参数，fp32 ≈12.8MB；导出的 ONNX 文件 13MB）最通用
         PP-YOLOE-s（国产 Paddle 系，工具链友好）
   分类：MobileNetV3（约 2.5M）
   分割：PP-LiteSeg（端侧偏重，优先做检测/分类）
@@ -147,6 +149,13 @@ torch.onnx.export(model, dummy_input, "yolov8n.onnx",
 <span class="k">验证一步不能省：</span>
   onnx.checker 过一遍 + onnxruntime 跑一张图，
   与 PyTorch 输出对齐（误差 &lt; 1e-3）才算导出成功。</div>
+    <div class="callout dev">
+      <strong>与实测的偏差（照上面做会卡住）：</strong>上面是「原版 ONNX + 自写后处理」的路线。
+      本板实际跑通的是 <b>airockchip 优化版 ONNX</b>——尾部子图被裁掉，并追加 <code>ReduceSum + Clip</code> 剪枝分支，
+      转成 RKNN 后有 <b>9 个输出</b>：每层 <code>box[64]</code> / <code>cls[80]</code> / <code>score_sum[1]</code>。
+      用 ultralytics 原版导出，后处理结构对不上，也拿不到 score_sum 快速剪枝。<b>两条路线不能混用</b>；
+      换模型前先确认 <code>n_output / 3 == output_per_branch</code>。
+    </div>
 
     <h3><span class="tag-lesson">讲解</span>5. 板书⑤：RKNN 转换 + 量化（厂商工具链主场）</h3>
     <p>这一步是「厂商已经把量化做掉大半」的地方。你要理解配置项在干什么，然后把关两个关键点。</p>
@@ -185,13 +194,33 @@ rknn.export_rknn("yolov8n_int8.rknn")
   量化前 mAP、量化后 mAP、掉幅、单帧延迟 / FPS
   例：mAP@0.5  0.42 → 0.40  （掉 2 个点，<span class="g">可接受</span>）
       mAP@0.5:0.95  0.28 → 0.25
-      单帧 12 ms → 约 83 FPS（瑞芯微 3576 int8 参考量级）
+      <span class="g">640 默认（单核）：19.5 ms → 51.3 FPS</span>
+      <span class="g">512 + 双核 + conf 0.35：12.2 ms → 81.9 FPS</span>
+      （同一张 bus.jpg，e2e 不含解码；55 FPS→82 FPS 是三项优化叠加，不是默认值）
 
 <span class="k">掉点厉害时按顺序排查：</span>
   ① 先怀疑<span class="r">校准集</span>（分布是否覆盖真实场景）
   ② 预处理对齐（mean/std、letterbox、RGB/BGR）
   ③ 对回归头 / 敏感层保 fp16（<span class="g">混合量化</span>）</div>
     <div class="formula">mAP = 各类别 AP 在类别上的平均 · AP = PR 曲线下面积</div>
+
+    <h3><span class="tag-lesson">讲解</span>6b. 板书⑥b：板端 Runtime 八条硬约定</h3>
+    <p>上面讲的是「转换 + 验收」。真正写自己的 Runtime 代码时，还有 8 条张量级约定——错一条就是精度崩或性能崩。以下全部来自本板实测，教程类资料一般不写。</p>
+    <div class="board"><span class="k">八条硬约定（int8 输出 / NCHW 布局）</span>
+① 反量化：<span class="g">float = (int8 − zp) × scale</span>
+   每个张量的 zp/scale 都不同（输入 zp=−128/scale=1/255；box 输出 zp=−44/scale=0.135）
+   <span class="r">不能统一用 1/255</span>
+② 输出是 NCHW：跨通道步进 = <span class="g">grid_h × grid_w</span>，不是 +1
+③ 三个输出一组：box[64] / cls[80] / <span class="g">score_sum[1]</span>
+   换模型先验 <code>n_output / 3 == output_per_branch</code>
+④ letterbox 三量必须保留：<span class="g">scale / x_pad / y_pad</span>
+   少一个，坐标回映就整体偏移
+⑤ DFL 解码：每条边的 16 个 logits → softmax → 求期望 → 亚像素偏移
+⑥ RGA 要求宽高 4/16 对齐；不对齐会<span class="r">静默</span>回退 CPU
+   （日志只有一行 <code>convert image use cpu</code>，功能正常、性能下降）
+⑦ <code>rknn_outputs_release()</code> 必调；漏了就是内存泄漏
+⑧ <code>librknnrt.so</code> 必须与板端 NPU 驱动匹配，否则 <code>rknn_init</code> 直接失败</div>
+    <div class="callout"><strong>一句话：</strong>转换只决定「能不能跑」，这 8 条决定「跑得对不对、快不快」。其中 ① 和 ③ 是最常见的精度事故来源。</div>
 
     <h3><span class="tag-lesson">讲解</span>7. 板书⑦：CV 量化 vs LLM 量化差异</h3>
     <p>前面第 2 章讲过通用量化，这里用 CV 的口径再对一次——<b>搞混了就会「LLM 那套调法用在检测上，mAP 掉一半」</b>。</p>

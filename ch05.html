@@ -36,11 +36,13 @@
   <h1>第 5 章：领域插件方法论与对照</h1>
   <p class="lead"><strong>章节目标：</strong>把「通用底座」和「领域差异」拆成两层——通用能力可迁移、领域差异可枚举；用一张 <b>7 维「领域插件模板」</b> 加一张 <b>LLM / CV / 语音 / 传感器四领域对照表</b>，让「换领域」变成「换最上面一层皮」，底座方法不动。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
     <span class="chip">产出目录：ch05-domain</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>两层模型、7 维插件模板、四领域对照（输入→预处理、输出→指标、网络→敏感点）均为通用理论。 <span class="fact measured">实测</span>本板已验证：LLM（rkllm）、CV（toolkit2 8 类算法）、语音（whisper/mms_tts fp16）三条链路可跑；传感器未上板。 <span class="fact dev">偏差</span>原文「LLM 成熟到 3B int4 可落」按 3.8GiB 不成立，已改为 0.5B~1.5B；成熟度需标板型。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -96,7 +98,7 @@
         <tr><td><b>端侧框架</b></td><td>RKNN（rkllm，w4a16）</td><td>RKNN toolkit2（int8，per-channel）</td><td>RKNN（int8）</td><td>RKNN（int8）或 CPU（超轻量）</td></tr>
         <tr><td><b>评估指标</b></td><td>PPL / 任务准确率</td><td>mAP（检测）/ mIoU（分割）</td><td>WER（ASR）/ 准确率 + 误唤醒率（KWS）</td><td>准确率 / F1</td></tr>
         <tr><td><b>量化敏感点</b></td><td>权重·激活离群值</td><td>回归头（坐标 / 掩码）</td><td>输入特征动态范围 · 流式缓存</td><td>小信号幅度 · 长尾类别</td></tr>
-        <tr><td><b>端侧成熟度</b></td><td>成熟（3B int4 可落）</td><td>最成熟</td><td>成熟</td><td>轻量模型最成熟</td></tr>
+        <tr><td><b>端侧成熟度</b></td><td>成熟（0.5B~1.5B 可落；3B 需 ≥8GB）</td><td>最成熟</td><td>成熟</td><td>轻量模型最成熟</td></tr>
       </tbody>
     </table>
     <div class="board"><span class="k">一眼看出差异在哪</span>
@@ -242,7 +244,7 @@
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>四个领域在 RK3576 上<strong>最终都走 RKNN</strong>：LLM 走 rkllm（w4a16），CV / 语音 / 传感器走 toolkit2（int8 为主）。</li>
+      <li>四个领域在 RK3576 上<strong>最终都走 RKNN</strong>：LLM 走 rkllm（默认 W8A8；W4A16+grq 备选），CV / 语音 / 传感器走 toolkit2（int8 为主）。</li>
       <li>平台统一带来一个便利：<strong>底座五步和带宽口径是通用的</strong>——3576 内存 LPDDR5-4800 / 32-bit，理论峰值 ≈19 GB/s；NPU 独占实测 12~16 GB/s；产品场景（多任务抢带宽）7~11 GB/s。</li>
       <li>领域差异主要落在<strong>预处理与量化敏感点</strong>：CV 盯回归头坐标、语音盯特征动态范围、传感器盯小幅长尾信号，LLM 盯权重·激活离群值。</li>
       <li>多模态场景（如语音 + LLM）在端侧会<strong>同时抢 NPU 与带宽</strong>，排期与调度要按「底座第③步：判瓶颈」先算清楚。</li>

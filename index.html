@@ -39,13 +39,26 @@
   <div class="grid cols-3" style="margin-top:14px">
     <div class="card"><div class="k">开发板</div><div class="v">RK3576</div></div>
     <div class="card"><div class="k">NPU 算力</div><div class="v">6 TOPS int8</div></div>
-    <div class="card"><div class="k">内存</div><div class="v">最高 16 GB LPDDR5</div></div>
+    <div class="card"><div class="k">内存 · SoC 上限</div><div class="v">16 GB LPDDR5</div></div>
+    <div class="card"><div class="k">内存 · 本板实测</div><div class="v">3.8 GiB</div></div>
     <div class="card"><div class="k">内存带宽·峰值</div><div class="v">≈19 GB/s</div></div>
     <div class="card"><div class="k">带宽·NPU 独占</div><div class="v">12~16 GB/s</div></div>
     <div class="card"><div class="k">带宽·产品场景</div><div class="v">7~11 GB/s</div></div>
     <div class="card"><div class="k">CPU</div><div class="v">4×A72 + 4×A53</div></div>
     <div class="card"><div class="k">内存类型</div><div class="v">LPDDR5-4800 / 32-bit</div></div>
     <div class="card"><div class="k">量化工具体系</div><div class="v">RKNN / rknn-llm</div></div>
+  </div>
+
+  <div class="callout">
+    <strong>标注约定（全站适用）：</strong>
+    <span class="fact theory">理论</span>公式、推导、平台通用结论，未在本板逐项实测；
+    <span class="fact measured">实测</span>本板（RK3576 / 3.8 GiB）跑出来的数字，附条件与口径；
+    <span class="fact dev">偏差</span>与实测不符、已更正的旧说法（保留原文便于对照）。
+  </div>
+
+  <div class="callout dev">
+    <strong>先分清两个内存口径：</strong>「SoC 支持 ≤16 GB」是 RK3576 芯片规格，「本板 3.8 GiB」是 <code>free -m</code> 实测。
+    本站所有内存预算、模型选型、并发排布，<b>默认按 3.8 GiB 计算</b>；凡写 16 GB 的地方都是行业通用假设，落地前必须换算。
   </div>
 
   <h2>章节目录</h2>
@@ -69,6 +82,38 @@
       <tr><td>15</td><td><a href="ch15.html">端侧系统架构与方案演练</a></td><td>Ⅲ 系统与架构</td></tr>
       <tr><td>16</td><td><a href="ch16.html">项目实战：多模态端侧助手</a></td><td>Ⅲ 系统与架构</td></tr>
       <tr><td>17</td><td><a href="ch17.html">项目收尾、稳定性与架构文档</a></td><td>Ⅲ 系统与架构</td></tr>
+    </tbody>
+  </table>
+
+  <h2>附录</h2>
+  <div class="grid cols-2">
+    <div class="card">
+      <div class="k">附录 A · 实测</div>
+      <p><a href="appendix-probe.html" style="color:var(--accent)">端侧表征复用与决策头</a></p>
+      <p style="color:var(--muted)">只跑 prefill 取 hidden state，用 896 维向量做决策，单次 161~316ms。含可复现性、各向异性、置信度校准三个反直觉结论。</p>
+    </div>
+    <div class="card">
+      <div class="k">口径</div>
+      <p>附录不是第 18 章，不占课程主线；它是「第 9 章之后可以往哪走」的一条实测支线。</p>
+      <p style="color:var(--muted)">正文 17 章结构不变。</p>
+    </div>
+  </div>
+
+  <h2>已知偏差与更正（2026-10-20）</h2>
+  <p class="lead">本轮以 9 份实测文档为基准复核全站，以下 9 处旧说法与实测不符，已在对应章节就地更正并加
+    <span class="fact dev">偏差</span> 标注。此表保留，便于与旧版对照。</p>
+  <table class="rev">
+    <thead><tr><th>位置</th><th>原说法</th><th>实测 / 更正</th></tr></thead>
+    <tbody>
+      <tr><td>ch04 / ch14 / ch15 / ch16</td><td>3576 是单核 NPU，num_npu_core 固定 1</td><td>2 核（core0/core1，max core mask = 3）；默认 auto 只用 1 核，显式开双核 e2e −21.7%</td></tr>
+      <tr><td>ch01 / ch06 / ch09 / ch15 / ch16</td><td>16 GB 可当可用内存做部署判断</td><td>SoC 上限 16 GB；本板实测 3.8 GiB，模型档位与并发表全部按 3.8 GiB 重算</td></tr>
+      <tr><td>ch16</td><td>KV/token 0.28 MB，4K ≈ 1.2 GB</td><td>GQA（kv_heads=2）实为 36 KB/token，4K ≈ 144 MB，8K ≈ 288 MB</td></tr>
+      <tr><td>ch13</td><td>LLM 走 rknn_model_zoo + toolkit2 → .rknn</td><td>LLM 走 rknn-llm → .rkllm；rkllm 只收 HF 目录或 GGUF，不收 ONNX</td></tr>
+      <tr><td>ch02 / ch04 / ch05</td><td>int4 支持有限、多为 int8 模拟</td><td>W4A16 原生支持：0.5B 实测 527 MB / decode 36.87 tok/s，但必须配 grq</td></tr>
+      <tr><td>ch04</td><td>默认 w4a16 + normal</td><td>该组合严重精度退化；可用组合是 W4A16+grq 或 W8A8+normal</td></tr>
+      <tr><td>ch10</td><td>YOLOv8n fp32 ≈6 MB；默认 12 ms/83 FPS</td><td>fp32 ≈12.8 MB（ONNX 13 MB）；640 默认 19.5 ms/51 FPS，12.2 ms/82 FPS 是 512+双核+conf0.35</td></tr>
+      <tr><td>ch10</td><td>ultralytics 原版 ONNX 直接转 RKNN</td><td>RKNN 生态用 airockchip 优化版：9 个输出、带 score_sum 剪枝分支，后处理结构不同</td></tr>
+      <tr><td>ch14</td><td>主推 batch 与投机解码</td><td>rkllm 板端单实例无 batch；NPU 不支持投机解码（llama.cpp 在 3576 上只跑 CPU）</td></tr>
     </tbody>
   </table>
 

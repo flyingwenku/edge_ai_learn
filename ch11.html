@@ -36,11 +36,13 @@
   <h1>第 11 章：语音 ASR/KWS 与流式推理</h1>
   <p class="lead"><strong>章节目标：</strong>搞懂端侧语音的三大任务与代表网络，理解<b>前端特征（MFCC / fbank）为什么这么算</b>，分清<b>流式与整段推理</b>的取舍，并能用现成 KWS 模型跑通一条「拾音 → 特征 → 推理 → 判定」的链路。一句话记住：<span class="key">唤醒词 / KWS 是端侧最便宜、最成熟的语音入口，模型只有几百 KB</span>。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 4 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch11-speech</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>三大任务、Conformer/RNN-T/KWS 网络、MFCC/fbank 三步、流式 vs 整段、WER/CER 手算均为通用理论。 <span class="fact measured">实测</span>本板 whisper（enc 48M + dec 156M，fp16）中文 RTF 0.235、英文 0.219；mms_tts RTF 0.074；均为双模型 pipeline 跑 NPU。 <span class="fact dev">偏差</span>原文「encoder 走 NPU、解码另配」偏窄，实际 enc+dec 都在 NPU；且缺 RTF 这个第一验收指标，已补。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -82,9 +84,9 @@
               和全局（长句依赖）。当前主流 ASR 声学模型。
   RNN-T    ：输入/预测/联合网络三件套，天然支持<span class="g">流式</span>，
               边听边出字，实时性好。
-  Whisper-encoder：Whisper 的编码器部分，特征强、鲁棒，
-              端侧可取"encoder 走 NPU + 解码另配"的组合。
-              （Whisper 整体偏大，端侧一般取它的编码器思路）
+  Whisper：encoder + decoder <span class="g">两个模型都转 RKNN</span>（本板实测 48M + 156M），
+              <span class="r">必须 fp16</span>（int8 不支持）；只转 encoder 跑不通。
+              中文 RTF 0.235、英文 0.219（<1 即实时）
 
 <span class="k">KWS 代表网络（都很小，几百 KB 级）</span>
 
@@ -190,7 +192,10 @@
 <span class="k">一对矛盾：</span>调低触发阈值 → 唤醒率↑ 但误唤醒也↑；
              调高阈值 → 误唤醒↓ 但"叫不醒"。要按产品体验取平衡点。</div>
 
-    <h3><span class="tag-lesson">讲解</span>7. 板书⑦：成熟度——为什么先从 KWS 入手</h3>
+        <div class="callout"><strong>补充指标 · RTF（实时率）＝ 处理耗时 ÷ 音频时长。</strong>
+      <b>RTF &lt; 1 才算实时</b>，这是产品验收里比 WER 更常被问的数。本板实测 whisper 中文 0.235 / 英文 0.219、mms_tts 0.074。</div>
+
+<h3><span class="tag-lesson">讲解</span>7. 板书⑦：成熟度——为什么先从 KWS 入手</h3>
     <div class="board"><span class="k">端侧语音的成熟度阶梯</span>
 
   最成熟  ★★★  KWS / 唤醒词：模型几百 KB、mW 级、可常年在线

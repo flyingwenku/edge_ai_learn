@@ -36,11 +36,13 @@
   <h1>第 16 章：项目实战：多模态端侧助手</h1>
   <p class="lead"><strong>章节目标：</strong>把前 15 章的零件组装成一个<b>既能「看」也能「说」的端侧 AI demo v0.1</b>——摄像头 <b>YOLO 类小模型</b>负责感知（检测），本地 <b>1.5B/3B int4 LLM</b>负责交互（对话），RK3576 上无网跑通双任务，并留下双任务基准性能记录。这是把前面所有知识落到一个可演示工程上的关键一步。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 4 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch16-project</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>四层架构、双任务数据流、OpenAI 兼容接口、内存/时间片/带宽三类瓶颈判定均为通用方法论。 <span class="fact measured">实测</span>本板实测：0.5B W8A8 811MB / 峰值 0.73GB / decode 20.07 tok/s；yolov8n 640 e2e 19.5ms；双核 −21.7%。 <span class="fact dev">偏差</span>原文 KV 算错 8 倍、按 16GB 排预算、3B w4a16 默认、单核 batch——四处已重写为 3.8 GiB + GQA + W8A8 + 单实例。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -53,7 +55,7 @@
   <h2>课堂讲义（板书）</h2>
   <div class="lesson">
     <h3><span class="tag-lesson">讲解</span>0. 这节课到底学什么</h3>
-    <p>前面各章是零件：会算内存、会量化、会转换、会调优。这一章是把零件<b>拼成一台能跑的机器</b>。这版 demo 有两个目标——端侧本地、断网、<b>既能「看」（摄像头检测）又能「说」（本地对话）</b>，而且能拿出数字证明<b>两个模型在同一块 16GB 板子上共存</b>还跑得动。</p>
+    <p>前面各章是零件：会算内存、会量化、会转换、会调优。这一章是把零件<b>拼成一台能跑的机器</b>。这版 demo 有两个目标——端侧本地、断网、<b>既能「看」（摄像头检测）又能「说」（本地对话）</b>，而且能拿出数字证明<b>两个模型在同一块板子（本板实测 3.8 GiB）上共存</b>还跑得动。</p>
     <div class="callout"><strong>交付物定义很硬：</strong>一段命令能启动、一个 HTTP 服务既<b>能问（对话）</b>又<b>能看（检测）</b>、本地无网能答、有一张<b>双任务基准表</b>。做到这几条，才算把前 15 章的知识收成了一个可运行的多模态端侧工程。</div>
 
     <h3><span class="tag-lesson">讲解</span>1. 板书①：项目分层架构（四层）</h3>
@@ -105,20 +107,20 @@ LLM 管"说"（语义、交互、可解释）。
 <span class="g">两者共享 NPU + 内存，谁也离不开谁，但要抢资源。</span></div>
 
     <p><b>第一个要算的账：内存预算。</b>很多人一听「双模型」就慌，其实检测模型小得可怜。看数：</p>
-    <div class="board"><span class="k">双任务内存预算（3B LLM + YOLOv8n，4K 上下文）</span>
+    <div class="board"><span class="k">双任务内存预算（Qwen2.5-3B GQA + YOLOv8n，4K 上下文）</span>
 
   LLM 权重 w4a16              ≈ 2.000 GB
-  LLM KV Cache @4K            ≈ 1.200 GB
+  LLM KV Cache @4K            ≈ <span class="g">0.144 GB</span>   ← 36 KB/token × 4096（GQA kv=2）
   LLM runtime + 对齐          ≈ 0.500 GB
-  CV 模型 YOLOv8n int8        ≈ 0.005 GB   ← 才 5 MB！
+  CV 模型 YOLOv8n int8        ≈ 0.013 GB
   CV runtime / 激活 / 帧缓冲  ≈ 0.045 GB
-  系统 + 其它进程             ≈ 1.000 GB
+  系统 + 其它进程             ≈ 0.800 GB
   ─────────────────────────────────────────
-  合计                        ≈ <span class="g">4.75 GB</span>（16GB 板：宽裕）
+  合计                        ≈ <span class="r">3.50 GB</span>
 
-<span class="k">关键结论：</span>CV 检测模型只有几 MB，
-真正吃内存的仍是 <span class="r">LLM 的权重 + KV</span>。
-所以"双任务内存不够"的锅，永远先算 LLM 那笔账。</div>
+<span class="r">本板实测 3.8 GiB → 3.5 GB 已贴顶，实际跑不起来。</span>
+<span class="g">真实项目落到 0.5B W8A8：811 MB 模型 + 峰值 0.73 GB，余量充足。</span>
+3B 只在 ≥8 GB 板子上成立。</div>
 
     <p><b>第二个要算的账：NPU 时间片。</b>RK3576 只有一块 NPU，CV 和 LLM 都得排队用它。先把各自的占用算清楚：</p>
     <div class="board"><span class="k">NPU 时间片与并发</span>
@@ -148,7 +150,7 @@ LLM(Qwen2.5-3B) decode：NPU 独占 6~8 t/s → 单 token ≈ 125~167 ms（带�
   NPU 时间片：并发时 CV 被 LLM 长 prefill 饿到 → <span class="k">次要瓶颈</span>
   内存带宽  ：LLM decode 每 token 读 2GB → NPU 独占 12~16 GB/s → 6~8 t/s
              产品场景被摄/屏抢到 7~11 GB/s → 3.5~5.5 t/s → <span class="r">主瓶颈</span>
-  内存容量  ：双任务 ≈ 4.75GB / 16GB → <span class="g">不是瓶颈</span>
+  内存容量  ：双任务 ≈ 3.45GB / 本板 3.8 GiB → <span class="r">已贴顶，是硬约束</span>
 
 <span class="k">一句话：</span>双任务 demo 的瓶颈，主因仍是 <span class="r">LLM 的内存带宽</span>；
 CV 只是"抢时间片"的次要矛盾。优化先压 LLM 带宽（量化 / 前缀缓存），
@@ -205,7 +207,7 @@ edge-agent/
     <p><b>基准也要记双任务的账。</b>单任务基线 + 并发掉幅，缺一不可——只报单任务数字，等于没说清共存是否可行。</p>
     <div class="board"><span class="k">双任务基准记录模板</span>
 
-【环境】板型= RK3576 ; NPU= 6 TOPS ; 内存= 16GB
+【环境】板型= RK3576 ; NPU= 6 TOPS ; 内存= 3.8GiB（实测）
         LLM= qwen2.5-3b-w4a16 ; ctx= 4096
         CV= yolov8n-int8 ; 输入= 640 ; 帧率目标= 15fps
 【单任务基线】
@@ -223,43 +225,45 @@ edge-agent/
     <h3><span class="tag-lesson">讲解</span>3. 板书③：模型与工具链选型</h3>
     <div class="board"><span class="k">选型结论（回顾前面各章，直接给答案）</span>
 
-模型     <span class="g">Qwen2.5-1.5B / 3B Instruct</span>（中文强、生态好）
-精度     <span class="g">w4a16 int4</span>（端侧甜点，内存/速度平衡）
+模型     <span class="g">Qwen2.5-0.5B / 1.5B</span>（本板 3.8GiB 的可行档；3B 仅 ≥8GB，实测未采用）
+精度     <span class="g">W8A8 默认</span>（稳定、实测 20.07 tok/s）；W4A16+grq 仅作性能优先备选（快 1.84×，但 0.5B 上语义退化）
 工具链   <span class="g">rknn-llm（rkllm）</span> 转 .rkllm，NPU 原生
 检测模型 <span class="g">YOLOv8n（int8）</span> → .rknn，NPU 感知
 服务     先 CLI 跑通 → 再包 HTTP（OpenAI 兼容 + /detect）
 
-<span class="k">为什么 1.5B 和 3B 都准备？</span>
-  3B：回答质量好，decode 约 6~8 t/s（NPU 独占；产品 3.5~5.5，带宽瓶颈）
-  1.5B：更轻，decode 约 7~11 t/s（产品）／12~16（NPU 独占），内存 ~1GB
-  → <span class="g">3B 做质量场景，1.5B 做断网降级/极速场景</span>
+<span class="k">为什么 0.5B 和 1.5B 都准备？</span>
+  0.5B W8A8：811MB、峰值 0.73GB、decode 20.07 t/s → <span class="g">本板默认档</span>
+  1.5B int4：约 1.0GB，加 KV/runtime/系统 ≈ 2.6GB → <span class="g">质量档（本板上限）</span>
+  3B int4：约 3.45GB → <span class="r">本板 3.8 GiB 无余量，不采用</span>
+  → <span class="g">默认 0.5B，需要更好回答时切 1.5B</span>
 
 <span class="k">为什么检测走 RKNN 而不是 rkllm？</span>
   rkllm 是 <span class="r">LLM 专用</span>工具链；检测是 CNN，
   用 <span class="g">RKNN Toolkit</span> 把 YOLOv8n 转成 .rknn，直吃 NPU。
   <span class="g">同一个 NPU，两套工具链产物——这正是"共享硬件"的落地。</span>
 
-<span class="k">内存预算（3B int4 + 4K 上下文）</span>
+<span class="k">内存预算（Qwen2.5-3B GQA + 4K 上下文 · 已按正确 KV 口径）</span>
   模型权重 w4a16         ≈ 2.0 GB
-  KV Cache @4K           ≈ 1.2 GB
+  KV Cache @4K           ≈ <span class="g">0.144 GB</span>（36 KB/token）
   runtime + 对齐         ≈ 0.5 GB
-  系统 + 其它进程        ≈ 1.0 GB
+  系统 + 其它进程        ≈ 0.8 GB
   ─────────────────────────────────
-  合计                   ≈ <span class="g">4.7 GB</span>  （16GB 板子：安全预算内，OK）</div>
+  合计                   ≈ 3.45 GB  <span class="r">（本板 3.8 GiB 已无余量 → 实际用 0.5B）</span></div>
     <p><b>练习（板书填空）：</b>KV Cache 与合计自己算，再展开答案。</p>
     <table class="tight">
       <thead><tr><th>上下文</th><th>每 token KV</th><th>KV Cache(填)</th><th>总占用(填)</th><th>能塞下?</th></tr></thead>
       <tbody>
-        <tr><td>2K</td><td>≈0.28 MB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
-        <tr><td>4K</td><td>≈0.28 MB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
-        <tr><td>8K</td><td>≈0.28 MB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>2K</td><td>≈36 KB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>4K</td><td>≈36 KB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
+        <tr><td>8K</td><td>≈36 KB</td><td class="fill">?</td><td class="fill">?</td><td class="fill">?</td></tr>
       </tbody>
     </table>
     <details>
       <summary>点击展开答案（先自己填！）</summary>
-      <p>KV = 上下文 × 0.28MB：2K≈<b>0.56GB</b>，4K≈<b>1.2GB</b>，8K≈<b>2.3GB</b>。<br>
-      总占用 = 2.0(模型) + KV + 1.5(其它)：2K≈<b>4.1GB</b>，4K≈<b>4.7GB</b>，8K≈<b>5.8GB</b>。<br>
-      16GB 都能塞下，但 8K 时 KV 已经超过模型本身一半——这就是 KV 抢带宽/抢内存的问题，上下文不是免费拉的。加上 CV 之后每档再 +0.05GB，可忽略。</p>
+      <p>KV = 上下文 × <b>36 KB</b>：2K≈<b>72MB</b>，4K≈<b>144MB</b>，8K≈<b>288MB</b>。<br>
+      总占用 = 2.0(模型) + KV + 1.3(运行时+系统)：2K≈<b>3.37GB</b>，4K≈<b>3.44GB</b>，8K≈<b>3.59GB</b>。<br>
+      <span class="r">本板 3.8 GiB 三档都贴顶；8K 时 KV 仍只占模型 14%，不是「超过一半」——原稿把 MHA 的每 token 值套到了 GQA 模型上。</span>
+      实际落地是 0.5B：KV 8K 仅 100MB。</p>
     </details>
 
     <h3><span class="tag-lesson">讲解</span>4. 板书④：最小对话循环（先跑通再说）</h3>
@@ -367,12 +371,13 @@ cat /sys/kernel/debug/rknpu/load
 □ 基准表已落盘          —— 五项指标齐全
 
 <span class="k">项目一句话概览（写进文档开头）：</span>
-「在 RK3576 上搭一个"感知 + 交互"的端侧 AI 助手：
-用 RKNN 把 YOLOv8n 量化成 int8 跑摄像头检测，用 rknn-llm 把 Qwen2.5-3B
-量化成 w4a16 做本地对话，两个模型共享一块 NPU 和 16GB 内存，
+「在 RK3576（本板 3.8 GiB）上搭一个"感知 + 交互"的端侧 AI 助手：
+用 RKNN 把 YOLOv8n 量化成 int8 跑摄像头检测，用 rknn-llm 把 Qwen2.5-0.5B
+量化成 W8A8 做本地对话，两个模型共享一块 2 核 NPU，
 四层架构、CLI 和 OpenAI 兼容 HTTP 都能用，本地断网可用，
-首 token 约 1.2s、decode 约 6 tok/s（产品 3.5~5.5、NPU 独占 6~8）、
-检测单帧约 12ms、并发内存约 4.8GB，瓶颈在内存带宽。」</div>
+实测 TTFT 约 0.2s（59 tok prefill）、decode 20.07 tok/s、峰值内存 0.73GB、
+检测单帧约 19.5ms（640，e2e），瓶颈在内存带宽。」
+<span class="r">（3B 档在本板不可行：3.45GB + 系统已超 3.8GiB；若换 ≥8GB 板可按板书②的 3B 预算重排。）</span></div>
 
     <h3><span class="tag-lesson">讲解</span>8. 板书⑧：感知链路边界（CV 全链路见第 10 章）</h3>
     <p>本章的感知模块只负责「<span class="key">把检测模型接进项目</span>」——取帧、调 RKNN 封装、结果结构化、事件聚合。检测模型的选型、数据标注、ONNX 导出、RKNN 量化与 mAP 验收属于 CV 全链路教学，已在<b>第 10 章《CV 检测全链路》</b>完整讲过，本章不重复展开。</p>
@@ -391,7 +396,19 @@ cat /sys/kernel/debug/rknpu/load
 <span class="g">本章只需关心"怎么用"，不再重复"怎么造"。</span></div>
   </div>
 
-  <h2>练习（交作业）</h2>
+    <div class="callout dev">
+    <strong>实测补充 · LLM 服务化六坑（最小 demo 跑通后一定会遇到）：</strong>
+    <ul class="clean" style="padding-left:2px;margin:8px 0 0">
+      <li><b>别手写模板</b>：Runtime 自带 chat template；手写 <code>&lt;|im_start|&gt;</code> 或「用户：/助手：」= 套两层，回答全乱。</li>
+      <li><b>多轮</b>：<code>keep_history=1</code>，循环里只处理最新一条；写错会「永远只回答第一句」。</li>
+      <li><b>中断</b>：前端 abort 只断浏览器到代理的流，板端会跑完 → 必须 <code>/rkllm_abort</code> 真中断并清忙标志。</li>
+      <li><b>排队</b>：板端单实例，忙时全 503 → 代理层加全局串行锁 + 自动重试（实测停止后恢复 12s → 1.09s）。</li>
+      <li><b>上下文污染</b>：中断后半截生成残留在 KV Cache → 下条消息前必须 clear。</li>
+      <li><b>SSE</b>：无 Content-Length，结束前必须 <code>close_connection = True</code>，否则客户端一直等 done。</li>
+    </ul>
+  </div>
+
+<h2>练习（交作业）</h2>
   <p class="lead">讲义看懂后动手把 demo 真搭起来。做完贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
@@ -512,10 +529,10 @@ cat /sys/kernel/debug/rknpu/load
   <div class="note">
     <ul class="clean" style="padding-left:2px">
       <li>模型放在本地 <code>models/</code>（eMMC/NVMe），加载后常驻内存；<strong>首次 load 较慢</strong>，别误判为卡死。</li>
-      <li>3576 内存 16GB，但 demo + 系统 + KV + 检测缓冲 + 其它服务要一起算；<strong>3B int4 建议上下文 ≤4K</strong>，8K 会让 KV 涨到 2.3GB。</li>
+      <li>本板实测内存 <b>3.8 GiB</b>（SoC 上限才是 16GB）：3B int4 + 4K 约 3.45GB，已无余量；<b>实际落地是 0.5B W8A8（811MB / 峰值 0.73GB）</b>，1.5B 是这台板子的上限档。</li>
       <li>检测模型务必走 <strong>RKNN Toolkit（int8 .rknn）</strong>，不要用 rkllm——rkllm 只吃 LLM。</li>
-      <li>NPU 是共享资源，CV 与 LLM 会<strong>抢时间片</strong>：给 CV 设保底帧率，LLM prefill 尽量分块；NPU 多核时优先给两者分核。</li>
-      <li>NPU 单核场景下，服务端并发（batch）能把带宽利用率从 ~75% 拉到 ~98%，是提升吞吐的正道。</li>
+      <li>NPU 是共享资源，CV 与 LLM 会<strong>抢时间片</strong>：给 CV 设保底帧率，LLM prefill 尽量分块；本板 2 核可分核（CV 占 core1、LLM 占 core0）。</li>
+      <li>本板 <b>2 核 NPU</b>：CV 与 LLM 可分核（core1 / core0），实测双核使 e2e −21.7%。但 <b>rkllm 是单实例单上下文</b>，没有 batch 调度——并发只能靠上层串行锁排队。</li>
       <li>demo 用 <code>1.5B</code> 做断网降级/极速模式、<code>3B</code> 做质量模式——<strong>一套代码两个档位</strong>，能覆盖更多场景。</li>
       <li>HTTP 服务记得绑 <code>0.0.0.0</code> 才能被外部访问；生产要加超时与限流，避免长 prompt 打满内存。</li>
       <li>带宽口径统一记住：RK3576 LPDDR5-4800 峰值 ≈19GB/s，NPU 独占 12~16GB/s，产品场景 7~11GB/s。</li>

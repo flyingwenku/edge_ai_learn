@@ -36,11 +36,13 @@
   <h1>第 4 章：部署链路与算子</h1>
   <p class="lead"><strong>章节目标：</strong>把「会算」变成「会落地」——用 <b>rknn-toolkit2</b> 把 3B 模型转成 NPU 能吃的 <code>.rknn</code>，做完校准、量化、精度对比，最后能给出明确判断：<span class="key">「这个量化方案能不能上线？」</span></p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch04-deploy</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>流水线四段、量化三件套、校准集军规、上线三关、ONNX 三类报错均为通用理论。 <span class="fact measured">实测</span>本板实测：双核 e2e −21.7%；W4A16+normal 精度崩、W4A16+grq / W8A8+normal 可用；int4 为原生格式。 <span class="fact dev">偏差</span>原文「单核 + 默认 w4a16+normal + num_npu_core 1」三处均与实测冲突，已就地更正。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -96,15 +98,16 @@
      normal         最直接（max 定标），快、够用
      mmse           最小化量化误差，慢一点、精度更好
      kl_divergence  分布对齐，对激活敏感场景好
+     <span class="r">（注意：rkllm 实际只提供 normal / grq；mmse、kl_divergence 属 rknn-toolkit2，别混用）</span>
 
 <span class="k">一句话：dtype 决定"多省"，algorithm 决定"多准"。</span></div>
     <div class="board"><span class="k">rkllm 转换配置示例（config.json）</span>
 {
   "target_platform": "rk3576",
   "model_path": "Qwen2.5-3B-Instruct",
-  "quantized_dtype": "w4a16",       <span class="g">// 权重 4 位，激活 16 位</span>
-  "quantized_algorithm": "normal",
-  "num_npu_core": 1,
+  "quantized_dtype": "w8a8",        <span class="g">// 稳定首选；W4A16 需配 grq</span>
+  "quantized_algorithm": "normal",  <span class="g">// W4A16 时必须改 grq</span>
+  "num_npu_core": 2,                <span class="g">// 3576 有 2 核；实际生效靠运行时 API</span>,
   "group_size": 128
 }
 
@@ -178,15 +181,17 @@ PPL' = exp(0.5400) = <span class="r">1.716</span>
 ② 校准数据   换更贴近线上、覆盖更全的样本
      <span class="g">性价比最高的一招</span>，往往比调算法管用
 
-③ NPU 核心数 num_npu_core
-     3576 是<span class="r">单核 6 TOPS</span>（3588 才三核）；
-     3576 上固定 1，调它没意义；迁 3588 时才有 1/2/3 可选
+③ NPU 核心数 num_npu_core          ← 本站第一大收益项，别跳过
+     3576 有 <span class="g">2 个 NPU 核</span>（core0 / core1；rknn_set_core_mask 实测 max = 3）
+     默认 auto <span class="r">只跑 1 个核</span>；显式开双核 e2e <span class="g">−21.7%</span>（23.03→18.02 ms）
+     只能运行时设：rknn_set_core_mask(ctx, RKNN_NPU_CORE_0_1)
+     <span class="r">在 config() 里设会报 'core_mask' is not support</span>
 
 <span class="k">带宽利用率（判断跑没跑满的关键指标）</span>
   decode 实测 6 tok/s（NPU 独占场景），模型 int4 3B ≈ 2.0 GB
   有效带宽 = 6 × 2.0 = 12 GB/s
   利用率   = 12 / 16 = <span class="g">75%</span>（对 NPU 独占上沿 16 GB/s）
-  <span class="k">→ &lt; 60% 说明没跑满，还有调优空间（batch/算子）</span>
+  <span class="k">→ &lt; 60% 说明没跑满，还有调优空间（双核 / 零拷贝 / 算子回退）</span>
   <span class="k">→ 产品真实场景可达带宽只有 7~11 GB/s，decode 会降到 3.5~5.5 tok/s</span></div>
     <div class="callout"><strong>一句话记住：</strong><span class="key">带宽利用率 = tok/s × 模型真实GB ÷ 有效带宽上限</span>（NPU 独占 12~16 / 产品 7~11 GB/s）。它是判断「瓶颈在带宽还是在别处」的尺子，比单纯看 tok/s 有用得多。</div>
 
@@ -441,8 +446,8 @@ ONNX 阶段报错 → 改导出；RKNN 阶段报错 → 换/拆算子或固定 s
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>RK3576 的 NPU 是 <strong>单核 6 TOPS</strong>，<code>num_npu_core</code> 固定为 1；「试核心数」是 RK3588 三核才有的玩法，3576 上调它没意义。</li>
-      <li>3576 以 <strong>int8 定点加速为主</strong>，<code>w4a16</code> 多为 int8 模拟或部分算子支持——转完务必实测 tok/s 和精度，别想当然。</li>
+      <li>RK3576 的 NPU 是 <strong>2 核 6 TOPS</strong>（core0 + core1，max core mask = 3）。<strong>默认 auto 只跑 1 核</strong>；显式 <code>rknn_set_core_mask(ctx, RKNN_NPU_CORE_0_1)</code> 后 yolo11 e2e 23.03→18.02 ms（<b>−21.7%</b>）。这是本板性价比最高的一项优化。</li>
+      <li><code>w4a16</code> 是<strong>原生格式</strong>（0.5B 实测 527MB / 36.87 tok/s），但<strong>必须配 <code>grq</code></strong>：<code>W4A16 + normal</code> 会严重语义退化。稳妥默认是 <code>W8A8 + normal</code>。</li>
       <li>LLM 走 <strong>rknn-llm（rkllm）</strong>一键转换，比手搓 ONNX 稳；小模型/ViT 才用 rknn-toolkit2。</li>
       <li><code>target_platform</code> 必须写 <code>rk3576</code>；换板子要重转，产物不通用。</li>
       <li>3576 内存为 <strong>LPDDR5-4800 / 32-bit</strong>，理论峰值带宽 ≈19 GB/s；NPU 独占实测 12~16 GB/s，产品场景（摄像头 + NPU + 屏幕同时抢）只有 7~11 GB/s，算子回退时搬运更吃亏。</li>

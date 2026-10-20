@@ -36,11 +36,13 @@
   <h1>第 8 章：LLM③ KV Cache、PagedAttention 与带宽瓶颈</h1>
   <p class="lead"><strong>章节目标：</strong>把「<b>内存怎么涨、速度卡在哪</b>」算成数字，并搞懂 KV Cache 的<b>分页管理与量化</b>——拿到任意模型 + 上下文长度，能<b>秒算 KV Cache、秒判算力瓶颈还是带宽瓶颈</b>。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch08-llm-kv</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>KV 公式、算术强度判据、PagedAttention 分页类比、KV 量化敏感性均为通用理论。 <span class="fact measured">实测</span>本板带宽三档（19 / 12~16 / 7~11 GB/s）为实测；KV 数字按 3B GQA config 计算，非实测占用。 <span class="fact dev">偏差</span>算术强度脊点单位需标口径（INT8 OPS ≠ FLOP/s）；PagedAttention 在 rkllm 上不适用，属原理认知。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -282,8 +284,8 @@
     <dl>
       <dt>目标</dt><dd>画出「上下文长度 vs 内存占用」的线性关系，找出 3576 的内存临界点。</dd>
       <dt>要掌握</dt><dd>KV Cache 是线性的（不是平方）；和模型权重（int4 约 1.6 GB）叠加后的总占用。</dd>
-      <dt>实操步骤</dt><dd>写 <code>kv_curve.md</code>：以模型 1.6 GB + KV Cache 叠加，算出 16 GB 内存下能撑多长上下文；给出结论。</dd>
-      <dt>检验标准</dt><dd>能说出「KV Cache 线性增长，16 GB 下 3B int4 理论可撑很长上下文，但带宽仍是瓶颈」。</dd>
+      <dt>实操步骤</dt><dd>写 <code>kv_curve.md</code>：以模型 1.6 GB + KV Cache 叠加，分别算本板 3.8 GiB 与 16 GB 下能撑多长上下文；给出结论。</dd>
+      <dt>检验标准</dt><dd>能说出「KV Cache 线性增长；3.8 GiB 下 3B int4 几乎无余量，16 GB 才宽裕，但带宽仍是瓶颈」。</dd>
     </dl>
   </div>
 

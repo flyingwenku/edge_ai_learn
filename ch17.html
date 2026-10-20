@@ -36,11 +36,13 @@
   <h1>第 17 章：项目收尾、稳定性与架构文档</h1>
   <p class="lead"><strong>章节目标：</strong>把前面各章的零件收口成「<b>一个能现场演示、能长期稳定运行的端侧 agent + 一份能讲清每个决策理由的架构文档 + 一份覆盖稳定性/功耗/降级的运维清单</b>」——这是把项目从「能跑」推进到「能长期可靠运行」的最后一环。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 4 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch17-closeout</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>function calling/RAG 闭环、四件套指标、一页纸 ADR、稳定性三件事、三层降级均为通用方法论。 <span class="fact measured">实测</span>实测案例来自 A171（AX620Q/uClibc）：20s nowayout 看门狗、appdaemon cleanup 触发 reboot、risc-v 占用 i2c、IP 冲突；本板 rkllm 单实例。 <span class="fact dev">偏差</span>原文稳定性只讲通用 systemd/RSS，未用一手案例；已补「真实故障四例」，并把「NPU→CPU 降级」标为需实测。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -282,7 +284,18 @@ LLM 连续失败 N 次      → 退到纯规则 / 关键词模式       → 无�
     </details>
   </div>
 
-  <h2>练习（交作业）</h2>
+    <div class="callout dev">
+    <strong>实测补充 · 真实故障四例（比通用 checklist 更能救命）：</strong>
+    <ul class="clean" style="padding-left:2px;margin:8px 0 0">
+      <li><b>整机每 20s 重启</b>：不是你的进程崩，而是硬件狗 20s 超时 + <code>nowayout=1</code>（<code>printf V</code> 关不掉），且 appdaemon 的 <code>[cleanup]</code> 会主动 reboot。解法：接管喂狗（内置线程）+ 暂时停 appdaemon。</li>
+      <li><b>日志刷屏看不到真错误</b>：i2c 错误毫秒级刷，先 <code>echo "2 4 1 7" &gt; /proc/sys/kernel/printk</code>，才能看见究竟是无内核 Oops 还是用户态段错误。</li>
+      <li><b>段错误定位</b>：uClibc 没有 <code>execinfo.h</code>，用 <code>sigaction + ucontext</code> 取 PC/LR + 遍历 <code>/proc/self/maps</code>，再 <code>addr2line</code> 还原到行——本次靠它把根因定到「模型文件名少 4 个字母」。</li>
+      <li><b>ping 通但端口全不通</b>：IP 冲突，ARP 指向了另一台设备；比对 MAC 比扫端口更快解决。</li>
+    </ul>
+    <p style="margin:8px 0 0"><b>另：</b>「NPU 异常 → 切 CPU 兜底」在本栈上要实测——llama.cpp 在 3576 上只跑 CPU，切过去 decode 会掉到 1.5 t/s 量级，是否可接受要按产品定。</p>
+  </div>
+
+<h2>练习（交作业）</h2>
   <p class="lead">讲义看懂后动手产出。做完贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>

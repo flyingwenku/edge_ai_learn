@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>附录 A：端侧表征复用与决策头</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand">端侧 <span>AI</span> 架构 · 学习站</div>
+  <nav class="nav">
+    <a href="index.html">总览</a>
+    <a href="ch01.html">1</a>
+    <a href="ch02.html">2</a>
+    <a href="ch03.html">3</a>
+    <a href="ch04.html">4</a>
+    <a href="ch05.html">5</a>
+    <a href="ch06.html">6</a>
+    <a href="ch07.html">7</a>
+    <a href="ch08.html">8</a>
+    <a href="ch09.html">9</a>
+    <a href="ch10.html">10</a>
+    <a href="ch11.html">11</a>
+    <a href="ch12.html">12</a>
+    <a href="ch13.html">13</a>
+    <a href="ch14.html">14</a>
+    <a href="ch15.html">15</a>
+    <a href="ch16.html">16</a>
+    <a href="ch17.html">17</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <a class="back" href="index.html">← 返回总览</a>
+  <h1>附录 A：端侧表征复用与决策头</h1>
+  <p class="lead"><strong>一句话：</strong>不生成文字，只跑 prefill 取最后一层 hidden state，用 896 维向量直接做决策——单次 161~316 ms，比让 0.5B 自由生成快一个量级，而且可复现。这是「LLM 当编码器用」的一条实测支线。</p>
+
+  <div class="pill-row">
+    <span class="chip">状态：实测 POC · 2026-10-15</span>
+    <span class="chip">平台：RK3576 / rkllm 1.2.3</span>
+    <span class="chip">模型：Qwen2.5-0.5B W8A8</span>
+  </div>
+
+  <div class="callout"><strong>本页口径：</strong>
+    <span class="fact theory">理论</span>hidden state 的含义、线性探针、温度校准与 ECE 属通用方法。
+    <span class="fact measured">实测</span>所有数字来自本板 POC：hidden 维度/时延/可复现性/真假日相关/校准前后兜底率。
+    <span class="fact dev">偏差</span>原文档里两处写法已修正——「零训练点积换选项」不成立、「置信度可当可靠性」不成立。
+  </div>
+
+  <h2>一、为什么值得做</h2>
+  <div class="grid cols-3">
+    <div class="card"><div class="k">延迟</div><div class="v">161~316 ms</div><p style="color:var(--muted);margin:6px 0 0">纯 prefill，无 decode；自回归生成 20 token 约 1 s</p></div>
+    <div class="card"><div class="k">向量维度</div><div class="v">896</div><p style="color:var(--muted);margin:6px 0 0">与 Qwen2.5-0.5B hidden size 完全一致</p></div>
+    <div class="card"><div class="k">可复现</div><div class="v">md5 一致</div><p style="color:var(--muted);margin:6px 0 0">同 prompt 两次导出完全相同</p></div>
+  </div>
+
+  <p>端侧小模型的自由生成不可靠（第 16 章已用实验证明：0.5B 在决策任务上是常数输出）。但它的<strong>表征</strong>仍可能有用：把模型当编码器，只做一次前向，把 hidden 交给一个几十 KB 的线性头。这条路把「生成的不确定性」换成了「分类的可度量性」。</p>
+
+  <h2>二、接口能力（RKLLM 原生，不用改 SDK）</h2>
+  <div class="board"><span class="k">rkllm.h 里的三种推理模式</span>
+RKLLM_INFER_GENERATE              = 0   ← 正常生成
+RKLLM_INFER_GET_LAST_HIDDEN_LAYER = 1   ← 决策头要的
+RKLLM_INFER_GET_LOGITS            = 2   ← 温度校准要的
+
+typedef struct {
+    const float* hidden_states;  // num_tokens × embd_size
+    int embd_size;
+    int num_tokens;
+} RKLLMResultLastHiddenLayer;</div>
+  <div class="callout"><strong>配套能力齐全：</strong><code>rkllm_set_chat_template()</code> 自定义模板 · <code>RKLLM_INPUT_TOKEN</code> 直接喂 token id 精确定位 · <code>rkllm_load_lora()</code> · <code>rkllm_clear_kv_cache()</code>。</div>
+
+  <h2>三、实测数据（0.5B W8A8）</h2>
+  <div class="board"><span class="k">一次 prefill 的产出</span>
+HIDDEN: embd_size=896  num_tokens=59  total_floats=52864 (206.5 KB)
+[last] dim=896  l2=306.515250  head=-1.29307 -6.46489 -0.86470 ...
+
+<span class="k">可复现性（决定性证据）</span>
+a8a2272ae50bd4010554eca9463aac28  /tmp/hidden_last.bin
+a8a2272ae50bd4010554eca9463aac28  /tmp/hidden_last.bin   ← 两次完全相同
+
+<span class="k">时延（59 tokens，prefill only）</span>
+315.8 ms / 294.6 ms / 260.5 ms
+
+<span class="k">logits 模式</span>
+vocab_size=151936  num_tokens=59  (34.2 MB)  ← 温度校准的数据来源</div>
+  <div class="callout dev"><strong>偏差更正 1：</strong>原以为「hidden 依赖运行时状态、不可复现」。实测 md5 完全一致——所以
+  「板端导出 hidden → 回传 PC 训头 → 部署回板」这条闭环成立，训练与推理看到的是同一个东西。</div>
+
+  <h2>四、三条硬约束（踩过才知道）</h2>
+  <div class="board"><span class="k">① 指针只在本次 callback 内有效</span>
+SDK 注释：需要在当前 callback 中获取，若未及时获取，下一次 callback 会释放该指针。
+→ 必须立刻 memcpy 出来，不能存指针。
+
+<span class="k">② 绝对不能用原始余弦相似度当决策</span>
+状态A（离线/12%/41℃） l2=306.515
+状态B（在线/95%/25℃） l2=305.877
+cos(A, B) = <span class="r">0.9558</span>   ← 两个完全不同的状态，相似度仍极高
+
+<span class="k">③ 必须用板端量化后的 hidden 训练</span>
+W8A8 会改变 hidden 分布；用 PC fp32 hidden 训完搬上板，头会失效。</div>
+  <p><strong>为什么 cos 这么高：</strong>小模型 hidden 有强各向异性——所有句子共享一个很大的公共分量。直接比相似度等于在比公共分量，判别信息被淹没。必须训一个线性头，把判别方向从公共分量里分离出来。</p>
+
+  <h2>五、真相关 vs 假相关（证明 hidden 里真有信息）</h2>
+  <p>同一类状态（天气预报）问两个问题：<strong>带伞</strong>（标签由状态决定，真相关）与<strong>带钥匙</strong>（标签随机，假相关）。240 条样本，板端批量导出 hidden，PC 上训 <code>Linear(896, 2)</code>。</p>
+  <table class="tight">
+    <thead><tr><th>任务</th><th>关系</th><th>训练准确率</th><th>测试准确率</th><th>多数类基线</th><th>测试平均置信度</th></tr></thead>
+    <tbody>
+      <tr><td>带伞</td><td>真相关</td><td>1.000</td><td><strong>1.000</strong></td><td>0.611</td><td>0.997</td></tr>
+      <tr><td>带钥匙</td><td>假相关</td><td>1.000</td><td><strong>0.389</strong></td><td>0.667</td><td>0.852</td></tr>
+    </tbody>
+  </table>
+  <p>平均 prefill：145.6 ms / 36.3 tokens（240 条）。</p>
+  <div class="callout"><strong>两个结论：</strong>真相关学得会（测试 100%，线性可分）；假相关学不到（训练背到 1.000，测试掉到 0.389，比瞎猜还差）——说明模型没有从天气里凭空编造「钥匙」的相关性。</div>
+
+  <h2>六、置信度是骗人的（本节最重要）</h2>
+  <div class="board"><span class="k">假相关任务的置信度分布</span>
+测试平均置信度 0.852
+  答对时 0.813
+  答错时 <span class="r">0.877</span>   ← 答错比答对更自信
+
+<span class="k">阈值兜底效果（confidence &lt; 0.6）</span>
+校准前：只拦住 5.6% 的样本
+校准后（T=8.5）：触发率 4.2% → <span class="g">75.0%</span></div>
+  <table class="tight">
+    <thead><tr><th>任务</th><th>最优 T</th><th>测试准确率</th><th>ECE 校准前</th><th>ECE 校准后</th><th>兜底触发 前→后</th></tr></thead>
+    <tbody>
+      <tr><td>带伞</td><td>0.55</td><td>1.000</td><td>0.0042</td><td>0.0002</td><td>0% → 0%</td></tr>
+      <tr><td>带钥匙</td><td><strong>8.50</strong></td><td>0.417</td><td><strong>0.4955</strong></td><td><strong>0.1547</strong></td><td><strong>4.2% → 75.0%</strong></td></tr>
+    </tbody>
+  </table>
+  <div class="callout dev"><strong>偏差更正 2：</strong>原以为「softmax 置信度可以直接当把握程度」。实测答错时更自信，
+  <code>confidence &lt; 0.6</code> 的兜底形同虚设。<b>必须做温度校准（dev 集网格搜 T 最小化 NLL），否则兜底不生效。</b>
+  校准只对「模型其实在瞎猜」的场景有意义——带伞任务本来就 100% 正确，校准前后看不出差别。</div>
+
+  <h2>七、三种决策头对比（「专用模型」质疑的答案）</h2>
+  <p>模板改成运行时注入选项：<code>[STATE]… [QUESTION] action in {带伞, 不带伞} [OPTIONS] 带伞 不带伞</code>。两个完全不同的选项集（带具 / 出行方式）共用同一批状态。</p>
+  <table class="tight">
+    <thead><tr><th>头</th><th>形式</th><th>参数量</th><th>选项集 A</th><th>选项集 B</th><th>换选项的代价</th></tr></thead>
+    <tbody>
+      <tr><td>H1 固定 Linear</td><td><code>Linear(896, n)</code></td><td>n×896</td><td>1.000</td><td>1.000</td><td>改架构重训</td></tr>
+      <tr><td>H2 零训练点积</td><td><code>q·o/√d</code></td><td><strong>0</strong></td><td><strong>0.545</strong></td><td><strong>0.455</strong></td><td>换缓存表</td></tr>
+      <tr><td>H3 只训选项向量</td><td>只训 <code>o_vec</code></td><td>n×896</td><td>0.891</td><td>0.964</td><td>重训几秒</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>结论：</strong>文档设想的「零训练换选项」（H2）在 0.5B + W8A8 上不成立（0.545/0.455 ≈ 瞎猜），
+  原因就是 0.956 的各向异性。现实路径是 <b>H3</b>：底座冻结、只训 n×896 个选项向量，换任务几秒钟；
+  「专用」的部分只有这几千个参数，和「每个任务训一个专用模型」有数量级差别。</div>
+
+  <h2>八、一次 prefill 取多个向量</h2>
+  <div class="board"><span class="k">用 token 模式精确定位（n_tokens 与请求 id 严格 1:1）</span>
+mp_2.txt (2 选项) pos=41,45,48   -> n_tokens=49 / 请求 49, rows=3  (1 q + 2 o)
+mp_3.txt (3 选项) pos=39,42,45,49 -> n_tokens=50 / 请求 50, rows=4  (1 q + 3 o)
+
+<span class="k">实测时延</span>
+q_vec（含 [QUESTION]，41.2 tokens）  161.2 ms
+o_vec（独立选项，13.8 tokens）        89.6 ms  ← 只在离线算一次，运行时查表
+端到端单次决策 229 ms（48.7 tokens）</div>
+  <div class="callout dev"><strong>坑：token 模式不能在同一进程里跑第二次。</strong>第二次起 <code>num_tokens</code> 会失真（20→10、30→10、49→46）；
+  改成「每个 prompt 一个独立进程」就完全正确（10→10、20→20、50→50）。prompt 模式没有这个问题，可正常批量。
+  <b>结论：批量导出用 prompt 模式，需要精确定位时用 token 模式 + 独立进程。</b></div>
+
+  <h2>九、落地七步</h2>
+  <div class="board">① 定义任务：先锁一个窄域决策，选项固定且可枚举
+② 造数据：每条样本 = [STATE] + [QUESTION] + 硬标签
+③ 板端批量导出 hidden（prompt 模式，240 条约 35s）
+④ PC 训头：Linear(896, n) + CE；选项向量版（H3）只训 o_vec
+⑤ 蒸馏：用强模型打软标签做 KL——对 0.5B 这步不能省
+⑥ 温度校准：dev 集网格搜 T，写死进板端 C 代码
+⑦ 低置信兜底：confidence &lt; 0.4~0.6 走规则或云端
+<span class="k">部署形态：</span>运行时只有一次 161~229 ms 的 prefill + 一次矩阵乘；o_vec 是离线常量表</div>
+
+  <h2>十、边界认知（别把 POC 当产品）</h2>
+  <div class="grid cols-2">
+    <div class="card"><div class="k">学到的是浅层规则</div><p>训练集只有「降雨概率高→带伞」，头就只学会这一条。遇到「90% 但全天不出门」「开车从地库到地库」全部判错且置信度 1.000。<b>这是数据覆盖问题，不是方法问题。</b></p></div>
+    <div class="card"><div class="k">温度校准抓不住 OOD</div><p>股市行情、冰箱内容这类无关输入，置信度 0.987 / 0.999，兜底不触发。<b>校准只修正分布内过度自信，不能替代 OOD 检测</b>——要另加领域标识或「可判否」头。</p></div>
+    <div class="card"><div class="k">17 条边界用例：9 对 / 5 错</div><p>准确率 0.643。亮点是跨语言（英文天气判对）、抗干扰（长通知里抓降雨）、泛化（「早上晴傍晚转雨」训练集没有也能判对）。</p></div>
+    <div class="card"><div class="k">底座坏了，头救不回来</div><p>W4A16 有稳定语义退化（连「鸡有几个头」都答错），表征空间已被污染。这个场景<b>必须用 W8A8</b>。</p></div>
+  </div>
+
+  <h2>十一、作业与验收</h2>
+  <div class="task">
+    <div class="head"><span class="num">1</span><h3>跑通 hidden 探针</h3></div>
+    <dl>
+      <dt>目标</dt><dd>板端导出一条 896 维向量，并验证两次 md5 一致。</dd>
+      <dt>要掌握</dt><dd>GET_LAST_HIDDEN_LAYER 模式；callback 内 memcpy；num_tokens 的含义。</dd>
+      <dt>检验标准</dt><dd>embd_size=896；两次导出 md5 相同；能解释「为什么必须立刻拷贝」。</dd>
+    </dl>
+  </div>
+  <div class="task pm">
+    <div class="head"><span class="num">2</span><h3>训一个头并做真假相关对照</h3></div>
+    <dl>
+      <dt>目标</dt><dd>真相关任务测试 ≥0.9；假相关任务测试接近随机。</dd>
+      <dt>要掌握</dt><dd>为什么不能用 cos 直接判；为什么必须用板端量化 hidden。</dd>
+      <dt>检验标准</dt><dd>两张准确率表 + 一句「假相关学不到」的机制解释。</dd>
+    </dl>
+  </div>
+  <div class="task">
+    <div class="head"><span class="num">3</span><h3>温度校准与兜底</h3></div>
+    <dl>
+      <dt>目标</dt><dd>dev 集搜 T，报出校准前后 ECE 与兜底触发率。</dd>
+      <dt>要掌握</dt><dd>ECE 的含义；为什么校准只对「在瞎猜」的场景有效。</dd>
+      <dt>检验标准</dt><dd>能说清「不校准，兜底形同虚设」，并给出一个具体触发率对比。</dd>
+    </dl>
+  </div>
+
+  <h2>本节要点回顾</h2>
+  <div class="quote">
+    <span class="tag">要点回顾</span>
+    <ul class="clean">
+      <li>LLM 可以只当编码器：一次 prefill 取 hidden，161~316 ms，比自回归生成快一个量级。</li>
+      <li>hidden 是确定性的（md5 一致），所以「板端导出 → PC 训头 → 回板部署」闭环成立。</li>
+      <li>不能用原始余弦相似度决策：不同状态 cos=0.956，小模型各向异性极强，必须训判别头。</li>
+      <li>必须用板端量化后的 hidden 训练，PC fp32 训完搬过去会失效。</li>
+      <li>置信度不可信：答错时 0.877 &gt; 答对时 0.813；温度校准把兜底触发率从 4.2% 提到 75%。</li>
+      <li>零训练点积换选项在 0.5B 上不成立（0.545/0.455）；现实路径是只训选项向量（0.891/0.964）。</li>
+      <li>token 模式同进程第二次会失真，批量用 prompt 模式、精确定位用 token 模式 + 独立进程。</li>
+      <li>校准抓不住 OOD；浅层规则不等于语义理解——POC 到产品之间还差数据覆盖与 OOD 检测。</li>
+    </ul>
+  </div>
+
+  <div class="footer">附录 A · 实测 POC · 2026-10-15 · 平台 RK3576 / rkllm 1.2.3 / Qwen2.5-0.5B W8A8</div>
+</div>
+</body>
+</html>

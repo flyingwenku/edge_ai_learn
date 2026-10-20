@@ -47,6 +47,8 @@
     <span class="key">一句话贯穿全章：算法选 GPTQ/AWQ，落地选 RKNN；端侧先 PTQ，掉点超预算再上 QAT。</span>
   </div>
 
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>量化数学（对称量化三步、误差来源）、粒度三级、GPTQ/AWQ/RKNN 分工、PTQ/QAT 取舍均为通用理论。 <span class="fact measured">实测</span>0.5B 同板同提示：W8A8 811MB / 20.07 tok/s；W4A16+grq 527MB / 36.87 tok/s。 <span class="fact dev">偏差</span>原文「int4 多为 int8 模拟」与实测相反，已更正；补 grq 依赖与 0.5B 语义退化。</div>
+
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
     <li><strong>第 1 步 听讲解：</strong>读「课堂讲义（板书）」，把量化数学、粒度和方案看懂，不懂就记下问题。</li>
@@ -428,7 +430,8 @@ RK3576 生产落地   → <span class="g">RKNN int8，per-channel</span>（NPU �
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 的 NPU 是 <strong>int8 定点加速器为主</strong>，int4 支持有限且多为 int8 模拟，所以生产上优先 <strong>int8 per-channel</strong>。</li>
+      <li>3576 的 NPU 以 int8 为主，但 <strong>int4 有原生路径（RKLLM 的 W4A16）</strong>：0.5B 实测 527MB、decode 36.87 tok/s，比 W8A8 快 1.84×、省 37% 内存。</li>
+      <li><strong>但 int4 必须配 grq</strong>：<code>W4A16 + normal</code> 会严重语义退化（「一只鸡有 2 个头」）；且 0.5B 这种小模型对 4bit 极敏感，选型必须验语义而不是只看跑分。</li>
       <li>RKNN 量化必须给<strong>校准集</strong>，且要覆盖真实输入分布（后续部署实战章节会用真实数据校准）。</li>
       <li>GPTQ/AWQ 的产物不能直接塞给 NPU，需要转 RKNN——所以端侧落地环节认 RKNN。</li>
       <li>RKNN 走的就是 <strong>PTQ</strong>：校准集质量直接决定线上 mAP。做检测/分割时，校准集务必覆盖<strong>夜景、小目标、强光/逆光、难例</strong>等真实场景，否则激活范围估偏直接拖垮精度。</li>

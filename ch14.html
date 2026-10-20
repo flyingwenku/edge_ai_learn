@@ -36,11 +36,13 @@
   <h1>第 14 章：性能调优与精度评估</h1>
   <p class="lead"><strong>章节目标：</strong>从「能跑」到「跑得快」——掌握 NPU 核心数 / batch / 量化配置 / CPU+NPU 混合 / 投机解码几大手段，能在给定延迟目标下<b>调出达标配置</b>，并说清每一步为什么有效。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch14-perf</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>五项指标、Amdahl、CPU/NPU 分工、精度评估闭环、误差分层定位均为通用理论。 <span class="fact measured">实测</span>本板实测：双核 −21.7%、零拷贝 yolo11 −15.0%（yolov8@512 反而 +7.2%）、降 512 使 run −35.7%、conf 0.35 使 post −96%。 <span class="fact dev">偏差</span>原文「单核没得调」「主推 batch/投机解码」与本栈冲突，已重写为「双核 + 零拷贝 + 降分辨率 + 剪枝 + 测量纪律」。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -104,16 +106,17 @@ w4a16  最省内存、最快，精度略降   ← 端侧默认起点
 w8a16  精度更好，慢约 15~30%
 w8a8   最稳，LLM 上未必最快
 
-<span class="k">旋钮二：NPU 核心数 num_npu_core</span>
-<span class="r">3576 单核，固定 1（没得调）</span>；
-3588 三核，实测 1→2 核近线性、2→3 核收益递减（带宽抢用）。
+<span class="k">旋钮二：NPU 核心数（本板第一大收益，必做）</span>
+   3576 有 <span class="g">2 个核</span>（core0/core1，max core mask = 3）
+   默认 auto <span class="r">只跑 1 核</span> → 必须显式开：rknn_set_core_mask(ctx, RKNN_NPU_CORE_0_1)
+   实测：yolo11 23.03→18.02 ms（−21.7%）；yolov8 19.48→15.00 ms（−23.0%）
+   <span class="r">转换期 config() 不支持 core_mask，会报 'core_mask' is not support</span>
 
-<span class="k">旋钮三：batch size（并发数）</span>
-单路 bandwidth-bound，多路可"摊薄"权重读取：
-  batch=1  → 6.0 t/s，带宽利用率 75.0%
-  batch=4  → <span class="g">7.6 t/s（合计）</span>，利用率 <span class="g">95%</span>
-  batch=8  → 7.9 t/s（合计），利用率 98%，但单路 TTFT 变差
-<span class="k">batching 提吞吐、不降延迟——适合多用户服务端场景。</span></div>
+<span class="k">旋钮三：batch size（并发数）—— <span class="r">本栈不可用</span></span>
+   下面的 batch 数据是<b>通用理论</b>（GPU/服务端推理成立）。
+   <span class="r">本板 rkllm 是单实例单上下文：忙时全部请求 503，没有 batch 调度接口。</span>
+   要并发只能在上层做串行锁 + 排队，或用多进程各占一个模型实例（内存翻倍）。
+   batch=1 → 6.0 t/s（75.0%）／batch=4 → 7.6 t/s（95%）／batch=8 → 7.9 t/s（98.8%）← 仅供理解「摊薄权重读取」</div>
     <p><b>练习（板书填空）：</b>把 batch 提升后的带宽利用率算出来，再展开答案。</p>
     <table class="tight">
       <thead><tr><th>batch</th><th>合计 tok/s</th><th>模型(GB)</th><th>有效带宽(GB/s)</th><th>利用率(填)</th></tr></thead>
@@ -130,7 +133,21 @@ w8a8   最稳，LLM 上未必最快
       规律：batch 越大越接近带宽上限，但收益递减；到 8 路只多 0.3 t/s，成本（内存×8、TTFT 变差）不划算——这就是「甜点」在哪的判断。</p>
     </details>
 
-    <h3><span class="tag-lesson">讲解</span>4. 板书④：CPU + NPU 混合调度</h3>
+        <h3><span class="tag-lesson">讲解</span>3b. 板书③b：测量纪律（比旋钮更容易翻车）</h3>
+    <div class="board"><span class="k">四条测量纪律（RK3576 实测踩出来的）</span>
+① 分段计时：T_pre / T_set / T_run / T_get / T_post / T_draw 必须拆开
+   整帧墙钟没有诊断价值（基线里 T_run 占 78%、T_post 仅 4.7%）
+② 预热 + 中位数：跨进程第 1 次慢 10~25%，同配置波动 ±6~9%
+   每配置 ≥3 次、丢首次、取中位数；只信差异 &gt;10% 的结论
+③ 绑大核：taskset -c 4-7，避免小核调度把方差拉大
+④ 观测有代价：开 RKNN_FLAG_COLLECT_PERF_MASK 后 rknn_run +54%
+   逐层数据只能看占比结构，不能当常态耗时</div>
+    <div class="callout dev"><strong>实测更正 · 本板真正有效的四个旋钮：</strong>
+      <b>① 开双核</b>（e2e −21.7%，无风险）→ <b>② 零拷贝</b>（yolo11 −15.0%；但 yolov8@512 上 +7.2%，必须按模型实测）
+      → <b>③ 降输入分辨率</b>（rknn_run −35.7%）→ <b>④ conf 阈值修后处理剪枝</b>（post 2.98→0.11 ms，−96%）。
+      投机解码在 NPU 路径不可用：llama.cpp 在 3576 上只跑 CPU，算出的加速比不代表产品路径。</div>
+
+<h3><span class="tag-lesson">讲解</span>4. 板书④：CPU + NPU 混合调度</h3>
     <p>NPU 不是万能的：有些算子 NPU 不支持或支持差（如某些动态 shape、特殊激活、非标准 attention）。这些会<b>回退（fallback）到 CPU</b>，一旦掉 CPU 就会拖慢整体。</p>
     <div class="board"><span class="k">混合调度三原则</span>
 
@@ -168,6 +185,9 @@ w8a8   最稳，LLM 上未必最快
 <span class="k">llama.cpp 支持：</span>--model big.gguf --model-draft small.gguf
 （-md 指定草稿模型；--draft-max 控制 γ）</div>
     <div class="callout"><strong>为什么端侧特别值：</strong>decode 是带宽瓶颈，投机解码让一次权重读取服务多个 token，<span class="key">本质是提升带宽利用率</span>——和第 4 章那把尺子对上了。</div>
+    <div class="callout dev"><strong>实测口径：本节在本栈不可用。</strong>
+      rkllm 没有 draft 模型接口，NPU 路径上跑不了投机解码；llama.cpp 在 3576 上只跑 CPU（吃不到 NPU），
+      算出的加速比不代表产品路径。这条只作为「带宽受限时的一种通用思路」理解，别写进 3576 的优化方案。</div>
 
     <h3><span class="tag-lesson">讲解</span>6. 板书⑥：找最优组合（配置矩阵 + 帕累托）</h3>
     <div class="board"><span class="k">实验矩阵（示例，一次动一个变量）</span>
@@ -194,7 +214,8 @@ w8a8   最稳，LLM 上未必最快
    - batch=4 → 7.6 t/s（95%）✅ 内存 2.9GB（≤4GB）；单路 TTFT 变差
    - 投机解码 → 7.2 t/s（90%），单路低延迟优先
    - batching + 投机 组合 → 冲 95%+
-⑤ 结论：<span class="g">先保单路达 6 tok/s，再用 batch 或投机解码冲利用率</span>
+⑤ 结论：<span class="g">先保单路达 6 tok/s</span>；<span class="r">batch / 投机解码在本栈不可用，</span>
+   <span class="g">实际冲利用率靠：开双核 → 零拷贝 → 降分辨率 → 修后处理剪枝</span>
 
 <span class="k">给定延迟目标时的调优路径：</span>
 先算理论天花板确认目标可达 → 再算需要的带宽利用率 →
@@ -227,6 +248,22 @@ w8a8   最稳，LLM 上未必最快
   PPL 涨幅 &lt;5% / mAP 掉点 &lt;1pt / RMSE 涨幅 &lt;5% → 可上线
   超门槛 → 先补校准集（板书⑩），不行再上 QAT（板书⑩）</div>
     <div class="callout"><strong>纪律：</strong><span class="key">校准集和验证集必须分开。</span>拿校准集去评精度 = 自己给自己出题还提前看答案，涨幅必然好看，线上必崩。</div>
+
+    <h3><span class="tag-lesson">讲解</span>8b. 板书⑧b：验收口径两档制</h3>
+    <p>全量 mAP/PPL 是「上线签字」用的标准；日常迭代用不起那么重的流程。把口径分两档，避免把「没做全量」误当成「没验收」，也避免用轻量结论去回答上线问题。</p>
+    <div class="board"><span class="k">两档验收口径</span>
+【A 档 · 快速迭代（每次转换都跑，约 10 分钟）】
+  检测：固定 20 张图，比 <span class="g">IoU(框位移) + 置信度漂移 + 丢检数</span>
+       判据：框位移 ≤ 2% 图宽、置信度差 &lt; 0.05、丢检 0 个
+  语言：固定 10 条 prompt，人肉判「事实错 / 极性反 / 跑题 / 截断」
+       判据：事实错 0 条（重点看数字、方向、否定词）
+【B 档 · 上线验收（版本冻结前跑一次，约半天）】
+  检测：完整验证集 <span class="g">mAP@0.5 / mAP@0.5:0.95</span>，记录掉幅
+  语言：固定验证集 <span class="g">PPL</span> + 50 题人肉评分
+       判据：PPL 涨幅 &lt;5%、mAP 掉点 &lt;1pt、无事实错误</div>
+    <div class="callout dev"><strong>与本项目的落差（要说清）：</strong>实际只做了 A 档——单图置信度对比 + 框位移 ≤11px；
+    B 档的 mAP/PPL 基线<b>尚未跑</b>。所以：A 档够用来「改坏了立刻发现」，B 档才是上线依据；
+    <b>别用 A 档结论回答「能不能上线」</b>。</div>
 
     <h3><span class="tag-lesson">讲解</span>9. 板书⑨：量化误差分析（找出塌掉的那一层）</h3>
     <p>精度不达标时，别急着换方案——先<b>定位误差出自哪一层</b>。量化误差是逐层累积的，找到「罪魁层」，往往只改一个配置就能救。</p>
@@ -380,7 +417,7 @@ w8a8   最稳，LLM 上未必最快
     <ul class="clean">
       <li>性能调优先建指标：<b>TTFT、decode tok/s、内存、NPU 利用率、带宽利用率</b>五项，再测 baseline 并用 Amdahl 算理论上界，确认瓶颈占比后再决定投入。</li>
       <li>TTFT 是算力瓶颈（prefill 算完整个 prompt），decode tok/s 是带宽瓶颈（每 token 读一遍全部权重）——两者要分开看。</li>
-      <li>三大旋钮各管一件事：量化配置在 w4a16 / w8a16 间权衡精度与速度；batch size 提吞吐与带宽利用率（多用户服务端优先）；NPU 核心数在 3576 上固定为 1，没得调。</li>
+      <li>三大旋钮：量化配置在 W8A8 / W4A16+grq 间权衡精度与速度；<b>NPU 核心数在 3576 上是 2 核、默认只用 1 核，必须显式开（e2e −21.7%）</b>；batch 属通用理论，在 rkllm 单实例上不可用。</li>
       <li>CPU+NPU 混合调度让 NPU 干矩阵乘、CPU 干采样与 tokenizer，减少搬运；判断算子是否掉 CPU，看 build 日志的 <code>not supported</code> 与 <code>top</code> 的 CPU 占用。</li>
       <li>投机解码用小模型猜、大模型验证，让一次权重读取服务多个 token；α=0.8、γ=4、r=0.1 时手算加速比约 <b>2.4×</b>，α 太低或小模型太重反而变慢。</li>
       <li>给延迟目标的调优路径：先算理论天花板确认可达 → 再算需要的带宽利用率 → 单路不够就上 batch 或投机解码 → 在达标方案里挑内存最小、最稳的。</li>
@@ -393,10 +430,10 @@ w8a8   最稳，LLM 上未必最快
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 是<strong>单核 NPU</strong>，<code>num_npu_core</code> 固定 1，调核心数没意义；这一点要说清，别照搬 3588 的经验。</li>
-      <li>带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s），batch 与投机解码是<strong>提升带宽利用率的正路</strong>；超过 ~95% 利用率后收益递减。</li>
+      <li>3576 是<strong>2 核 NPU</strong>（max core mask = 3），但<strong>默认 auto 只用 1 核</strong>；显式开双核 e2e −21.7%，这是本板最该先做的一项。</li>
+      <li>带宽三档（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）。提升利用率的正路在 3576 上是<b>减字节</b>（量化、GQA、KV 量化）与<b>减搬运</b>（零拷贝、16 对齐），不是 batch。</li>
       <li>NPU 利用率看 <code>/sys/kernel/debug/rknpu/load</code>；若 CPU 长期 ≥100% 而 NPU 低，说明有算子掉 CPU（fallback），要回第 4 章查 build 日志。</li>
-      <li>内存有限，batch 翻倍内存也翻倍——3B int4 batch=8 约 3.6GB，别再叠加其它服务。</li>
+      <li>本板内存只有 3.8 GiB：单个 0.5B 模型峰值约 0.73GB，1.5B 约 2.6GB；再叠 CV/服务就要按第 15 章的并发预算算，别照 batch=8 的假设排。</li>
     </ul>
   </div>
 

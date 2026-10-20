@@ -36,11 +36,13 @@
   <h1>第 7 章：LLM② 注意力机制与位置编码</h1>
   <p class="lead"><strong>章节目标：</strong>搞懂「<b>注意力决定怎么搬运信息、GQA 决定端侧跑不跑得动</b>」——拿到任意一个模型 config，能一眼算出它的 KV Cache 大小，并说出该不该换成 GQA。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
     <span class="chip">产出目录：ch07-llm-attn</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>Q/K/V 直觉、Softmax 手算、MHA/MQA/GQA/MLA 演进、RoPE 相对位置推导均为通用理论。 <span class="fact measured">实测</span>KV 公式按 Qwen2.5-3B 实测 config 代入：36 KB/token、8K ≈ 288 MB；与 ch08/ch16 已对齐。 <span class="fact dev">偏差</span>原文算术强度把 6 TOPS 直接当 6000 GFLOP/s，口径偏大（1 MAC = 2 ops），结论不变。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">

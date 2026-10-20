@@ -36,11 +36,13 @@
   <h1>第 9 章：LLM④ FFN、MoE 与架构趋势</h1>
   <p class="lead"><strong>章节目标：</strong>搞懂「<b>FFN 存知识、MoE 是云端的省算力游戏、端侧另有答案</b>」——拿到一个端侧场景，能当场说出该选什么架构方向、为什么 MoE 不合适。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
     <span class="chip">产出目录：ch09-llm-trend</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>FFN=知识存储、8d² 公式、MoE 总参数 vs 激活参数、Transformer/SSM/混合趋势均为通用理论。 <span class="fact measured">实测</span>本板只验证了 Qwen2.5-0.5B（W8A8/W4A16）与 3B 的容量推算，未跑 MoE/SSM。 <span class="fact dev">偏差</span>原文以 16GB 论证 MoE 装不下，已改为本板 3.8 GiB（结论更强，不只是「装不下」而是「差一个量级」）。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -122,7 +124,7 @@
 
 ① 内存装不下（最直接）
    Mixtral 47B，即便压到 int4 也 ≈ 24 GB
-   RK3576 内存上限 16 GB → <span class="r">装不下</span>。
+   RK3576 本板实测 3.8 GiB（SoC 上限才是 16GB）→ <span class="r">连零头都不够</span>。
    端侧要的是"总参数小"，MoE 天生总参数大。
 
 ② batch=1 时 MoE 不省时间（最关键！）
@@ -291,7 +293,7 @@
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3576 内存上限 16GB，<strong>MoE 模型（如 Mixtral 47B）根本装不下</strong>，架构评审时直接排除。</li>
+      <li>本板实测内存 <strong>3.8 GiB</strong>（SoC 上限才是 16GB），<strong>MoE 模型（如 Mixtral 47B int4 ≈24GB）差一个量级</strong>，架构评审时直接排除。</li>
       <li>端侧 decode 是<strong>带宽瓶颈</strong>，MoE 的稀疏优势在 batch=1 场景吃不到，别被"省算力"忽悠。</li>
       <li>选模型优先看<strong>是否 GQA + 是否有 RKNN 官方示例</strong>（Qwen2.5 / MiniCPM 最省心）。</li>
       <li>SSM/混合架构作为长上下文储备观察，但落地前先确认 NPU 算子支持，别踩"跑不起来"的坑。</li>

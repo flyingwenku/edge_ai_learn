@@ -36,11 +36,13 @@
   <h1>第 6 章：LLM① Transformer 结构与参数量</h1>
   <p class="lead"><strong>章节目标：</strong>打开 <code>config.json</code> 就能把参数量算出来——<b>拿到 Qwen2.5-3B 的配置文件，5 分钟内手算出 3.09B，并说清每一份权重从哪来</b>。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
     <span class="chip">产出目录：ch06-llm-struct</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>参数量公式 2h² + 2h·k·d + 3h·I、embedding/tie 口径、参数量→内存换算均为理论（可手算验证）。 <span class="fact measured">实测</span>Qwen2.5-0.5B 实测 config：h=896、L=24、kv=2、词表 151936；3B 的 3.09B 为官方口径。 <span class="fact dev">偏差</span>原文「3576 的 16GB 余量充足」按本板 3.8GiB 不成立，已更正。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -291,7 +293,7 @@ FFN 占比 ≈ 67.63 / 77.07 ≈ <span class="g">88%</span>（每层内）。</d
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li>3.09B int4 ≈ 1.6 GB，加上 KV Cache 与运行时缓冲，3576 的 <strong>16 GB LPDDR5</strong> 余量充足。</li>
+      <li>3.09B int4 ≈ 1.6 GB，加 KV（4K ≈ 144MB，GQA）与运行时约 <b>3.5GB</b>——<strong>本板实测 3.8 GiB，已贴顶、实际跑不动</strong>。3B 只在 ≥8GB 板子上成立；本板落地模型是 0.5B（W8A8 811MB，峰值 0.73GB）。</li>
       <li>FFN 占参数近八成，是<strong>量化与压缩的主战场</strong>；注意 FFN 权重对精度更敏感。</li>
       <li>若 config 里 <strong>tie_word_embeddings = true</strong>，别把输出层重复计一次，否则参数量会算大。</li>
       <li>回报参数量时<strong>务必说清口径</strong>（是否含 embedding、是否含 lm_head），这是专业度的体现。</li>

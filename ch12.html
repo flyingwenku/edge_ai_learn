@@ -36,11 +36,13 @@
   <h1>第 12 章：传感器时序信号识别</h1>
   <p class="lead"><strong>章节目标：</strong>掌握端侧传感器时序信号的识别链路——<b>IMU 姿态/动作识别、振动异常检测、雷达、心电/生理信号</b>，理解为什么这类模型<b>极小、要常驻、要 mW 级低功耗</b>，并会设计一条「滑窗 → 特征 → 1D-CNN → 部署」的可落盘链路。一句话记住：<span class="key">传感器模型是端侧最"小"的一类，小到对量化与噪声都敏感，常常需要 QAT</span>。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 4 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch12-sensor</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>四类时序任务、1D-CNN/TCN/LSTM/AE 选型、滑窗与归一化、TFLite-Micro/CMSIS-NN、F1/MAE/RMSE 均为通用理论。 <span class="fact measured">实测</span>本章暂无本板实测数据：未做 IMU/振动上板验证，功耗与 QAT 结论均来自公开资料与本课推演。 <span class="fact dev">偏差</span>原文未标注这一点，读起来像已验证。已明确标「未验证」；建议先跑一条 IMU 最小链路再当结论用。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -226,6 +228,23 @@
       要点：<b>步长越小、重叠越多，窗口数越多</b>——数据增强更强，但计算与存储也更多；这是「样本量 ↔ 成本」的折中。</p>
     </details>
   </div>
+
+  <div class="callout plate">
+    <strong>本章状态：未上板验证。</strong>文中「10~50KB」「1~10mW」「小模型必须 QAT」这些数字来自公开资料与本课推演，
+    不是本板实测。要拿它做决策，先跑完下面这条最小协议——半天可完成。
+  </div>
+
+  <h2>最小验证协议（补实测用）</h2>
+  <div class="board"><span class="k">一条能出结论的最小链路</span>
+① 数据：UCI HAR 或自采 IMU 50Hz，3 轴加速度，窗 2s（100 点）/ 步 1s
+② 模型：3 层 1D-CNN（约 20K 参数），输入 (100, 3)
+③ 量化：int8 PTQ，代表性数据集取训练集 200 个窗（别用随机数）
+④ 上板：RKNN toolkit2 → .rknn；测单窗延迟（100 次中位数）
+⑤ 对照：fp32 / int8 PTQ / int8 QAT 三档 F1（QAT 可选，先看 PTQ 掉多少）
+<span class="k">验收标准</span>
+  · 能报出「PTQ 掉几个点 F1」——这是本章唯一真正需要的数字
+  · 单窗延迟 &lt; 5ms（50Hz 下 20ms 预算内）
+  · 若 PTQ 掉点 &gt; 3 个点，再决定是否值得上 QAT</div>
 
   <h2>练习（交作业）</h2>
   <p class="lead">讲义看懂后动手设计并跑通一条链路。做完贴回来我批改。</p>

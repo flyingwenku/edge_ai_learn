@@ -36,11 +36,13 @@
   <h1>第 15 章：端侧系统架构与方案演练</h1>
   <p class="lead"><strong>章节目标：</strong>拿到一条需求，<b>10 分钟内出一页纸架构方案</b>——端云怎么分、成本多少、功耗多少、断网怎么办。这就是端侧系统架构设计的日常动作。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch15-arch</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>端云分工判据、能力边界卡、一页纸七段模板、并发预算方法、降级顺序均为通用方法论。 <span class="fact measured">实测</span>本板实测：内存 3.8 GiB、带宽三档、0.5B W8A8 峰值 0.73GB；BOM 与功耗尚无实测，属估算。 <span class="fact dev">偏差</span>原文「单核 NPU」「按 8GB 排并发」「16GB 余量」均已按 3.8 GiB 与实际双核更正；BOM/功耗已标「估算」。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -77,19 +79,21 @@
     <p>做架构要清楚手上的芯片「能吃多大模型」。RK3576 的舒适区很小但很实用。</p>
     <div class="board"><span class="k">RK3576 能力边界</span>
 
-  舒适区模型规模 ：<span class="g">1.5B ~ 3B int4 / int8</span>
+  舒适区模型规模 ：<span class="g">0.5B ~ 1.5B</span>（本板实测 3.8 GiB）
+                   3B int4 ≈3.45GB 已贴顶 → 需 ≥8GB 才算舒适区
   能干的活       ：意图识别、简单多轮对话、RAG 问答、语音唤醒
   吃力的活       ：&gt;7B 模型、长上下文(&gt;8K)、复杂数学/代码
   <span class="r">真正瓶颈</span>       ：内存带宽（产品 7~11 GB/s，NPU 独占 12~16，峰值 19）—不是 NPU 算力
-  实测参考       ：3B int4 ≈ <span class="k">3.5~5.5 tok/s</span>（产品；NPU 独占 6~8，语音交互够用）
+  实测参考       ：0.5B W8A8 → 20.07 tok/s、峰值 0.73GB（本板默认档）
+                   3B int4    → 产品 3.5~5.5 tok/s（≥8GB 板；仅作推算）
 
 <span class="g">结论：3576 = 中端端侧 AI，定位「意图 + 轻对话」，不是「大模型推理机」。</span>
 往上要更强：RK3588（带宽更高）；往下要更省：3576 就够。</div>
-    <div class="callout"><b>一句话结论：</b>RK3576 用 <b>1.5B~3B int4 做意图识别和简单对话</b>是甜点；复杂推理走云端，<b>断网降级到本地 1.5B</b>——这条要能脱口而出。</div>
+    <div class="callout"><b>一句话结论：</b>本板（3.8 GiB）用 <b>0.5B~1.5B 做意图识别与简单对话</b>是甜点，3B 要 ≥8GB；复杂推理走云端，<b>断网降级到本地 0.5B</b>——这条要能脱口而出。</div>
 
     <h3><span class="tag-lesson">讲解</span>3. 板书③：BOM 成本拆解</h3>
     <p>方案里必须回答「这台设备物料多少钱」，答不出就是账没算清。BOM 要能拆到主控、内存、存储、传感器、结构。</p>
-    <div class="board"><span class="k">BOM 拆解模板（示例：本地语音助手）</span>
+    <div class="board"><span class="k">BOM 拆解模板（示例：本地语音助手）· 价格为公开渠道估算，未做真实询价</span>
 
   主控 RK3576            ≈ <span class="k">$12</span>
   LPDDR4X 4GB            ≈ <span class="k">$6</span>
@@ -108,7 +112,9 @@
 
     <h3><span class="tag-lesson">讲解</span>4. 板书④：功耗估算与续航</h3>
     <p>续航不是拍脑袋，是 <b>电池容量 ÷ 平均功耗</b>。平均功耗要从工作剖面推。</p>
-    <div class="board"><span class="k">功耗估算与续航</span>
+    <div class="board"><span class="r">（下表为行业典型值估算，本板未做实测功耗；落地前用 USB 功率计或分压采样核一遍）</span>
+
+<span class="k">功耗估算与续航</span>
 
   待机（仅唤醒词）        ≈ <span class="g">0.3 W</span>
   本地 1.5B 语音对话      ≈ <span class="g">2.5 ~ 3.5 W</span>
@@ -123,6 +129,22 @@
 
 <span class="r">常见坑：</span>只按峰值算续航 → 严重高估；要按「带权平均」算。</div>
     <div class="callout"><b>一句话结论：</b>续航 = <b>电池容量 ÷ 平均功耗</b>；平均功耗要按工作剖面加权，不能拿峰值或待机糊弄。</div>
+
+    <h3><span class="tag-lesson">讲解</span>4b. 板书④b：BOM 与功耗怎么「实测」</h3>
+    <p>上一节的 BOM 与功耗都是估算。方案要能签字，至少得说清「哪些是询价、哪些是称出来的、误差多大」。</p>
+    <div class="board"><span class="k">BOM：三个必须询价的项</span>
+  主控（含封装/批次）、内存（同容量同频率）、结构件（模具费单独列）
+  其余（WiFi/BT、mic、喇叭、PMIC）可用公开渠道价，标 ±20% 误差
+<span class="k">功耗：三种测法（精度/成本递增）</span>
+  ① USB 电流表（5V 供电）：P = 5V × I，够看趋势，±10%
+  ② 采样电阻 + 万用表（12V 输入）：±2%，需断开原供电路径
+  ③ INA219/INA260 模块：能出「时间-功率」曲线，可抓峰值与占空比
+<span class="k">必须记录的四个工况</span>
+  待机（只跑唤醒） / 空闲（模型已加载未推理） / 单次推理峰值 / 连续推理 10 分钟稳态
+<span class="k">判据</span>
+  续航 = 电池 Wh ÷ 加权平均 W（按占空比加权，不能用峰值）
+  温度：稳态 30 分钟后重测 tok/s，比冷启动掉 &gt;15% 说明已在降频
+  <span class="r">只报峰值功耗 = 续航严重高估；只报冷启动性能 = 性能严重高估</span></div>
 
     <h3><span class="tag-lesson">讲解</span>5. 板书⑤：一页纸方案模板（本章核心，背下来）</h3>
     <p>这是本章要你反复练到肌肉记忆的东西。任何端侧 AI 需求，都用这七段回答。</p>
@@ -168,7 +190,7 @@
 
     <h3><span class="tag-lesson">讲解</span>6. 板书⑥：多模型并发与内存争抢（CV + LLM 同时跑）</h3>
     <p>真实产品很少「只跑一个 LLM」：摄像头要跑 CV（检测/人脸），耳朵要跑 ASR（唤醒），嘴要跑 LLM 对话——<b>它们共用同一块内存和同一条总线</b>。不做预算就会互相踩脚：轻则掉帧、掉 tok/s，重则 OOM 崩掉。</p>
-    <div class="board"><span class="k">多模型并发资源预算表（RK3576 / 8GB / 视觉 + 语音助手同时在线）</span>
+    <div class="board"><span class="k">多模型并发资源预算表（RK3576 / 本板 3.8 GiB / 视觉 + 语音助手同时在线）</span>
 
 模块                    常驻权重   运行时峰值     带宽需求(NPU 忙)   优先级
 ──────────────────────────────────────────────────────────────
@@ -182,7 +204,9 @@ CV 分割/pose int8         8 MB      0.20 GB         ~2 GB/s         <span clas
 预留（碎片/峰值/OOM 缓冲） —         1.00 GB         —               —
 ──────────────────────────────────────────────────────────────
 合计(3B + 双 CV)          ≈2.03 GB   3.35 GB         ≈17 GB/s <span class="r">⚠ 超总线</span>
-合计(1.5B + 单 CV)        ≈1.02 GB   3.00 GB         ≈11 GB/s <span class="g">✅ 安全</span>
+合计(1.5B + 单 CV)        ≈1.02 GB   3.00 GB         ≈11 GB/s <span class="g">✅ 带宽安全</span>
+<span class="r">但内存账要按本板 3.8 GiB 重算：3.0 GB 运行时 + 系统 ≈ 3.8GB 已到顶，
+3B 档（3.35GB）在本板不可行；实际可行档是 0.5B + 单 CV。</span>
 
 <span class="k">内存红线：</span>永远留 ≥1GB 预留，见底就主动降级，别等 OOM Killer。
 <span class="k">带宽安全线：</span>总线（NPU 独占上沿）≈16 GB/s，留 20% 余量 → 并发安全线 ≈ <span class="g">12.8 GB/s</span>（产品场景 7~11 更低）。</div>
@@ -202,7 +226,10 @@ CV 分割/pose int8         8 MB      0.20 GB         ~2 GB/s         <span clas
 <span class="r">红线：</span>宁可主动降级，也不要被动 OOM。</div>
     <div class="callout"><b>一句话结论：</b>并发预算 = <b>内存三类分账 + NPU 时间片优先级 + 带宽安全线 + 有序降级</b>；核心动作是「先算账、留缓冲、按阈值降」。</div>
 
-    <h3><span class="tag-lesson">讲解</span>7. 板书填空：并发预算手算（填完展开答案）</h3>
+        <div class="callout dev"><strong>口径提醒：</strong>并发预算表的「8GB」是通用假设。本板实测 3.8 GiB，
+      按表里 3B + 双 CV 的 3.35GB 运行时算，加系统就超了——<b>这张表要当方法论看，数字必须按自己的板子重填</b>。</div>
+
+<h3><span class="tag-lesson">讲解</span>7. 板书填空：并发预算手算（填完展开答案）</h3>
     <p>用上面预算表，填出「3B + 双 CV」并发的运行时峰值、带宽需求合计，并判断该不该降级（安全线 12.8 GB/s）。</p>
     <table class="tight">
       <thead><tr><th>项目</th><th>算式</th><th>结果（填）</th></tr></thead>
@@ -327,7 +354,7 @@ CV 分割/pose int8         8 MB      0.20 GB         ~2 GB/s         <span clas
       <li>功耗与续航：<b>续航 = 电池容量 ÷ 平均功耗</b>，平均功耗按工作剖面加权；例：平均 2.5 W、20 Wh 电池 → 8 h。</li>
       <li>一页纸方案七段模板：场景与目标 / 需求与指标 / 端云分工 / 关键选型 / 成本(BOM) / 功耗与续航 / 风险与取舍——一页纸、七段齐、每个数字有来源。</li>
       <li>三个场景（本地语音助手 / 车机语音 / 工业边缘盒子）共用一套模板，变的只是数字与取舍：语音助手看成本续航，车机看可靠性与车规，工业盒子看多路与散热。</li>
-      <li>多模型并发预算：内存分<b>常驻权重 / 动态运行时 / 预留缓冲</b>三类（预留 ≥1GB）；单核 NPU 只能分时复用，按优先级调度；带宽安全线约 <b>12.8 GB/s</b>（产品更低）。</li>
+      <li>多模型并发预算：内存分<b>常驻权重 / 动态运行时 / 预留缓冲</b>三类（预留 ≥1GB）；3576 有 <b>2 个 NPU 核</b>，可分核（CV 占 core1、LLM 占 core0）或分时复用；带宽安全线约 <b>12.8 GB/s</b>（产品 7~11 更低）。</li>
       <li>降级要<b>有顺序、有阈值</b>：先体验后核心、先大对象后小对象、先可降级后不可降级；宁可主动降级，也不要被动 OOM。</li>
     </ul>
   </div>
@@ -335,7 +362,7 @@ CV 分割/pose int8         8 MB      0.20 GB         ~2 GB/s         <span clas
   <h2>RK3576 特别提示</h2>
   <div class="note">
     <ul class="clean" style="padding-left:2px">
-      <li><strong>定位要说准：</strong>3576 是中端端侧 AI，适合「意图 + 轻对话 + RAG」，不要吹它能跑大模型。</li>
+      <li><strong>定位要说准：</strong>3576 是中端端侧 AI；本板 3.8 GiB 上适合「0.5B~1.5B 做意图 + 轻对话 + RAG」，不要吹它能跑大模型。</li>
       <li><strong>瓶颈是带宽不是算力：</strong>方案里写优化方向时，优先「降比特 / 减上下文 / 前缀缓存」，而不是「加算力」。</li>
       <li><strong>内存是成本杠杆：</strong>4GB 够就跑 4GB，别为了跑更大的模型硬上 8GB，BOM 会顶不住。</li>
       <li><strong>升级判断：</strong>若要跑 &gt;3B 或长上下文，考虑 RK3588（带宽更高）；中端产品 3576 性价比更优。</li>

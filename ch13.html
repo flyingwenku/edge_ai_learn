@@ -36,11 +36,13 @@
   <h1>第 13 章：RK3576 上手与部署实战</h1>
   <p class="lead"><strong>章节目标：</strong>把一块<b>真板子</b>从零跑到能对话——烧系统、装 RKNN 工具链、转一个 1.5B 模型、跑通推理并记录出 TTFT / tok/s / 内存 / NPU 利用率。<span class="key">从纸上算账走到真机实测，这一步跑通，端侧部署链路就完整闭环了。</span></p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 3 个任务</span>
     <span class="chip">产出目录：ch13-rk3576</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>烧录两条路线、上位机/板端工具链分工、四项指标定义、性能画像均为通用理论。 <span class="fact measured">实测</span>本板实测：NPU 2 核 950MHz、内存 3.8 GiB、librknnrt 2.3.0；0.5B W8A8 初始化 1.39s、prefill 324.5 tok/s、decode 20.07 tok/s、峰值 0.73GB。 <span class="fact dev">偏差</span>原文把 LLM 写成 toolkit2/zoo → .rknn，工具链错误；「单核」「16GB」也已更正。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -89,7 +91,8 @@
 
 <span class="k">【板端 RK3576】—— 负责"推理"</span>
   运行库：librknnrt.so（与板端 NPU 驱动对应）
-  Python 轻量包：rknn-toolkit-lite2       # 板端只推理，不转换
+  Python 轻量包：rknn-toolkit-lite2       # CNN 推理（.rknn）
+  LLM 运行时：librkllmrt.so + rkllm       # LLM 推理（.rkllm，两套不是一回事）
   git clone https://github.com/airockchip/rknn_model_zoo
   → 作用：加载 .rknn 跑推理
 
@@ -100,64 +103,66 @@
   查 NPU 驱动：cat /sys/kernel/debug/rknpu/version</div>
     <div class="callout"><b>口诀：转换在上位机，推理由板端；两边版本必须能用同一套号。</b>记不住就去 rknn_model_zoo 的 README 找"对应关系表"。</div>
 
-    <h3><span class="tag-lesson">讲解</span>3. 板书③：转换一个 1.5B 模型到 RKNN</h3>
-    <div class="board"><span class="k">以 Qwen2.5-1.5B 为例（走 rknn_model_zoo 现成脚本）</span>
+    <h3><span class="tag-lesson">讲解</span>3. 板书③：转换一个 1.5B 模型到 RKLLM（.rkllm）</h3>
+    <div class="callout dev"><strong>本节已更正：</strong>旧版写「zoo 的 export_rknn.py → .rknn、用 lite2 加载」是错的。
+      <b>LLM 走 rknn-llm（rkllm），产物是 .rkllm</b>；rknn-toolkit2 只处理 ONNX 类模型（CNN/ViT），转不了 LLM，
+      而 rkllm 只接受 <b>HF 模型目录或 GGUF</b>，<b>不接受 ONNX</b>。</div>
+    <div class="board"><span class="k">以 Qwen2.5-0.5B/1.5B 为例（rknn-llm 链路）</span>
 
-<span class="k">① 准备：克隆仓库 + 下载 HF 模型</span>
-  git clone https://github.com/airockchip/rknn_model_zoo
-  cd rknn_model_zoo
-  # 下载 Qwen2.5-1.5B 的 HF 权重（huggingface-cli / modelscope）
+<span class="k">① 准备：拿 HF 模型目录（不是 onnx）</span>
+  git clone https://github.com/airockchip/rknn-llm
+  # 从 ModelScope 克隆 Qwen/Qwen2.5-0.5B-Instruct（HF 源常不可达）
 
-<span class="k">② 导出 ONNX（用仓库 LLM 专用脚本，别自己写）</span>
-  cd examples/llm
-  python3 export_rknn.py \
-      --model_path /path/to/Qwen2.5-1.5B \
-      --model_type qwen2  --target_platform rk3576
-  # 注意：LLM 导出要处理 RoPE、KV Cache 布局，官方脚本已封装
+<span class="k">② 生成量化校准集（CPU 跑，别用随机数据）</span>
+  cd examples/rkllm_api_demo/export
+  python -u generate_data_quant.py -m <HF_DIR> -o data_quant.json --max-new-tokens 64
+  # 官方 21 条够跑通；要验 W4A16 质量问题建议 50 条（grq 耗时对样本数超线性）
 
-<span class="k">③ 量化（必须给校准文本！）</span>
-  # 用一段覆盖真实输入的文本做校准集（几百条）
-  # 目标：w8a8 = int8 权重 + int8 激活，per-channel
-  # 校准集放进 dataset.txt，脚本会读取
+<span class="k">③ 转换（一条命令出 .rkllm）</span>
+  python -u export_rkllm.py --model-dir <HF_DIR> --dataset data_quant.json \
+      --output qwen25-0.5b_w8a8.rkllm --device cpu --dtype float32 \
+      --target-platform RK3576 --num-npu-core 2 \
+      --quantized-dtype W8A8 --quantized-algorithm normal \
+      --optimization-level 0 --max-context 4096
+  # W4A16 必须配 --quantized-algorithm grq；用 normal 会严重语义退化
 
-<span class="k">④ 生成 .rknn 产物</span>
-  qwen2.5-1.5b_w8a8.rknn   （约 1.6 ~ 1.9 GB）
+<span class="k">④ 产物与实测（0.5B）</span>
+  W8A8 + normal  → 811 MB，峰值 0.73 GB，decode 20.07 tok/s
+  W4A16 + grq    → 527 MB，峰值 0.46 GB，decode 36.87 tok/s
+  （W4A16 快 1.84×，但 0.5B 上语义退化，默认仍选 W8A8）
 
 <span class="k">坑提示</span>
-  · 优先用 zoo 里<span class="g">已支持并测过</span>的模型，自己从头转 LLM 坑极多
-  · 量化校准集不覆盖真实分布 → 精度崩（第 2 章讲过）
-  · 3599/3576 target_platform 别填错</div>
+  · 校准集规模与耗时超线性：21 条≈30min，50 条≈1.5~1.8h，125 条≈4~5h
+  · grq 导出峰值内存接近 7 GB：WSL 给足物理内存（7GB+8G swap），别只加 swap
+  · 日志看两处：输出文件句柄 <code>/proc/&lt;pid&gt;/fd</code> 出现 rkllm = 开始落盘；<code>/proc/&lt;pid&gt;/stat</code> 状态 R/D/T</div>
     <div class="callout"><b>高效的偷懒正确姿势：</b>先跑通官方示例，<b>再</b>换自己的模型。<b>不要一上来就自己写导出脚本</b>——LLM 的 RoPE/KV Cache 布局是深坑，zoo 已经踩过了。</div>
 
     <h3><span class="tag-lesson">讲解</span>4. 板书④：在板子上跑通推理 + 记录四项指标</h3>
-    <div class="board"><span class="k">把模型推到板子 + 登录</span>
+    <div class="board"><span class="k">把模型推到板子 + 登录（LLM 用 .rkllm，不是 .rknn）</span>
 
-  # 方式一：ADB
-  adb devices
-  adb push qwen2.5-1.5b_w8a8.rknn /userdata/
+  # 传输（二选一）
+  scp qwen25-0.5b_w8a8.rkllm radxa@&lt;IP&gt;:/home/radxa/
+  # 或 python code_tools/ip_bro/tools/sshx.py --put &lt;local&gt; &lt;remote&gt;
 
-  # 方式二：SSH / scp
-  ssh root@192.168.x.x
-  scp qwen2.5-1.5b_w8a8.rknn root@192.168.x.x:/userdata/
-
-<span class="k">板端跑 demo（rknn_model_zoo 的 llm 示例）</span>
-  cd rknn_model_zoo/examples/llm/python
-  python3 llm_demo.py \
-      --model_path /userdata/qwen2.5-1.5b_w8a8.rknn \
-      --prompt "你好，介绍一下你自己" --max_new_tokens 128
+<span class="k">板端跑 rkllm demo</span>
+  export LD_LIBRARY_PATH=/home/radxa/rkllm_api_demo/lib
+  ./llm_demo &lt;model.rkllm&gt; 4096 "你好，介绍一下你自己"
+  # 起服务：flask_server.py --rkllm_model_path &lt;model.rkllm&gt; --target_platform rk3576
+  # 实测入口：/rkllm_chat、/rkllm_clear、/rkllm_abort
 
 <span class="k">要记录的 4 个指标</span>
-  ① 首 token 延迟 TTFT：从发送 prompt 到吐出第一个 token 的时间（受 prefill 影响）
+  ① 首 token 延迟 TTFT：从发送 prompt 到吐出第一个 token（受 prefill 影响）
   ② 生成速度 tok/s：后续 token 的稳态速度（受 decode 带宽影响）
   ③ 内存占用：free -m   （看 used / available）
   ④ NPU 利用率：cat /sys/kernel/debug/rknpu/load
-      输出形如：NPU load: Core0: 78%, Core1: 0%
+      实测输出形如：NPU load: Core0: 78%, Core1: 0%
+      <span class="r">注意：Core1 为 0% 往往是你没开双核，不是它不存在</span>
 
 <span class="k">辅助命令</span>
   free -m                                   # 内存
   cat /proc/meminfo | head                  # 内存细节
   cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq  # CPU 频率
-  cat /sys/kernel/debug/rknpu/load           # NPU 负载</div>
+  cat /sys/kernel/debug/rknpu/load           # NPU 负载（两核分别显示）</div>
     <p><b>记录模板（每次实验一行，先自己填一栏再展开答案）：</b></p>
     <div class="board"><span class="k">inference_metrics.csv</span>
 model, quant, prompt_len, ttft_ms, tok_per_s, mem_used_mb, npu_pct, note
@@ -165,11 +170,12 @@ qwen2.5-1.5b, w8a8, 32, ___, ___, ___, ___, 短 prompt
 qwen2.5-1.5b, w8a8, 512, ___, ___, ___, ___, 长 prompt（看 TTFT 上升）</div>
     <details>
       <summary>点击展开答案（参考量级，实测为准）</summary>
-      <div class="board">qwen2.5-1.5b w8a8，RK3576 参考量级：
-  · TTFT：短 prompt 数百 ms；512 token prompt 明显上升到 ~1 s
-  · tok/s：约 5 ~ 10 tok/s（带宽受限；NPU 独占 12~16 GB/s，产品场景只有 7~11 GB/s）
-  · 内存：模型 ~1.8 GB + 运行时 ≈ 2.5 GB 量级
-  · NPU：生成阶段 Core0 常见 60 ~ 90%
+      <div class="board">本板实测（0.5B）与 1.5B 推算：
+  · 0.5B W8A8：初始化 1.39s；prefill 324.5 tok/s（64 tok → 0.2s）
+                decode 20.07 tok/s；峰值内存 0.73 GB
+  · 0.5B W4A16+grq：decode 36.87 tok/s；峰值 0.46 GB（但语义退化）
+  · 1.5B W8A8（推算）：权重 ~1.6GB，decode 约 6~9 tok/s（带宽受限）
+  · NPU：生成阶段 Core0 常见 60~90%；<span class="r">Core1 为 0% = 没开双核</span>
 
 <span class="k">关键：数字不重要，"趋势"才重要——</span>
 prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
@@ -177,10 +183,10 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
 
     <h3><span class="tag-lesson">讲解</span>5. 板书⑤：RK3576 性能画像与三条铁律</h3>
     <div class="board"><span class="k">RK3576 性能画像（必须背）</span>
-  NPU 6 TOPS            ← 算力够（对 1.5B~3B）
+  NPU 6 TOPS / <span class="g">2 核</span>      ← 算力够（本板可行档 0.5B~1.5B）
   内存带宽 19 / 12~16 / 7~11 GB/s ← <span class="r">真正的瓶颈</span>（理论/NPU 独占/产品，decode 打产品档）
   CPU 4×A72 + 4×A53     ← CPU 弱，别指望 CPU 兜底
-  内存 ≤ 16 GB LPDDR5
+  内存 SoC 上限 16GB / <span class="g">本板实测 3.8 GiB</span>
 
 <span class="k">三条铁律</span>
 ① <span class="r">优先纯 NPU 推理</span>：一旦有算子回落到 CPU，
@@ -190,14 +196,25 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
    长 prompt 的 TTFT 会明显上升。
 
 <span class="k">自测基准（参考，实测为准）</span>
-  Qwen2.5-1.5B w8a8：TTFT 数百 ms ~ 1 s，生成 5 ~ 10 tok/s
+  Qwen2.5-0.5B w8a8：prefill 324.5 tok/s、decode 20.07 tok/s、峰值 0.73GB
+  Qwen2.5-1.5B w8a8（推算）：decode 约 6~9 tok/s
   如果实测远低于此 → 查两件事：
     (a) 有没有算子回落到 CPU？（看日志 fallback / cpu 提示）
     (b) 模型是不是没跑在 NPU 上？（NPU load 一直 0% = 没上 NPU）</div>
     <div class="callout"><b>排障第一反应：</b>速度不对，先看 <code>rknpu/load</code>。<b>NPU 利用率为 0 或很低，说明大量算子在 CPU 上跑</b>——这才是端侧最常见的性能坑。</div>
   </div>
 
-  <h2>练习（交作业）</h2>
+    <div class="callout dev">
+    <strong>实测补充 · 板端救援四件事（原文没有，但每天都会用到）：</strong>
+    <ul class="clean" style="padding-left:2px;margin:8px 0 0">
+      <li><b>看门狗</b>：硬件狗 20s 超时且 nowayout=1，<code>printf V &gt; /dev/watchdog</code> 关不掉，只能持续喂；程序里内置喂狗线程（每 5s 一次），否则整机每 20s 重启。</li>
+      <li><b>日志刷屏</b>：i2c 类错误会毫秒级刷，先 <code>echo "2 4 1 7" &gt; /proc/sys/kernel/printk</code> 再调试，否则真错误看不见。</li>
+      <li><b>持久化</b>：<code>/tmp</code> 是 tmpfs（重启即清），<code>/opt</code> 是 ubifs rw；修模型软链、配置要落在 /opt。</li>
+      <li><b>连不上</b>：ping 通但 22/8080 不通，先比 MAC（IP 冲突，ARP 指向别人），比扫端口有效；串口（115200 8N1）是最后兜底。</li>
+    </ul>
+  </div>
+
+<h2>练习（交作业）</h2>
   <p class="lead">这一章全是实操。做完把命令记录和数据贴回来我批改。</p>
 
   <h3 style="margin-top:22px"><span class="tag-hw">上午</span>任务 4h</h3>
@@ -220,12 +237,12 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
     </dl>
   </div>
   <div class="task">
-    <div class="head"><span class="num">3</span><h3>转换 Qwen2.5-1.5B 到 RKNN</h3></div>
+    <div class="head"><span class="num">3</span><h3>转换 Qwen2.5-0.5B 到 RKLLM（.rkllm）</h3></div>
     <dl>
-      <dt>目标</dt><dd>产出可用的 <code>qwen2.5-1.5b_w8a8.rknn</code>。</dd>
-      <dt>要掌握</dt><dd>LLM 专用导出脚本；校准集做法；w8a8 含义。</dd>
-      <dt>实操步骤</dt><dd>① 下载 HF 权重；② 跑 <code>examples/llm/export_rknn.py</code>；③ 准备校准文本 <code>dataset.txt</code> 并量化；④ 记录产物大小；写 <code>convert_log.md</code>：命令、校准集规模、产物大小、耗时、遇到的问题。</dd>
-      <dt>检验标准</dt><dd>.rknn 文件生成且大小合理（≈1.6~1.9 GB）。</dd>
+      <dt>目标</dt><dd>产出可用的 <code>qwen25-0.5b_w8a8.rkllm</code>。</dd>
+      <dt>要掌握</dt><dd>rkllm 转换命令；校准集做法；W8A8 与 W4A16+grq 的差异。</dd>
+      <dt>实操步骤</dt><dd>① 从 ModelScope 拿 HF 模型目录；② 跑 <code>generate_data_quant.py</code> 生成校准集；③ 跑 <code>export_rkllm.py</code>（W8A8+normal）；④ 记录产物大小；写 <code>convert_log.md</code>：命令、校准集规模、产物大小、耗时、遇到的问题。</dd>
+      <dt>检验标准</dt><dd>.rkllm 生成且大小合理（0.5B W8A8 ≈811 MB；1.5B ≈1.6 GB）。</dd>
     </dl>
   </div>
 
@@ -233,7 +250,7 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
   <div class="task pm">
     <div class="head"><span class="num">1</span><h3>跑通推理 + 记录四项指标</h3></div>
     <dl>
-      <dt>目标</dt><dd>板端跑通 llm_demo，至少测 2 个 prompt（短 + 长），填满指标表。</dd>
+      <dt>目标</dt><dd>板端跑通 rkllm demo，至少测 2 个 prompt（短 + 长），填满指标表。</dd>
       <dt>要掌握</dt><dd>llm_demo 用法；TTFT / tok/s / 内存 / NPU 四个指标怎么取。</dd>
       <dt>实操步骤</dt><dd>① <code>adb push</code> 或 <code>scp</code> 模型到板子；② 跑 <code>llm_demo.py</code>；③ 用 <code>free -m</code> 与 <code>cat /sys/kernel/debug/rknpu/load</code> 采集数据；写 <code>inference_metrics.md</code> + <code>inference_metrics.csv</code>：按模板填表（短 prompt / 长 prompt 各一行）。</dd>
       <dt>检验标准</dt><dd>能观察到"prompt 变长 → TTFT 变大"的趋势，四条数据齐全。</dd>
@@ -283,8 +300,8 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
     <ul class="clean">
       <li>RK3576 端侧部署是一条四步链路：<b>烧系统 → 配工具链 → 转模型 → 跑推理</b>，四步打通才算走完。</li>
       <li>系统镜像必须带 NPU 驱动；烧完先用 <code>/sys/kernel/debug/rknpu/version</code> 验证驱动存在。</li>
-      <li>RKNN 工具链分两半：上位机 <code>rknn-toolkit2</code> 负责转换与量化，板端 <code>librknnrt.so</code> + <code>rknn-toolkit-lite2</code> 负责推理；<b>两边版本必须对齐</b>，否则报 version mismatch。</li>
-      <li>模型转换优先用 <code>rknn_model_zoo</code> 的 LLM 脚本导出 ONNX，再给覆盖真实分布的校准集做 w8a8 量化，产物 <code>.rknn</code> 约 1.6~1.9 GB。</li>
+      <li>工具链分两套：<b>CNN/ViT</b> 走上位机 <code>rknn-toolkit2</code> → <code>.rknn</code>，板端 <code>librknnrt.so</code> + <code>rknn-toolkit-lite2</code>；<b>LLM</b> 走 <code>rknn-llm</code> → <code>.rkllm</code>，板端 <code>librkllmrt.so</code> + <code>rkllm</code>。两边版本都要对齐。</li>
+      <li>LLM 转换用 <code>rknn-llm</code>：HF 目录 → 校准集 → <code>export_rkllm.py</code> → <code>.rkllm</code>（0.5B W8A8 811MB）。<b>rkllm 不收 ONNX</b>；W4A16 必须配 grq。</li>
       <li>板端跑通后记录四项指标：<b>TTFT、decode tok/s、内存占用、NPU 利用率</b>，重点看趋势而非单点数字。</li>
       <li>3576 的瓶颈是内存带宽（峰值 19 / NPU 独占 12~16 / 产品 7~11 GB/s）与弱 CPU，所以优先纯 NPU 推理，一旦算子回落 CPU 速度会被拖垮。</li>
       <li>性能不对时先看 <code>rknpu/load</code>：利用率长期为 0 说明大量算子在 CPU 上跑，这是端侧最常见的性能坑。</li>

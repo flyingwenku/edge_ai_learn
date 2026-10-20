@@ -36,11 +36,13 @@
   <h1>第 3 章：推理流程与框架拆解</h1>
   <p class="lead"><strong>章节目标：</strong>把「模型文件」到「出一句话」中间的每一段路拆开——<b>拿到「RK3576 + 3B」，能立刻报出用哪个框架、为什么，并画出推理全流程图</b>。</p>
   <div class="pill-row">
-    <span class="chip">状态：进行中</span>
+    <span class="chip">状态：讲义 + 作业 · 2026-10-20 复核</span>
     <span class="chip">上午 4h · 3 个任务</span>
     <span class="chip">下午 4h · 4 个任务</span>
     <span class="chip">产出目录：ch03-inference</span>
   </div>
+
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>六框架归类、ONNX/opset 作用、prefill（matmul/算力）vs decode（matvec/带宽）均为通用理论。 <span class="fact measured">实测</span>本板 0.5B 实测 prefill 324.5 tok/s、decode 20.07 tok/s（约 16×），decode 受 12~16 GB/s 带宽约束。 <span class="fact dev">偏差</span>原文「prefill 常是 decode 的 5~10 倍」偏保守，实测约 16×；量级结论不变。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
