@@ -53,7 +53,7 @@
     <strong>标注约定（全站适用）：</strong>
     <span class="fact theory">理论</span>公式、推导、平台通用结论，未在本板逐项实测；
     <span class="fact measured">实测</span>本板（RK3576 / 3.8 GiB）跑出来的数字，附条件与口径；
-    <span class="fact dev">偏差</span>与实测不符、已更正的旧说法（保留原文便于对照）。
+    <span class="fact dev">易错点</span>初学者最容易搞反的地方，看到就先停一下。
   </div>
 
   <div class="callout dev">
@@ -98,24 +98,6 @@
       <p style="color:var(--muted)">正文 17 章结构不变。</p>
     </div>
   </div>
-
-  <h2>已知偏差与更正（2026-10-20）</h2>
-  <p class="lead">本轮以 9 份实测文档为基准复核全站，以下 9 处旧说法与实测不符，已在对应章节就地更正并加
-    <span class="fact dev">偏差</span> 标注。此表保留，便于与旧版对照。</p>
-  <table class="rev">
-    <thead><tr><th>位置</th><th>原说法</th><th>实测 / 更正</th></tr></thead>
-    <tbody>
-      <tr><td>ch04 / ch14 / ch15 / ch16</td><td>3576 是单核 NPU，num_npu_core 固定 1</td><td>2 核（core0/core1，max core mask = 3）；默认 auto 只用 1 核，显式开双核 e2e −21.7%</td></tr>
-      <tr><td>ch01 / ch06 / ch09 / ch15 / ch16</td><td>16 GB 可当可用内存做部署判断</td><td>SoC 上限 16 GB；本板实测 3.8 GiB，模型档位与并发表全部按 3.8 GiB 重算</td></tr>
-      <tr><td>ch16</td><td>KV/token 0.28 MB，4K ≈ 1.2 GB</td><td>GQA（kv_heads=2）实为 36 KB/token，4K ≈ 144 MB，8K ≈ 288 MB</td></tr>
-      <tr><td>ch13</td><td>LLM 走 rknn_model_zoo + toolkit2 → .rknn</td><td>LLM 走 rknn-llm → .rkllm；rkllm 只收 HF 目录或 GGUF，不收 ONNX</td></tr>
-      <tr><td>ch02 / ch04 / ch05</td><td>int4 支持有限、多为 int8 模拟</td><td>W4A16 原生支持：0.5B 实测 527 MB / decode 36.87 tok/s，但必须配 grq</td></tr>
-      <tr><td>ch04</td><td>默认 w4a16 + normal</td><td>该组合严重精度退化；可用组合是 W4A16+grq 或 W8A8+normal</td></tr>
-      <tr><td>ch10</td><td>YOLOv8n fp32 ≈6 MB；默认 12 ms/83 FPS</td><td>fp32 ≈12.8 MB（ONNX 13 MB）；640 默认 19.5 ms/51 FPS，12.2 ms/82 FPS 是 512+双核+conf0.35</td></tr>
-      <tr><td>ch10</td><td>ultralytics 原版 ONNX 直接转 RKNN</td><td>RKNN 生态用 airockchip 优化版：9 个输出、带 score_sum 剪枝分支，后处理结构不同</td></tr>
-      <tr><td>ch14</td><td>主推 batch 与投机解码</td><td>rkllm 板端单实例无 batch；NPU 不支持投机解码（llama.cpp 在 3576 上只跑 CPU）</td></tr>
-    </tbody>
-  </table>
 
   <h2>通用底座 · 核心速记</h2>
   <div class="grid cols-2">

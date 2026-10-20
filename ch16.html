@@ -42,7 +42,7 @@
     <span class="chip">产出目录：ch16-project</span>
   </div>
 
-  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>四层架构、双任务数据流、OpenAI 兼容接口、内存/时间片/带宽三类瓶颈判定均为通用方法论。 <span class="fact measured">实测</span>本板实测：0.5B W8A8 811MB / 峰值 0.73GB / decode 20.07 tok/s；yolov8n 640 e2e 19.5ms；双核 −21.7%。 <span class="fact dev">偏差</span>原文 KV 算错 8 倍、按 16GB 排预算、3B w4a16 默认、单核 batch——四处已重写为 3.8 GiB + GQA + W8A8 + 单实例。</div>
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>四层架构、双任务数据流、OpenAI 兼容接口、内存/时间片/带宽三类瓶颈判定均为通用方法论。 <span class="fact measured">实测</span>0.5B W8A8 811MB / 峰值 0.73GB / decode 20.07 tok/s；yolov8n 640 e2e 19.5ms；双核 −21.7%。 <span class="fact dev">易错点</span>用 MHA 的每 token KV 值套 GQA 模型——Qwen2.5-3B 是 36 KB/token；3B 在本板 3.8 GiB 不可行。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">

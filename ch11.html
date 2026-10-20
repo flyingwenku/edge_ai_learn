@@ -42,7 +42,7 @@
     <span class="chip">产出目录：ch11-speech</span>
   </div>
 
-  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>三大任务、Conformer/RNN-T/KWS 网络、MFCC/fbank 三步、流式 vs 整段、WER/CER 手算均为通用理论。 <span class="fact measured">实测</span>本板 whisper（enc 48M + dec 156M，fp16）中文 RTF 0.235、英文 0.219；mms_tts RTF 0.074；均为双模型 pipeline 跑 NPU。 <span class="fact dev">偏差</span>原文「encoder 走 NPU、解码另配」偏窄，实际 enc+dec 都在 NPU；且缺 RTF 这个第一验收指标，已补。</div>
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>三大任务、Conformer/RNN-T/KWS 网络、MFCC/fbank 三步、流式 vs 整段、WER/CER 手算均为通用理论。 <span class="fact measured">实测</span>whisper（enc 48M + dec 156M，fp16）中文 RTF 0.235、英文 0.219；mms_tts RTF 0.074。 <span class="fact dev">易错点</span>以为只转 Whisper encoder 就够——enc+dec 都要转，且必须 fp16；另外只看 WER 不够，先看 RTF 是否 <1。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">

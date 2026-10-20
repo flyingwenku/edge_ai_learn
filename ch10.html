@@ -42,7 +42,7 @@
     <span class="chip">产出目录：ch10-cv</span>
   </div>
 
-  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>CV 六步链路、YOLO 三段结构、COCO/YOLO 标注换算、mAP 定义、回归头比分类头敏感的手算均为通用理论。 <span class="fact measured">实测</span>本板实测：yolov8n@640 int8 e2e 19.48 ms / 51.3 FPS（rknn_run 14.94ms）；11n 22.30→15.33 ms（双核+零拷贝）；6 类算法（检测/分割/人脸/姿态/OCR/语音）跑通。 <span class="fact dev">偏差</span>原文体积（6MB）与帧率（12ms/83FPS）对不上，已更正；并补上 airockchip 优化版 ONNX 这条真实路线。</div>
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>CV 六步链路、YOLO 三段结构、COCO/YOLO 标注换算、mAP 定义、回归头比分类头敏感的手算均为通用理论。 <span class="fact measured">实测</span>yolov8n@640 int8 e2e 19.48 ms / 51.3 FPS；11n 22.30→15.33 ms（双核+零拷贝）；6 类算法跑通。 <span class="fact dev">易错点</span>以为 ultralytics 原版 ONNX 能直接转 RKNN——生态用的是 airockchip 优化版（9 个输出、带 score_sum）；YOLOv8n fp32 是 12.8MB，不是 6MB。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -150,7 +150,7 @@ torch.onnx.export(model, dummy_input, "yolov8n.onnx",
   onnx.checker 过一遍 + onnxruntime 跑一张图，
   与 PyTorch 输出对齐（误差 &lt; 1e-3）才算导出成功。</div>
     <div class="callout dev">
-      <strong>与实测的偏差（照上面做会卡住）：</strong>上面是「原版 ONNX + 自写后处理」的路线。
+      <strong>易错点（照上面做会卡住）：</strong>上面是「原版 ONNX + 自写后处理」的路线。
       本板实际跑通的是 <b>airockchip 优化版 ONNX</b>——尾部子图被裁掉，并追加 <code>ReduceSum + Clip</code> 剪枝分支，
       转成 RKNN 后有 <b>9 个输出</b>：每层 <code>box[64]</code> / <code>cls[80]</code> / <code>score_sum[1]</code>。
       用 ultralytics 原版导出，后处理结构对不上，也拿不到 score_sum 快速剪枝。<b>两条路线不能混用</b>；

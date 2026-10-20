@@ -42,7 +42,7 @@
     <span class="chip">产出目录：ch13-rk3576</span>
   </div>
 
-  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>烧录两条路线、上位机/板端工具链分工、四项指标定义、性能画像均为通用理论。 <span class="fact measured">实测</span>本板实测：NPU 2 核 950MHz、内存 3.8 GiB、librknnrt 2.3.0；0.5B W8A8 初始化 1.39s、prefill 324.5 tok/s、decode 20.07 tok/s、峰值 0.73GB。 <span class="fact dev">偏差</span>原文把 LLM 写成 toolkit2/zoo → .rknn，工具链错误；「单核」「16GB」也已更正。</div>
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>烧录两条路线、上位机/板端工具链分工、四项指标定义、性能画像均为通用理论。 <span class="fact measured">实测</span>NPU 2 核 950MHz、内存 3.8 GiB、librknnrt 2.3.0；0.5B W8A8 初始化 1.39s、prefill 324.5 tok/s、decode 20.07 tok/s、峰值 0.73GB。 <span class="fact dev">易错点</span>以为 LLM 也走 toolkit2——LLM 走 rkllm，产物是 .rkllm，且 rkllm 不收 ONNX。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
@@ -104,8 +104,8 @@
     <div class="callout"><b>口诀：转换在上位机，推理由板端；两边版本必须能用同一套号。</b>记不住就去 rknn_model_zoo 的 README 找"对应关系表"。</div>
 
     <h3><span class="tag-lesson">讲解</span>3. 板书③：转换一个 1.5B 模型到 RKLLM（.rkllm）</h3>
-    <div class="callout dev"><strong>本节已更正：</strong>旧版写「zoo 的 export_rknn.py → .rknn、用 lite2 加载」是错的。
-      <b>LLM 走 rknn-llm（rkllm），产物是 .rkllm</b>；rknn-toolkit2 只处理 ONNX 类模型（CNN/ViT），转不了 LLM，
+    <div class="callout dev"><strong>常见误区：</strong>以为 LLM 也能用 toolkit2 从 ONNX 转 <code>.rknn</code>、再用 lite2 加载。
+      <b>LLM 必须走 rknn-llm（rkllm），产物是 .rkllm</b>；rknn-toolkit2 只处理 ONNX 类模型（CNN/ViT），
       而 rkllm 只接受 <b>HF 模型目录或 GGUF</b>，<b>不接受 ONNX</b>。</div>
     <div class="board"><span class="k">以 Qwen2.5-0.5B/1.5B 为例（rknn-llm 链路）</span>
 
@@ -205,7 +205,7 @@ prompt 越长 → TTFT 越大；上下文越长 → tok/s 越低。</div>
   </div>
 
     <div class="callout dev">
-    <strong>实测补充 · 板端救援四件事（原文没有，但每天都会用到）：</strong>
+    <strong>实测补充 · 板端救援四件事（教程常漏，但每天都会用到）：</strong>
     <ul class="clean" style="padding-left:2px;margin:8px 0 0">
       <li><b>看门狗</b>：硬件狗 20s 超时且 nowayout=1，<code>printf V &gt; /dev/watchdog</code> 关不掉，只能持续喂；程序里内置喂狗线程（每 5s 一次），否则整机每 20s 重启。</li>
       <li><b>日志刷屏</b>：i2c 类错误会毫秒级刷，先 <code>echo "2 4 1 7" &gt; /proc/sys/kernel/printk</code> 再调试，否则真错误看不见。</li>

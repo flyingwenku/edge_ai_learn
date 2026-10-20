@@ -42,7 +42,7 @@
     <span class="chip">产出目录：ch17-closeout</span>
   </div>
 
-  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>function calling/RAG 闭环、四件套指标、一页纸 ADR、稳定性三件事、三层降级均为通用方法论。 <span class="fact measured">实测</span>实测案例来自 A171（AX620Q/uClibc）：20s nowayout 看门狗、appdaemon cleanup 触发 reboot、risc-v 占用 i2c、IP 冲突；本板 rkllm 单实例。 <span class="fact dev">偏差</span>原文稳定性只讲通用 systemd/RSS，未用一手案例；已补「真实故障四例」，并把「NPU→CPU 降级」标为需实测。</div>
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>function calling/RAG 闭环、四件套指标、一页纸 ADR、稳定性三件事、三层降级均为通用方法论。 <span class="fact measured">实测</span>案例来自 A171（AX620Q/uClibc）：20s nowayout 看门狗、appdaemon cleanup 触发 reboot、risc-v 占用 i2c、IP 冲突；本板 rkllm 单实例。 <span class="fact dev">易错点</span>只按通用 systemd/RSS 做稳定性——先看硬件狗（20s nowayout）与 appdaemon 的 cleanup reboot，否则会把「整机重启」误判成自己的 bug。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">

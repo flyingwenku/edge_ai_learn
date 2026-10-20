@@ -42,7 +42,7 @@
     <span class="chip">产出目录：ch07-llm-attn</span>
   </div>
 
-  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>Q/K/V 直觉、Softmax 手算、MHA/MQA/GQA/MLA 演进、RoPE 相对位置推导均为通用理论。 <span class="fact measured">实测</span>KV 公式按 Qwen2.5-3B 实测 config 代入：36 KB/token、8K ≈ 288 MB；与 ch08/ch16 已对齐。 <span class="fact dev">偏差</span>原文算术强度把 6 TOPS 直接当 6000 GFLOP/s，口径偏大（1 MAC = 2 ops），结论不变。</div>
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>Q/K/V 直觉、Softmax 手算、MHA/MQA/GQA/MLA 演进、RoPE 相对位置推导均为通用理论。 <span class="fact measured">实测</span>KV 公式按 Qwen2.5-3B 实测 config 代入：36 KB/token、8K ≈ 288 MB。 <span class="fact dev">易错点</span>把 6 TOPS 直接当 6000 GFLOP/s——INT8 OPS ≠ FLOP/s（1 MAC = 2 ops）；带宽瓶颈的结论不变，但数字要标口径。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">

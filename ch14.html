@@ -42,7 +42,7 @@
     <span class="chip">产出目录：ch14-perf</span>
   </div>
 
-  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>五项指标、Amdahl、CPU/NPU 分工、精度评估闭环、误差分层定位均为通用理论。 <span class="fact measured">实测</span>本板实测：双核 −21.7%、零拷贝 yolo11 −15.0%（yolov8@512 反而 +7.2%）、降 512 使 run −35.7%、conf 0.35 使 post −96%。 <span class="fact dev">偏差</span>原文「单核没得调」「主推 batch/投机解码」与本栈冲突，已重写为「双核 + 零拷贝 + 降分辨率 + 剪枝 + 测量纪律」。</div>
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>五项指标、Amdahl、CPU/NPU 分工、精度评估闭环、误差分层定位均为通用理论。 <span class="fact measured">实测</span>双核 −21.7%、零拷贝 yolo11 −15.0%（yolov8@512 反而 +7.2%）、降 512 使 run −35.7%、conf 0.35 使 post −96%。 <span class="fact dev">易错点</span>以为核心数没得调、batch/投机解码是主力——本板 2 核必开；batch 与投机解码在 rkllm+NPU 路径上不可用。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">

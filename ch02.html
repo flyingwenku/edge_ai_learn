@@ -47,7 +47,7 @@
     <span class="key">一句话贯穿全章：算法选 GPTQ/AWQ，落地选 RKNN；端侧先 PTQ，掉点超预算再上 QAT。</span>
   </div>
 
-  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>量化数学（对称量化三步、误差来源）、粒度三级、GPTQ/AWQ/RKNN 分工、PTQ/QAT 取舍均为通用理论。 <span class="fact measured">实测</span>0.5B 同板同提示：W8A8 811MB / 20.07 tok/s；W4A16+grq 527MB / 36.87 tok/s。 <span class="fact dev">偏差</span>原文「int4 多为 int8 模拟」与实测相反，已更正；补 grq 依赖与 0.5B 语义退化。</div>
+  <div class="callout"><strong>本章口径：</strong><span class="fact theory">理论</span>量化数学（对称量化三步、误差来源）、粒度三级、GPTQ/AWQ/RKNN 分工、PTQ/QAT 取舍均为通用理论。 <span class="fact measured">实测</span>0.5B 同板同提示：W8A8 811MB / 20.07 tok/s；W4A16+grq 527MB / 36.87 tok/s。 <span class="fact dev">易错点</span>以为 int4 在 3576 上只能靠 int8 模拟——W4A16 是原生格式，但必须配 grq；0.5B 这种小模型对 4bit 极敏感，选型要验语义而不是只看跑分。</div>
 
   <h2>这一页怎么用（学习流程）</h2>
   <ul class="clean">
